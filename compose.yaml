@@ -1,0 +1,14 @@
+# Local PostgreSQL for the dev profile: docker compose up -d
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: motoflow
+      POSTGRES_USER: motoflow
+      POSTGRES_PASSWORD: motoflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - motoflow-pg:/var/lib/postgresql/data
+volumes:
+  motoflow-pg:
