@@ -35,7 +35,7 @@ Frontend và backend chạy **cùng một domain**, nên trình duyệt không g
 | Không dùng tag `latest`, tag không ghi đè được | Tag = commit SHA, ECR bật *tag immutability*; deploy theo `@sha256:` |
 | Không access key dài hạn | OIDC + 3 IAM role quyền hẹp (`deploy/aws/`) |
 | Không mở SSH | Deploy qua SSM Run Command, vào máy bằng Session Manager |
-| Bản lỗi không làm sập site | `deploy-service` chờ health check; nếu bản mới không khỏe thì quay về image cũ và báo đỏ |
+| Bản lỗi không làm sập site | `deploy-service` chờ health check (backend: `GET /actuator/health` phải trả `UP`, tức là app đã chạy và kết nối được DB); nếu bản mới không khỏe thì quay về image cũ và báo đỏ |
 | CI dùng được ngay, CD bật sau | Các job CD tự bỏ qua cho tới khi đặt biến `AWS_ACCOUNT_ID` |
 
 ### Khác với ebook "From Code to Cloud"
@@ -234,7 +234,7 @@ sudo /opt/motoflow/bin/motoflow exec -T db pg_dump -U motoflow motoflow > /tmp/m
 | `No running EC2 instance tagged App=motoflow, Env=dev` | Sai tag hoặc instance đang tắt | Sửa tag / bật instance |
 | SSM kẹt `Pending` rồi `Undeliverable` | SSM agent offline: thiếu instance profile `motoflow-ec2` hoặc máy không ra Internet | Gắn role, kiểm tra Fleet Manager |
 | `AccessDenied ... ssm:SendCommand` | Tag instance không khớp policy | Tag phải đúng `App=motoflow` và `Env=dev`/`production` |
-| `backend did not become healthy` | `.env` sai, DB chưa sẵn sàng, migration lỗi | Đọc log in trong nhóm log của job; vào server xem `motoflow logs backend` |
+| `backend did not become healthy` | `.env` sai, DB chưa sẵn sàng, migration lỗi | Đọc log in trong nhóm log của job; vào server xem `motoflow logs backend` và `curl -s http://127.0.0.1:8080/actuator/health` |
 | Smoke test `HTTP 000` | `DEV_BASE_URL` sai, security group chưa mở 80/443, DNS chưa trỏ | Kiểm tra lần lượt |
 | Smoke test `HTTP 502` | Backend chưa từng deploy, hoặc đang khởi động lại | Xem `motoflow ps` |
 | `403 Invalid CORS request` khi đăng nhập trên web | Origin không khớp | Kiểm tra `MOTOFLOW_CORS_ORIGINS` trong `.env` đúng `https://<domain>` |
@@ -246,8 +246,6 @@ sudo /opt/motoflow/bin/motoflow exec -T db pg_dump -U motoflow motoflow > /tmp/m
 
 ## 7. Việc nên làm tiếp
 
-1. **`mvnw` mất quyền thực thi** (đang được commit với mode `100644`). CI đã chạy bằng `sh ./mvnw` nên không bị ảnh hưởng, nhưng nên sửa: `git update-index --chmod=+x mvnw`.
-2. **Thêm Spring Boot Actuator** (`spring-boot-starter-actuator`), cho phép `/actuator/health` trong `SecurityConfig`, rồi đổi health check trong `setup.sh` sang endpoint đó. Hiện tại health check dùng `/v3/api-docs`, nên sẽ hỏng nếu sau này tắt Swagger ở production.
-3. **Sao lưu DB hằng ngày** (`pg_dump` → S3) nếu production/UAT dùng PostgreSQL container.
-4. **Bỏ giá trị mặc định không an toàn** trong `application.properties` (JWT secret mẫu, `admin/admin`). Server không bị ảnh hưởng vì `.env` luôn đặt các giá trị này, nhưng nên bỏ để tránh vô tình chạy production bằng giá trị mẫu.
-5. **SDS (Report 4)**: API thực tế dùng `/api/...` chứ không phải `/api/v1`.
+1. **Sao lưu DB hằng ngày** (`pg_dump` → S3) nếu production/UAT dùng PostgreSQL container.
+2. **Bỏ giá trị mặc định không an toàn** trong `application.properties` (JWT secret mẫu, `admin/admin`). Server không bị ảnh hưởng vì `.env` luôn đặt các giá trị này, nhưng nên bỏ để tránh vô tình chạy production bằng giá trị mẫu.
+3. **SDS (Report 4)**: API thực tế dùng `/api/...` chứ không phải `/api/v1`.

@@ -187,12 +187,14 @@ set_image() {
   mv images.env.tmp images.env
 }
 
-# Backend: /v3/api-docs answers only once Spring Boot started, which needs Flyway and the
-# database. Switch to /actuator/health once Spring Boot Actuator is added.
+# Backend: Spring Boot Actuator answers {"status":"UP"} once the application started (Flyway
+# included) and PostgreSQL answers, and 503 {"status":"DOWN"} otherwise.
 healthy() {
+  local body
   for _ in $(seq 1 60); do # up to 3 minutes
     if [ "$SERVICE" = backend ]; then
-      curl -fsS -o /dev/null --max-time 5 http://127.0.0.1:8080/v3/api-docs && return 0
+      body="$(curl -fsS --max-time 5 http://127.0.0.1:8080/actuator/health)" \
+        && [[ "$body" == *'"status":"UP"'* ]] && return 0
     else
       "$MF" exec -T frontend wget -q -O /dev/null http://127.0.0.1/ 2>/dev/null && return 0
     fi
