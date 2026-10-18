@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/** A branch of the chain. Read-only for now; store management (UC-03..06) will add the behaviour. */
+/** A branch of the chain (UC-03 View Store List, UC-04 Create Store, UC-06 Update Store). */
 @Entity
 @Table(name = "store")
 @Getter
@@ -50,6 +50,28 @@ public class Store {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /** UC-04: a new store starts as planned, with no stock, documents or debts (BR-64). */
+    public static Store create(String storeCode, String storeName, String address, String phone, LocalDateTime now) {
+        Store store = new Store();
+        store.storeCode = storeCode;
+        store.storeName = storeName;
+        store.address = address;
+        store.phone = phone;
+        store.status = StoreStatus.PLANNED;
+        store.createdAt = now;
+        store.updatedAt = now;
+        return store;
+    }
+
+    /** UC-06. The code never changes, so documents and permission history keep pointing at the same store. */
+    public void update(String newName, String newAddress, String newPhone, StoreStatus newStatus, LocalDateTime now) {
+        storeName = newName;
+        address = newAddress;
+        phone = newPhone;
+        status = newStatus;
+        updatedAt = now;
+    }
 
     /** Staff can be assigned to a store being prepared or open, not to a closed one. */
     public boolean acceptsStaff() {

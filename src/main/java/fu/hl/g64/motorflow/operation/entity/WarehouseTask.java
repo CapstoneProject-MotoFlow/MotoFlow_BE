@@ -55,4 +55,9 @@ public class WarehouseTask {
 
     @Column(name = "result_submitted_at")
     private LocalDateTime resultSubmittedAt;
+
+    /** The document goes back to waiting for assignment, for example when the assignee moves away (UC-09). */
+    public void cancel() {
+        status = WarehouseTaskStatus.CANCELLED;
+    }
 }

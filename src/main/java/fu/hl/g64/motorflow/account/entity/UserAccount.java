@@ -154,6 +154,30 @@ public class UserAccount {
         updatedAt = now;
     }
 
+    /** UC-10. The caller signs the user out; the temporary sign-in lock no longer matters. */
+    public void lockByAdmin(LocalDateTime now) {
+        status = AccountStatus.LOCKED;
+        updatedAt = now;
+    }
+
+    /** UC-10. Also lifts the temporary lock after wrong passwords, so the user can sign in at once. */
+    public void unlockByAdmin(LocalDateTime now) {
+        status = AccountStatus.ACTIVE;
+        failedLoginCount = 0;
+        lockedUntil = null;
+        updatedAt = now;
+    }
+
+    /** UC-09. Same rule as {@link #create}: Branch Manager and Staff have exactly one store (BR-02). */
+    public void changeRoleAndStore(Role newRole, Long newStoreId, LocalDateTime now) {
+        if (newRole.requiresStore() != (newStoreId != null)) {
+            throw new IllegalArgumentException("Branch Manager and Staff need exactly one store; Owner and Admin none");
+        }
+        role = newRole;
+        storeId = newStoreId;
+        updatedAt = now;
+    }
+
     /** Usernames are stored in lower case, so "Staff01" and "staff01" are the same account. */
     public static String normalizeUsername(String username) {
         return username == null ? "" : username.strip().toLowerCase(Locale.ROOT);
