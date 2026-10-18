@@ -26,4 +26,11 @@ public class ProductVehicleModel {
 
     @Column(name = "vehicle_model_id", nullable = false)
     private Long vehicleModelId;
+
+    public static ProductVehicleModel of(Long productId, Long vehicleModelId) {
+        ProductVehicleModel link = new ProductVehicleModel();
+        link.productId = productId;
+        link.vehicleModelId = vehicleModelId;
+        return link;
+    }
 }

@@ -33,4 +33,12 @@ public class ProductIdentifier {
 
     @Column(name = "identifier_value", nullable = false, length = 100)
     private String identifierValue;
+
+    public static ProductIdentifier of(Long productId, IdentifierType type, String value) {
+        ProductIdentifier identifier = new ProductIdentifier();
+        identifier.productId = productId;
+        identifier.identifierType = type;
+        identifier.identifierValue = value;
+        return identifier;
+    }
 }

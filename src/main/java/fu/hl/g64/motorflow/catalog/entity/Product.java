@@ -62,4 +62,41 @@ public class Product {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /** UC-15. Creating a part never creates stock (DBR-02). */
+    public static Product create(String sku, String partName, Long categoryId, String brand, String countryOfOrigin,
+                                 String baseUnit, String specifications, Long createdBy, LocalDateTime now) {
+        Product product = new Product();
+        product.sku = sku;
+        product.status = ProductStatus.ACTIVE;
+        product.createdBy = createdBy;
+        product.createdAt = now;
+        product.update(partName, categoryId, brand, countryOfOrigin, baseUnit, specifications, now);
+        return product;
+    }
+
+    /** UC-16. The SKU never changes, so stock and documents keep pointing at the same part. */
+    public void update(String newPartName, Long newCategoryId, String newBrand, String newCountryOfOrigin,
+                       String newBaseUnit, String newSpecifications, LocalDateTime now) {
+        partName = newPartName;
+        categoryId = newCategoryId;
+        brand = newBrand;
+        countryOfOrigin = newCountryOfOrigin;
+        baseUnit = newBaseUnit;
+        specifications = newSpecifications;
+        updatedAt = now;
+    }
+
+    /** UC-17: no new sales orders or goods receipt requests; history stays (BR-07). */
+    public void discontinue(LocalDateTime now) {
+        status = ProductStatus.DISCONTINUED;
+        discontinuedAt = now;
+        updatedAt = now;
+    }
+
+    public void reactivate(LocalDateTime now) {
+        status = ProductStatus.ACTIVE;
+        discontinuedAt = null;
+        updatedAt = now;
+    }
 }

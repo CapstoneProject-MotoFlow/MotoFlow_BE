@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface StockBalanceRepository extends JpaRepository<StockBalance, Long> {
@@ -15,4 +16,6 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
                   + b.awaitingSupplierReturnQty > 0
             group by b.warehouseId""")
     List<Object[]> countProductsInStockByWarehouse();
+
+    List<StockBalance> findByWarehouseIdAndProductIdIn(Long warehouseId, Collection<Long> productIds);
 }
