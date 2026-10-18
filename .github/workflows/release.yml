@@ -1,0 +1,83 @@
+# Production release of the MotoFlow backend. Full guide: docs/CICD.md
+#
+# Release: push a tag v* on a commit of main, e.g. v1.0.0 for Software Package v1.
+#   The image CI/CD already built and tested for that commit is deployed as is; nothing is rebuilt.
+# Roll back: Actions -> Release -> Run workflow -> "Use workflow from" = an older tag.
+#
+# Runs only when the repository variable PROD_ENABLED is 'true' (a production server exists).
+# Required reviewers on environments are not available for private repositories on the
+# GitHub Free/Team plans, so the gate is "who pushes the v* tag" instead.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-production-backend
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  ECR_REPOSITORY: motoflow-backend
+
+jobs:
+  deploy-production:
+    name: deploy-production
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PROD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check that the tag is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points to ${GITHUB_SHA::7}, which is not on main. Tag a commit of main."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/motoflow-gha-deploy-prod
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find the image CI/CD built for this commit
+        id: image
+        env:
+          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          REPO_URI="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY"
+          # Right after a merge, CI/CD on main may still be building: wait up to 20 minutes.
+          for i in $(seq 1 40); do
+            if DIGEST=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+                  --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null); then
+              echo "image=$REPO_URI@$DIGEST" >> "$GITHUB_OUTPUT"
+              echo "Release $GITHUB_REF_NAME: \`$REPO_URI@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "No image for ${GITHUB_SHA::7} yet (attempt $i/40), waiting for CI/CD on main..."
+            sleep 30
+          done
+          echo "::error::No image for ${GITHUB_SHA::7}. Check that CI/CD on main passed for this commit."
+          exit 1
+
+      - name: Deploy to the production server over SSM
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: bash .github/scripts/ssm-deploy.sh production backend "$IMAGE"
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.PROD_BASE_URL }}
+        run: bash .github/scripts/smoke-test.sh "$BASE_URL"
