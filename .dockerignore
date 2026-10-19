@@ -1,0 +1,3 @@
+# The image only needs the JAR built by Maven (see Dockerfile).
+*
+!target/*.jar

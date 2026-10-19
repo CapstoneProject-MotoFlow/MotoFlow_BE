@@ -1,0 +1,143 @@
+# CI/CD for the MotoFlow backend. Full guide: docs/CICD.md
+#
+#   Pull request to main -> build-test (./mvnw verify: unit + integration tests)
+#   Push/merge to main   -> build-test -> build-push-image -> deploy-dev (+ smoke test)
+#   Tag v*               -> release.yml deploys the same image to production
+#
+# The CD jobs stay skipped until the repository variable AWS_ACCOUNT_ID is set,
+# so the CI part is useful before the AWS side exists.
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a PR cancels the old run; runs on main queue up and are never cancelled.
+  group: ci-cd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-1' }}
+  ECR_REPOSITORY: motoflow-backend
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # "sh ./mvnw" works even when mvnw lost its executable bit on Windows.
+      # Tests use embedded PostgreSQL, so no database service is needed here.
+      - name: Build and run all tests
+        run: sh ./mvnw -B -ntp verify
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports
+          path: target/surefire-reports/
+          retention-days: 7
+
+      # The image is built from this exact JAR, so what was tested is what gets deployed.
+      - name: Upload the tested JAR
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-jar
+          path: target/*.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  build-push-image:
+    name: build-push-image
+    needs: build-test
+    if: github.event_name == 'push' && vars.AWS_ACCOUNT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # OIDC token for AWS, no access keys stored in GitHub
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: app-jar
+          path: target
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/motoflow-gha-ecr-publisher
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Build and push the image (tag = commit SHA)
+        id: push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          REPO_URI="$REGISTRY/$ECR_REPOSITORY"
+          digest() {
+            aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+              --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null
+          }
+          # Tags are immutable in ECR: a re-run of this job reuses the image already pushed for this commit.
+          if ! DIGEST=$(digest); then
+            docker build \
+              --label org.opencontainers.image.revision="$GITHUB_SHA" \
+              --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              -t "$REPO_URI:$GITHUB_SHA" .
+            docker push "$REPO_URI:$GITHUB_SHA"
+            DIGEST=$(digest)
+          fi
+          echo "image=$REPO_URI@$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Image: \`$REPO_URI@$DIGEST\` (tag \`$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-dev:
+    name: deploy-dev
+    needs: build-push-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-dev-backend
+      cancel-in-progress: false # never stop a deployment halfway
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/motoflow-gha-deploy-dev
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Deploys by digest: dev and production run byte-for-byte the same image.
+      - name: Deploy to the dev server over SSM
+        env:
+          IMAGE: ${{ needs.build-push-image.outputs.image }}
+        run: bash .github/scripts/ssm-deploy.sh dev backend "$IMAGE"
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.DEV_BASE_URL }}
+        run: bash .github/scripts/smoke-test.sh "$BASE_URL"

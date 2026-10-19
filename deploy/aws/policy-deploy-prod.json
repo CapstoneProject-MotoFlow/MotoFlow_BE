@@ -1,0 +1,44 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FindServers",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeInstances",
+      "Resource": "*"
+    },
+    {
+      "Sid": "FindTheImageOfTheTaggedCommit",
+      "Effect": "Allow",
+      "Action": "ecr:DescribeImages",
+      "Resource": [
+        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-backend",
+        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-frontend"
+      ]
+    },
+    {
+      "Sid": "UseRunShellScript",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": "arn:aws:ssm:ap-southeast-1::document/AWS-RunShellScript"
+    },
+    {
+      "Sid": "OnlyOnProductionServers",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": "arn:aws:ec2:ap-southeast-1:<ACCOUNT_ID>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ssm:resourceTag/App": "motoflow",
+          "ssm:resourceTag/Env": "production"
+        }
+      }
+    },
+    {
+      "Sid": "ReadCommandResults",
+      "Effect": "Allow",
+      "Action": "ssm:GetCommandInvocation",
+      "Resource": "*"
+    }
+  ]
+}

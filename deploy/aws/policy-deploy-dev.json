@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FindServers",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeInstances",
+      "Resource": "*"
+    },
+    {
+      "Sid": "UseRunShellScript",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": "arn:aws:ssm:ap-southeast-1::document/AWS-RunShellScript"
+    },
+    {
+      "Sid": "OnlyOnDevServers",
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": "arn:aws:ec2:ap-southeast-1:<ACCOUNT_ID>:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ssm:resourceTag/App": "motoflow",
+          "ssm:resourceTag/Env": "dev"
+        }
+      }
+    },
+    {
+      "Sid": "ReadCommandResults",
+      "Effect": "Allow",
+      "Action": "ssm:GetCommandInvocation",
+      "Resource": "*"
+    }
+  ]
+}
