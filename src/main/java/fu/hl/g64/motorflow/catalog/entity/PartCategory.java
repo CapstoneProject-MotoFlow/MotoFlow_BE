@@ -49,4 +49,35 @@ public class PartCategory {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    public static PartCategory create(String name, VehicleType vehicleType, Long parentId, String description,
+                                      LocalDateTime now) {
+        PartCategory category = new PartCategory();
+        category.status = PartCategoryStatus.ACTIVE;
+        category.createdAt = now;
+        category.update(name, vehicleType, parentId, description, now);
+        return category;
+    }
+
+    /** UC-20: rename, or move to another vehicle type or parent. */
+    public void update(String newName, VehicleType newVehicleType, Long newParentId, String newDescription,
+                       LocalDateTime now) {
+        categoryName = newName;
+        vehicleType = newVehicleType;
+        parentId = newParentId;
+        description = newDescription;
+        updatedAt = now;
+    }
+
+    /** A sub-category follows its parent when the parent moves to another vehicle type. */
+    public void changeVehicleType(VehicleType newVehicleType, LocalDateTime now) {
+        vehicleType = newVehicleType;
+        updatedAt = now;
+    }
+
+    /** UC-21. Parts already in the category keep it. */
+    public void changeStatus(PartCategoryStatus newStatus, LocalDateTime now) {
+        status = newStatus;
+        updatedAt = now;
+    }
 }

@@ -34,7 +34,7 @@ class AuthApiIntegrationTest extends IntegrationTest {
     private static final String PASSWORD = "Owner2026pass";
     private static final String NEW_PASSWORD = "Fresh2026pass";
     private static final String COOKIE = "mf_refresh";
-    /** Any protected URL; it has no controller yet, so getting past security gives 404. */
+    /** A URL Staff may not open: before the password change it answers MSG13, after it MSG05 (wrong role). */
     private static final String PROTECTED_URL = "/api/stores";
 
     @Autowired
@@ -176,7 +176,8 @@ class AuthApiIntegrationTest extends IntegrationTest {
 
             // Same token: the change applies from the next request.
             mvc.perform(get(PROTECTED_URL).header(HttpHeaders.AUTHORIZATION, bearer(token)))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("MSG05"));
             login("staff", NEW_PASSWORD).andExpect(jsonPath("$.user.mustChangePassword").value(false));
         }
     }

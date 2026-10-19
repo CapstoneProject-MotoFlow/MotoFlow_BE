@@ -52,4 +52,29 @@ public class VehicleModel {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    public static VehicleModel create(String manufacturer, String modelName, VehicleType vehicleType, Short yearFrom,
+                                      Short yearTo, LocalDateTime now) {
+        VehicleModel model = new VehicleModel();
+        model.status = VehicleModelStatus.ACTIVE;
+        model.createdAt = now;
+        model.update(manufacturer, modelName, vehicleType, yearFrom, yearTo, now);
+        return model;
+    }
+
+    public void update(String newManufacturer, String newModelName, VehicleType newVehicleType, Short newYearFrom,
+                       Short newYearTo, LocalDateTime now) {
+        manufacturer = newManufacturer;
+        modelName = newModelName;
+        vehicleType = newVehicleType;
+        yearFrom = newYearFrom;
+        yearTo = newYearTo;
+        updatedAt = now;
+    }
+
+    /** UC-25. Compatibility already declared with this model stays. */
+    public void changeStatus(VehicleModelStatus newStatus, LocalDateTime now) {
+        status = newStatus;
+        updatedAt = now;
+    }
 }

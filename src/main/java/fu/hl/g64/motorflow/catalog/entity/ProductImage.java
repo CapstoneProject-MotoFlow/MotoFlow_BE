@@ -40,4 +40,16 @@ public class ProductImage {
 
     @Column(name = "uploaded_at", nullable = false)
     private LocalDateTime uploadedAt;
+
+    /** {@code storageKey} is the image URL; the browser uploads the file to the image host itself. */
+    public static ProductImage of(Long productId, String storageKey, int sortOrder, Long uploadedBy, LocalDateTime now) {
+        ProductImage image = new ProductImage();
+        image.productId = productId;
+        image.storageKey = storageKey;
+        image.sortOrder = (short) sortOrder;
+        image.isPrimary = sortOrder == 0;
+        image.uploadedBy = uploadedBy;
+        image.uploadedAt = now;
+        return image;
+    }
 }

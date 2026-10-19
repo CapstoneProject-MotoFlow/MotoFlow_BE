@@ -43,4 +43,31 @@ public class Warehouse {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /** UC-04: every new store gets exactly one warehouse, created with it (BR-04). */
+    public static Warehouse create(Long storeId, String name, String address, String phone, boolean central,
+                                   LocalDateTime now) {
+        Warehouse warehouse = new Warehouse();
+        warehouse.storeId = storeId;
+        warehouse.warehouseName = name;
+        warehouse.address = address;
+        warehouse.phone = phone;
+        warehouse.isCentral = central;
+        warehouse.createdAt = now;
+        warehouse.updatedAt = now;
+        return warehouse;
+    }
+
+    public void update(String newName, String newAddress, String newPhone, LocalDateTime now) {
+        warehouseName = newName;
+        address = newAddress;
+        phone = newPhone;
+        updatedAt = now;
+    }
+
+    /** Only while the chain has no central warehouse yet; it is never moved or removed (BR-04). */
+    public void makeCentral(LocalDateTime now) {
+        isCentral = true;
+        updatedAt = now;
+    }
 }
