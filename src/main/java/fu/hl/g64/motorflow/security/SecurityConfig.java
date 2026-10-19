@@ -56,6 +56,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/error").permitAll()
+                        // Health check for deploys and monitoring; answers only UP or DOWN.
+                        .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
                         // The only screens open to a user who still has a temporary password (SEC-03).
                         .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
