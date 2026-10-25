@@ -49,6 +49,11 @@ public class VehicleModelService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public VehicleModelResponse get(long id) {
+        return VehicleModelResponse.from(find(id));
+    }
+
     @Transactional
     public VehicleModelResponse create(AuthenticatedUser actor, VehicleModelRequest request) {
         requireValid(null, request);

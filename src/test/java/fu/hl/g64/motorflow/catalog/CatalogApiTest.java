@@ -63,6 +63,22 @@ class CatalogApiTest extends IntegrationTest {
     class Categories {
 
         @Test
+        void theLocationOfANewCategoryShowsItWithItsChildren() throws Exception {
+            String location = send(post("/api/part-categories"), ownerToken,
+                    Map.of("categoryName", "Hệ thống phanh", "vehicleType", "MOTORCYCLE"))
+                    .andExpect(status().isCreated()).andReturn().getResponse().getHeader(HttpHeaders.LOCATION);
+            long brakes = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
+            categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE", "parentId", brakes));
+
+            send(get(location), ownerToken)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.categoryName").value("Hệ thống phanh"))
+                    .andExpect(jsonPath("$.children[*].categoryName", contains("Bố thắng đĩa")));
+            send(get("/api/part-categories/999999"), ownerToken)
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG61"));
+        }
+
+        @Test
         void formATreeAndOnlyCategoriesWithoutChildrenTakeParts() throws Exception {
             long brakes = categoryId(Map.of("categoryName", "Hệ thống phanh", "vehicleType", "MOTORCYCLE"));
             long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE", "parentId", brakes));
@@ -122,6 +138,18 @@ class CatalogApiTest extends IntegrationTest {
 
     @Nested
     class VehicleModels {
+
+        @Test
+        void theLocationOfANewModelShowsIt() throws Exception {
+            String location = send(post("/api/vehicle-models"), ownerToken,
+                    Map.of("manufacturer", "Honda", "modelName", "Wave Alpha", "vehicleType", "MOTORCYCLE"))
+                    .andExpect(status().isCreated()).andReturn().getResponse().getHeader(HttpHeaders.LOCATION);
+
+            send(get(location), ownerToken)
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.modelName").value("Wave Alpha"));
+            send(get("/api/vehicle-models/999999"), ownerToken)
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG63"));
+        }
 
         @Test
         void areUniqueAndKeepTheirLinksWhenDeactivated() throws Exception {
