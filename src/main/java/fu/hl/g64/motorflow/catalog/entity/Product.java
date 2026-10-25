@@ -13,6 +13,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /** A spare part (SKU) stocked, priced and sold across the chain. */
@@ -46,6 +47,14 @@ public class Product {
 
     @Column(columnDefinition = "text")
     private String specifications;
+
+    /** Unit cost used for the opening count. */
+    @Column(name = "initial_unit_cost")
+    private Long initialUnitCost;
+
+    /** Chain-wide moving weighted average cost. */
+    @Column(name = "moving_avg_cost", precision = 18, scale = 4)
+    private BigDecimal movingAvgCost;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

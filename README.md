@@ -83,14 +83,15 @@ src/main/java/fu/hl/g64/motorflow/
 ├── account/             UC-08 tạo tài khoản, UC-11 cấp lại mật khẩu, quyền
 ├── store/               Store, Warehouse
 ├── catalog/             PartCategory, VehicleModel, Product, ProductIdentifier, ProductImage, ProductVehicleModel
-├── pricing/             RetailPrice, WholesalePrice, DiscountThreshold
-├── partner/             Customer, CreditEligibilityEvent, Supplier
+├── pricing/             PricingPolicy
+├── partner/             Customer, CustomerTier, CustomerTierChange, CreditEligibilityEvent, Supplier
 ├── sales/               SalesOrder, SalesOrderVersion, SalesOrderLine, UnmetDemand
 ├── receivable/          Receivable, Payment
 ├── receiving/           GoodsReceiptRequest(+Line), GoodsReceipt(+Line)
 ├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line)
 ├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent
-├── inventory/           StockBalance, StockMovement
+├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line),
+│                        PeriodStockBalance, DailyStockBalance
 ├── adjustment/          AdjustmentRequest, AdjustmentStockLine, AdjustmentAmountLine
 └── operation/           WarehouseTask, Notification, Attachment
 ```
@@ -109,15 +110,16 @@ Mỗi feature dùng các package con sau, chỉ tạo package nào thực sự c
 Test đặt ở cùng tên package trong `src/test/java` (ví dụ `account/AccountAdminApiTest.java`).
 
 Feature nào cũng được dùng repository/service của feature khác, vì đây là monolith thường, không có ranh giới module.
+Ngoại lệ duy nhất: **ghi tồn kho** (`stock_balance`, `stock_movement`) chỉ đi qua service của `inventory/`, không gọi thẳng repository của nó. Nhờ vậy, mọi chỗ đều ghi tồn kho cùng một cách (BR-29, không âm kho).
 
 ---
 
 ## 3. Database
 
 ### Nguồn gốc
-- Thiết kế logic (42 bảng, 3NF) nằm ở `MotoFlow_Logical_3NF/model.py`, cùng cấp với thư mục `SourceCode`.
+- Schema theo Report 4, mục 3 (Database Design, 50 bảng). V1..V5 dựng thiết kế logic 43 bảng ban đầu
+  (`MotoFlow_Logical_3NF/model.py`, cùng cấp với thư mục `SourceCode`); V7 đưa schema lên 50 bảng của Report 4.
 - `schema_postgres.sql` được sinh từ `model.py` bằng `python ddl.py`.
-- Report 4, mục Database Design, cũng lấy từ cùng file này.
 
 ### Flyway migration
 Các migration nằm trong `src/main/resources/db/migration/`:
@@ -125,10 +127,12 @@ Các migration nằm trong `src/main/resources/db/migration/`:
 | File | Nội dung |
 |---|---|
 | `V1__store_and_user_account.sql` | store, warehouse, user_account, user_permission, permission_history |
-| `V2__auth_session.sql` | refresh token (không có trong thiết kế logic) |
+| `V2__auth_session.sql` | auth_session (phiên đăng nhập, refresh token) |
 | `V3__audit_log.sql` | audit_log |
 | `V4__updated_at_default_and_fk_indexes.sql` | `DEFAULT NOW()` và index cho FK |
 | `V5__remaining_tables.sql` | 36 bảng còn lại |
+| `V6__single_central_warehouse.sql` | Chuỗi chỉ có một kho tổng |
+| `V7__r4_database_design_50_tables.sql` | Report 4 mục 3: 43 → 50 bảng (bỏ mã do hệ thống cấp, `pricing_policy`, hạng khách hàng, lô, kỳ kho, kiểm kê, số dư kỳ/ngày) |
 
 **Quy tắc:**
 - **Không sửa migration đã có** (Flyway sẽ báo checksum sai trên mọi máy đã chạy nó).

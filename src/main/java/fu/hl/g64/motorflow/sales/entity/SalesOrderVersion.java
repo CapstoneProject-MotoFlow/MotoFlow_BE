@@ -53,6 +53,9 @@ public class SalesOrderVersion {
     @Column(name = "discount_rate", nullable = false, precision = 5, scale = 2)
     private BigDecimal discountRate;
 
+    @Column(name = "suggested_discount_rate", precision = 5, scale = 2)
+    private BigDecimal suggestedDiscountRate;
+
     @Column(name = "change_reason")
     private String changeReason;
 

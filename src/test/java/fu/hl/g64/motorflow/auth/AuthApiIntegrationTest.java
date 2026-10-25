@@ -31,8 +31,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class AuthApiIntegrationTest extends IntegrationTest {
 
-    private static final String PASSWORD = "Owner2026pass";
-    private static final String NEW_PASSWORD = "Fresh2026pass";
+    private static final String PASSWORD = "Owner@2026pass";
+    private static final String NEW_PASSWORD = "Fresh@2026pass";
     private static final String COOKIE = "mf_refresh";
     /** A URL Staff may not open: before the password change it answers MSG13, after it MSG05 (wrong role). */
     private static final String PROTECTED_URL = "/api/stores";
@@ -196,11 +196,19 @@ class AuthApiIntegrationTest extends IntegrationTest {
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG43"));
             changePassword(token, PASSWORD, "Ab1")
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG43"));
+            changePassword(token, PASSWORD, "NoSpecial2026")
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG43"));
+            changePassword(token, PASSWORD, "Ab1!" + "x".repeat(47))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value("Mật khẩu phải dài từ 8 đến 50 ký tự, có ít nhất một chữ cái, "
+                            + "một chữ số và một ký tự đặc biệt, và không trùng tên đăng nhập."));
             changePassword(token, PASSWORD, PASSWORD)
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG44"));
             changePassword(token, "", "")
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"))
                     .andExpect(jsonPath("$.fieldErrors.newPassword").exists());
+            // Exactly 50 characters is still allowed.
+            changePassword(token, PASSWORD, "Ab1!" + "x".repeat(46)).andExpect(status().isNoContent());
         }
 
         @Test
@@ -313,8 +321,8 @@ class AuthApiIntegrationTest extends IntegrationTest {
     }
 
     private Long createStore(String code) {
-        return jdbc.queryForObject("INSERT INTO store (store_code, store_name, address, status, updated_at) "
-                + "VALUES (?, ?, 'Hà Nội', 'ACTIVE', now()) RETURNING id", Long.class, code, "Cửa hàng " + code);
+        return jdbc.queryForObject("INSERT INTO store (store_name, address, status, updated_at) "
+                + "VALUES (?, 'Hà Nội', 'ACTIVE', now()) RETURNING id", Long.class, "Cửa hàng " + code);
     }
 
     private void lockByAdmin(UserAccount user) {

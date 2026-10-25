@@ -84,9 +84,7 @@ public class PermissionService {
                 permissionHistory.save(PermissionHistory.roleChanged(accountId, oldRole, role, reason, admin.id(), now));
             }
             if (storeChanged) {
-                String oldCode = oldStoreId == null ? null : stores.findById(oldStoreId).map(Store::getStoreCode).orElse(null);
-                permissionHistory.save(PermissionHistory.storeChanged(accountId, oldCode,
-                        store == null ? null : store.getStoreCode(), reason, admin.id(), now));
+                permissionHistory.save(PermissionHistory.storeChanged(accountId, oldStoreId, storeId, reason, admin.id(), now));
             }
             account.changeRoleAndStore(role, storeId, now);
         }

@@ -254,10 +254,9 @@ class CatalogApiTest extends IntegrationTest {
             addStock(branch, padsPart, 5, "A-01");
             addStock(central, chainPart, 3, "B-02");
             LocalDateTime now = LocalDateTime.now(clock);
-            addRetailPrice(padsPart, 100_000, now.minusDays(1));
-            addRetailPrice(padsPart, 120_000, now.plusDays(1));
-            jdbc.update("INSERT INTO wholesale_price (product_id, store_id, unit_price, effective_from, set_by, set_at) "
-                    + "VALUES (?, ?, 90000, ?, ?, ?)", padsPart, branch, now.minusDays(1), owner.getId(), now);
+            addRetailPrice(padsPart, 90_000, now.minusDays(10), "SUPERSEDED");
+            addRetailPrice(padsPart, 100_000, now.minusDays(1), "ACTIVE");
+            addRetailPrice(padsPart, 120_000, now.plusDays(1), "SCHEDULED");
 
             createUser("staff01", Role.STAFF, branch);
             String staffToken = signIn("staff01");
@@ -284,7 +283,7 @@ class CatalogApiTest extends IntegrationTest {
 
             send(get("/api/products/{id}", padsPart), staffToken)
                     .andExpect(jsonPath("$.retailPrice").value(100_000))
-                    .andExpect(jsonPath("$.wholesalePrice").value(90_000))
+                    .andExpect(jsonPath("$.wholesalePrice").doesNotExist())
                     .andExpect(jsonPath("$.stock.storeId").value(branch))
                     .andExpect(jsonPath("$.stock.availableQty").value(5))
                     .andExpect(jsonPath("$.vehicleModels[0].modelName").value("Air Blade"));
@@ -344,8 +343,8 @@ class CatalogApiTest extends IntegrationTest {
     }
 
     private long createStore(String code, boolean centralWarehouse) {
-        Long storeId = jdbc.queryForObject("INSERT INTO store (store_code, store_name, address, status) "
-                + "VALUES (?, ?, 'Hà Nội', 'ACTIVE') RETURNING id", Long.class, code, "Cửa hàng " + code);
+        Long storeId = jdbc.queryForObject("INSERT INTO store (store_name, address, status) "
+                + "VALUES (?, 'Hà Nội', 'ACTIVE') RETURNING id", Long.class, "Cửa hàng " + code);
         jdbc.update("INSERT INTO warehouse (store_id, warehouse_name, is_central) VALUES (?, ?, ?)",
                 storeId, "Kho " + code, centralWarehouse);
         return storeId;
@@ -356,9 +355,10 @@ class CatalogApiTest extends IntegrationTest {
                 + "VALUES ((SELECT id FROM warehouse WHERE store_id = ?), ?, ?, ?)", storeId, productId, available, bin);
     }
 
-    private void addRetailPrice(long productId, long price, LocalDateTime effectiveFrom) {
-        jdbc.update("INSERT INTO retail_price (product_id, unit_price, effective_from, set_by, set_at) "
-                + "VALUES (?, ?, ?, ?, ?)", productId, price, effectiveFrom, owner.getId(), LocalDateTime.now(clock));
+    private void addRetailPrice(long productId, long price, LocalDateTime effectiveFrom, String status) {
+        jdbc.update("INSERT INTO pricing_policy (policy_type, product_id, unit_price, effective_from, status, set_by, set_at) "
+                + "VALUES ('RETAIL_PRICE', ?, ?, ?, ?, ?, ?)", productId, price, effectiveFrom, status, owner.getId(),
+                LocalDateTime.now(clock));
     }
 
     private UserAccount createUser(String username, Role role, Long store) {

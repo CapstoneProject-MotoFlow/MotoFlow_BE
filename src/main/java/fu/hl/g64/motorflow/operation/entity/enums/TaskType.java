@@ -4,5 +4,6 @@ package fu.hl.g64.motorflow.operation.entity.enums;
 public enum TaskType {
     PICKING,
     INSPECTION,
-    DISPATCH_PREPARATION
+    DISPATCH_PREPARATION,
+    COUNTING
 }

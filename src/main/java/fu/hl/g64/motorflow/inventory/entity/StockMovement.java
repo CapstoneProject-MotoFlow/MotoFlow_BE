@@ -14,6 +14,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /** Ledger: one posted change to one stock status of one part in one warehouse, traceable to its source document. */
@@ -32,6 +33,9 @@ public class StockMovement {
 
     @Column(name = "product_id", nullable = false)
     private Long productId;
+
+    @Column(name = "lot_id")
+    private Long lotId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "stock_status", nullable = false, length = 30)
@@ -58,6 +62,18 @@ public class StockMovement {
 
     @Column(name = "adjustment_request_id")
     private Long adjustmentRequestId;
+
+    @Column(name = "stock_count_id")
+    private Long stockCountId;
+
+    @Column(name = "inventory_period_id", nullable = false)
+    private Long inventoryPeriodId;
+
+    @Column(name = "unit_cost", nullable = false, precision = 18, scale = 4)
+    private BigDecimal unitCost;
+
+    @Column(nullable = false)
+    private long value;
 
     @Column
     private String reason;

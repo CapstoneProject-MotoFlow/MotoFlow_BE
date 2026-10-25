@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/** Goods moved from one source warehouse to one destination warehouse for one replenishment request (BR-57). */
+/** Goods moved from one source warehouse to one destination warehouse for a replenishment request, or created directly by Owner or the BM (BR-57). */
 @Entity
 @Table(name = "transfer_order")
 @Getter
@@ -26,10 +26,7 @@ public class TransferOrder {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "transfer_code", nullable = false, unique = true, length = 30)
-    private String transferCode;
-
-    @Column(name = "replenishment_request_id", nullable = false)
+    @Column(name = "replenishment_request_id")
     private Long replenishmentRequestId;
 
     @Column(name = "source_warehouse_id", nullable = false)

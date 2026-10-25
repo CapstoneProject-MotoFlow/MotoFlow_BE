@@ -26,10 +26,7 @@ public class Store {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "store_code", nullable = false, unique = true, length = 20)
-    private String storeCode;
-
-    @Column(name = "store_name", nullable = false, length = 150)
+    @Column(name = "store_name", nullable = false, unique = true, length = 150)
     private String storeName;
 
     @Column(nullable = false, length = 255)
@@ -52,9 +49,8 @@ public class Store {
     private LocalDateTime updatedAt;
 
     /** UC-04: a new store starts as planned, with no stock, documents or debts (BR-64). */
-    public static Store create(String storeCode, String storeName, String address, String phone, LocalDateTime now) {
+    public static Store create(String storeName, String address, String phone, LocalDateTime now) {
         Store store = new Store();
-        store.storeCode = storeCode;
         store.storeName = storeName;
         store.address = address;
         store.phone = phone;
@@ -64,7 +60,7 @@ public class Store {
         return store;
     }
 
-    /** UC-06. The code never changes, so documents and permission history keep pointing at the same store. */
+    /** UC-06. The id never changes, so documents and permission history keep pointing at the same store. */
     public void update(String newName, String newAddress, String newPhone, StoreStatus newStatus, LocalDateTime now) {
         storeName = newName;
         address = newAddress;

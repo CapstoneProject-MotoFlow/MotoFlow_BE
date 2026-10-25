@@ -27,9 +27,6 @@ public class GoodsReceiptRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "request_code", nullable = false, unique = true, length = 30)
-    private String requestCode;
-
     @Column(name = "supplier_id", nullable = false)
     private Long supplierId;
 

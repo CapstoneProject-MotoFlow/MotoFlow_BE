@@ -13,6 +13,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
+
 /** Inspection result of one part in one delivery. */
 @Entity
 @Table(name = "goods_receipt_line")
@@ -51,4 +53,16 @@ public class GoodsReceiptLine {
     @Enumerated(EnumType.STRING)
     @Column(name = "excess_decision", nullable = false, length = 20)
     private ExcessDecision excessDecision;
+
+    @Column(name = "unit_price")
+    private Long unitPrice;
+
+    @Column(name = "manufacturer_lot_no", length = 50)
+    private String manufacturerLotNo;
+
+    @Column(name = "manufacture_date")
+    private LocalDate manufactureDate;
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
 }

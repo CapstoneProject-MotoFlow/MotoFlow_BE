@@ -27,9 +27,6 @@ public class AdjustmentRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "adjustment_code", nullable = false, unique = true, length = 30)
-    private String adjustmentCode;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "adjustment_type", nullable = false, length = 25)
     private AdjustmentType adjustmentType;

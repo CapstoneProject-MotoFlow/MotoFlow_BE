@@ -3,9 +3,11 @@ package fu.hl.g64.motorflow.account.controller;
 import fu.hl.g64.motorflow.account.dto.AccountResponse;
 import fu.hl.g64.motorflow.account.dto.AccountState;
 import fu.hl.g64.motorflow.account.dto.CreateAccountRequest;
+import fu.hl.g64.motorflow.account.dto.CreatedAccountResponse;
 import fu.hl.g64.motorflow.account.dto.LockAccountRequest;
 import fu.hl.g64.motorflow.account.dto.PermissionHistoryResponse;
 import fu.hl.g64.motorflow.account.dto.ResetPasswordRequest;
+import fu.hl.g64.motorflow.account.dto.TemporaryPasswordResponse;
 import fu.hl.g64.motorflow.account.dto.UpdatePermissionsRequest;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.service.AccountService;
@@ -49,12 +51,12 @@ public class AccountController {
         return accountService.listAccounts(q, role, storeId, state);
     }
 
-    @Operation(summary = "Create an account with a temporary password (UC-08)")
+    @Operation(summary = "Create an account; the generated temporary password is returned only here (UC-08)")
     @PostMapping
-    public ResponseEntity<AccountResponse> create(@AuthenticationPrincipal AuthenticatedUser admin,
-                                                  @Valid @RequestBody CreateAccountRequest request) {
-        AccountResponse created = accountService.createAccount(admin, request);
-        return ResponseEntity.created(URI.create("/api/accounts/" + created.id())).body(created);
+    public ResponseEntity<CreatedAccountResponse> create(@AuthenticationPrincipal AuthenticatedUser admin,
+                                                         @Valid @RequestBody CreateAccountRequest request) {
+        CreatedAccountResponse created = accountService.createAccount(admin, request);
+        return ResponseEntity.created(URI.create("/api/accounts/" + created.account().id())).body(created);
     }
 
     @Operation(summary = "Change role, store and catalog permission (UC-09); 409 MSG18 asks to release assigned tasks")
@@ -80,13 +82,12 @@ public class AccountController {
         return ResponseEntity.noContent().build();
     }
 
-    @Operation(summary = "Issue a new temporary password (UC-11)")
+    @Operation(summary = "Issue a new generated temporary password, returned only here (UC-11)")
     @PostMapping("/{id}/reset-password")
-    public ResponseEntity<Void> resetPassword(@AuthenticationPrincipal AuthenticatedUser admin,
-                                              @PathVariable long id,
-                                              @Valid @RequestBody ResetPasswordRequest request) {
-        accountService.resetPassword(admin, id, request);
-        return ResponseEntity.noContent().build();
+    public TemporaryPasswordResponse resetPassword(@AuthenticationPrincipal AuthenticatedUser admin,
+                                                   @PathVariable long id,
+                                                   @Valid @RequestBody(required = false) ResetPasswordRequest request) {
+        return accountService.resetPassword(admin, id, request == null ? null : request.reason());
     }
 
     @Operation(summary = "Role, store and permission changes of one account, newest first (UC-12)")

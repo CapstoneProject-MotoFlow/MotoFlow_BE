@@ -58,10 +58,11 @@ public class PermissionHistory {
         return of(userId, "ROLE_CHANGED", null, oldRole.name(), newRole.name(), reason, changedBy, now);
     }
 
-    /** Values are store codes; null means no store. */
-    public static PermissionHistory storeChanged(Long userId, String oldStoreCode, String newStoreCode, String reason,
+    /** Values are store ids (the store has no code since V7); null means no store. */
+    public static PermissionHistory storeChanged(Long userId, Long oldStoreId, Long newStoreId, String reason,
                                                  Long changedBy, LocalDateTime now) {
-        return of(userId, "STORE_CHANGED", null, oldStoreCode, newStoreCode, reason, changedBy, now);
+        return of(userId, "STORE_CHANGED", null, oldStoreId == null ? null : oldStoreId.toString(),
+                newStoreId == null ? null : newStoreId.toString(), reason, changedBy, now);
     }
 
     public static PermissionHistory permissionGranted(Long userId, PermissionCode code, String reason, Long changedBy,

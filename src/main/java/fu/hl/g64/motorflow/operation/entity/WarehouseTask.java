@@ -16,7 +16,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/** Assignment of a picking, inspection or dispatch-preparation task to one Staff member (BR-32, UC-88). */
+/** Assignment of a picking, inspection, dispatch-preparation or counting task to one Staff member (BR-32, UC-88). */
 @Entity
 @Table(name = "warehouse_task")
 @Getter
@@ -34,11 +34,14 @@ public class WarehouseTask {
     @Column(name = "sales_order_id")
     private Long salesOrderId;
 
-    @Column(name = "goods_receipt_request_id")
-    private Long goodsReceiptRequestId;
+    @Column(name = "goods_receipt_id")
+    private Long goodsReceiptId;
 
     @Column(name = "transfer_order_id")
     private Long transferOrderId;
+
+    @Column(name = "stock_count_id")
+    private Long stockCountId;
 
     @Column(name = "assigned_to", nullable = false)
     private Long assignedTo;

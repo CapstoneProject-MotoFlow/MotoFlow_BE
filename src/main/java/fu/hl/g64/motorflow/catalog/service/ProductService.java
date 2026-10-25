@@ -26,10 +26,8 @@ import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
-import fu.hl.g64.motorflow.pricing.entity.RetailPrice;
-import fu.hl.g64.motorflow.pricing.entity.WholesalePrice;
-import fu.hl.g64.motorflow.pricing.repository.RetailPriceRepository;
-import fu.hl.g64.motorflow.pricing.repository.WholesalePriceRepository;
+import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
+import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Warehouse;
 import fu.hl.g64.motorflow.store.service.StoreScope;
@@ -72,8 +70,7 @@ public class ProductService {
     private final ProductIdentifierRepository identifiers;
     private final ProductImageRepository images;
     private final ProductVehicleModelRepository compatibility;
-    private final RetailPriceRepository retailPrices;
-    private final WholesalePriceRepository wholesalePrices;
+    private final PricingPolicyRepository pricingPolicies;
     private final StockBalanceRepository stockBalances;
     private final StoreScope storeScope;
     private final AuditLogRepository auditLog;
@@ -115,7 +112,6 @@ public class ProductService {
     public ProductResponse detail(AuthenticatedUser user, long id, Long storeId) {
         Product product = find(id);
         Warehouse warehouse = storeScope.viewableWarehouse(user, storeId);
-        LocalDateTime now = LocalDateTime.now(clock);
 
         List<ProductIdentifier> codes = identifiers.findByProductIdIn(List.of(id));
         List<String> imageUrls = images.findByProductIdIn(List.of(id)).stream()
@@ -124,9 +120,6 @@ public class ProductService {
                         .map(ProductVehicleModel::getVehicleModelId).toList()).stream()
                 .sorted(Comparator.comparing(VehicleModel::getManufacturer).thenComparing(VehicleModel::getModelName))
                 .map(VehicleModelResponse::from).toList();
-        Long wholesalePrice = warehouse == null ? null : wholesalePrices
-                .findFirstByProductIdAndStoreIdAndEffectiveFromLessThanEqualOrderByEffectiveFromDesc(id, warehouse.getStoreId(), now)
-                .map(WholesalePrice::getUnitPrice).orElse(null);
         ProductResponse.Stock stock = warehouse == null ? null : ProductResponse.Stock.of(warehouse.getStoreId(),
                 stockBalances.findByWarehouseIdAndProductIdIn(warehouse.getId(), List.of(id)).stream().findFirst().orElse(null));
 
@@ -135,7 +128,7 @@ public class ProductService {
                 product.getBrand(), product.getCountryOfOrigin(), product.getBaseUnit(), product.getSpecifications(),
                 product.getStatus(), product.getDiscontinuedAt(), values(codes, IdentifierType.OEM),
                 values(codes, IdentifierType.BARCODE), imageUrls, models, retailPricesInEffect(List.of(id)).get(id),
-                wholesalePrice, stock, product.getCreatedAt(), product.getUpdatedAt());
+                stock, product.getCreatedAt(), product.getUpdatedAt());
     }
 
     /** UC-15. Creates no stock (DBR-02); prices are set afterwards in SCR-25. */
@@ -283,10 +276,10 @@ public class ProductService {
                 .mapToObj(i -> ProductImage.of(productId, urls.get(i), i, actor.id(), now)).toList());
     }
 
-    /** The price of the newest version already in effect, per product (BR-09). */
+    /** The price of the newest ACTIVE version already in effect, per product (BR-09). */
     private Map<Long, Long> retailPricesInEffect(Collection<Long> productIds) {
-        return retailPrices.findInEffect(productIds, LocalDateTime.now(clock)).stream()
-                .collect(Collectors.toMap(RetailPrice::getProductId, RetailPrice::getUnitPrice, (older, newer) -> newer));
+        return pricingPolicies.findRetailPricesInEffect(productIds, LocalDateTime.now(clock)).stream()
+                .collect(Collectors.toMap(PricingPolicy::getProductId, PricingPolicy::getUnitPrice, (older, newer) -> newer));
     }
 
     private Product find(long id) {

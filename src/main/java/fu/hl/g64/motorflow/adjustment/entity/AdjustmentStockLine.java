@@ -33,6 +33,10 @@ public class AdjustmentStockLine {
     @Column(name = "product_id", nullable = false)
     private Long productId;
 
+    /** Null: lots are deducted FEFO, then FIFO when the request is applied. */
+    @Column(name = "lot_id")
+    private Long lotId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "stock_status", nullable = false, length = 30)
     private StockStatus stockStatus;

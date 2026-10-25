@@ -1,7 +1,10 @@
-package fu.hl.g64.motorflow.pricing.entity;
+package fu.hl.g64.motorflow.partner.entity;
 
+import fu.hl.g64.motorflow.partner.entity.enums.TierStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -10,30 +13,32 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-/** Time-effective versions of the wholesale price of a part at one store (BR-10). */
+/** A customer tier and its additional discount rate. A tier never grants credit eligibility. */
 @Entity
-@Table(name = "wholesale_price")
+@Table(name = "customer_tier")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class WholesalePrice {
+public class CustomerTier {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "product_id", nullable = false)
-    private Long productId;
+    @Column(name = "tier_name", nullable = false, unique = true, length = 50)
+    private String tierName;
 
-    @Column(name = "store_id", nullable = false)
-    private Long storeId;
-
-    @Column(name = "unit_price", nullable = false)
-    private long unitPrice;
+    @Column(name = "additional_rate", nullable = false, precision = 5, scale = 2)
+    private BigDecimal additionalRate;
 
     @Column(name = "effective_from", nullable = false)
     private LocalDateTime effectiveFrom;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 15)
+    private TierStatus status;
 
     @Column(name = "set_by", nullable = false)
     private Long setBy;
