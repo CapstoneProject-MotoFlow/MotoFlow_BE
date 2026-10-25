@@ -33,17 +33,17 @@ docker compose up -d
 ```
 
 ```bash
-./mvnw spring-boot:run
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-Profile `dev` được bật mặc định. Profile này dùng database `motoflow` ở `localhost:5432` (user và mật khẩu đều là `motoflow`).
+Không có profile mặc định: thiếu profile thì ứng dụng không chạy (không có khóa JWT). Profile này dùng database `motoflow` ở `localhost:5432` (user và mật khẩu đều là `motoflow`).
 
 ### Tài khoản Admin đầu tiên
 - Khi database chưa có Admin, ứng dụng tự tạo Admin theo `motoflow.bootstrap.admin.*` trong `application-dev.properties`.
 - Đây là mật khẩu tạm: lần đăng nhập đầu tiên sẽ bị buộc đổi mật khẩu.
 
 ### Tài liệu API
-Swagger UI: `http://localhost:8080/swagger-ui.html`.
+Swagger UI: `http://localhost:8080/swagger-ui.html` (tắt ở profile `prod`).
 1. Đăng nhập bằng `POST /api/auth/login`.
 2. Copy `accessToken` vào nút **Authorize**.
 
@@ -61,11 +61,11 @@ Trên server không dùng profile `dev`, nên phải đặt:
 
 | Biến | Ý nghĩa |
 |---|---|
-| `SPRING_PROFILES_ACTIVE` | profile của server (không để `dev`) |
+| `SPRING_PROFILES_ACTIVE` | `prod` (tắt Swagger, đọc IP client từ `X-Forwarded-For`) |
 | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | kết nối PostgreSQL |
-| `MOTOFLOW_JWT_SECRET` | khóa ký JWT, base64, tối thiểu 256 bit, **không dùng khóa dev** |
+| `MOTOFLOW_JWT_SECRET` | bắt buộc; khóa ký JWT, base64, tối thiểu 256 bit, **không dùng khóa dev** |
 | `MOTOFLOW_CORS_ORIGINS` | các domain frontend, cách nhau bằng dấu phẩy |
-| `MOTOFLOW_ADMIN_USERNAME`, `MOTOFLOW_ADMIN_PASSWORD` | Admin đầu tiên, chỉ dùng khi DB chưa có Admin |
+| `MOTOFLOW_ADMIN_USERNAME`, `MOTOFLOW_ADMIN_PASSWORD` | Admin đầu tiên, chỉ dùng khi DB chưa có Admin; mật khẩu phải đúng chính sách (chữ, số, ký tự đặc biệt, 8–50 ký tự) |
 
 ---
 

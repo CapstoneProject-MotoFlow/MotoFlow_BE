@@ -12,10 +12,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BootstrapAdminInitializerTest extends IntegrationTest {
 
-    private static final String TEMPORARY_PASSWORD = "Bootstrap2026";
+    private static final String TEMPORARY_PASSWORD = "Bootstrap@2026";
 
     @Autowired
     private BootstrapAdminInitializer initializer;
@@ -44,5 +45,13 @@ class BootstrapAdminInitializerTest extends IntegrationTest {
         assertThat(passwordEncoder.matches(TEMPORARY_PASSWORD, admin.getPasswordHash())).isTrue();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM permission_history WHERE change_type = 'ACCOUNT_CREATED'",
                 Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void refusesToStartWithAWeakPassword() {
+        ReflectionTestUtils.setField(initializer, "password", "admin");
+
+        assertThatThrownBy(() -> initializer.run(null)).isInstanceOf(IllegalStateException.class);
+        assertThat(users.count()).isZero();
     }
 }

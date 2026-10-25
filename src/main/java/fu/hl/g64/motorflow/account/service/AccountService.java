@@ -125,6 +125,9 @@ public class AccountService {
         if (account.isLockedByAdmin()) {
             return;
         }
+        if (account.getRole() == Role.ADMIN) {
+            requireAnotherActiveAdmin(users, account);
+        }
         LocalDateTime now = LocalDateTime.now(clock);
         account.lockByAdmin(now);
         sessions.revokeAllSessions(account.getId(), now, AuthSession.RevokeReason.ACCOUNT_LOCKED);
@@ -172,6 +175,13 @@ public class AccountService {
         }
         return users.findById(accountId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
+    }
+
+    /** Locking or demoting this Admin must leave at least one active Admin (MSG69). */
+    static void requireAnotherActiveAdmin(UserAccountRepository users, UserAccount admin) {
+        if (users.findActiveAdminsForUpdate().stream().noneMatch(a -> !a.getId().equals(admin.getId()))) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG69");
+        }
     }
 
     private static String blankToNull(String value) {

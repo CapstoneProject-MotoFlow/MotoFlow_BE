@@ -78,6 +78,9 @@ public class PermissionService {
         Role oldRole = account.getRole();
         Long oldStoreId = account.getStoreId();
         boolean storeChanged = !Objects.equals(oldStoreId, storeId);
+        if (oldRole == Role.ADMIN && role != Role.ADMIN && account.getStatus() == AccountStatus.ACTIVE) {
+            AccountService.requireAnotherActiveAdmin(users, account);
+        }
         if (role != oldRole || storeChanged) {
             releaseAssignedTasks(account, request.releaseAssignedTasks(), now);
             if (role != oldRole) {

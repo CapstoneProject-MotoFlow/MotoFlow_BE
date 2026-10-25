@@ -120,6 +120,35 @@ class AuthApiIntegrationTest extends IntegrationTest {
         }
 
         @Test
+        void unknownUsernameLocksLikeARealOneSoLockMessagesRevealNothing() throws Exception {
+            for (int i = 0; i < 4; i++) {
+                login("ghost01", "Wrong2026pass").andExpect(jsonPath("$.code").value("MSG09"));
+            }
+            login("ghost01", "Wrong2026pass").andExpect(status().isLocked()).andExpect(jsonPath("$.code").value("MSG12"));
+            login("ghost01", "Wrong2026pass").andExpect(status().isLocked()).andExpect(jsonPath("$.code").value("MSG11"));
+
+            clock.advance(Duration.ofMinutes(10));
+            login("ghost01", "Wrong2026pass").andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG09"));
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log", Integer.class)).isZero();
+        }
+
+        @Test
+        void signInsAndTheTemporaryLockAreAudited() throws Exception {
+            UserAccount owner = createUser("owner", Role.OWNER, null, false);
+            login("owner", PASSWORD).andExpect(status().isOk());
+            for (int i = 0; i < 5; i++) {
+                login("owner", "Wrong2026pass");
+            }
+
+            assertThat(jdbc.queryForList("SELECT action FROM audit_log WHERE entity_type = 'USER_ACCOUNT' "
+                    + "AND entity_id = ? AND actor_id = ? ORDER BY id", String.class, owner.getId(), owner.getId()))
+                    .containsExactly("LOGIN_SUCCESS", "LOGIN_FAILED", "LOGIN_FAILED", "LOGIN_FAILED", "LOGIN_FAILED",
+                            "LOGIN_FAILED", "ACCOUNT_TEMP_LOCKED");
+            assertThat(jdbc.queryForObject("SELECT reason FROM audit_log ORDER BY id LIMIT 1", String.class))
+                    .startsWith("IP ");
+        }
+
+        @Test
         void aSuccessfulSignInRestartsTheFailedAttemptCount() throws Exception {
             createUser("owner", Role.OWNER, null, false);
             for (int i = 0; i < 4; i++) {
@@ -260,6 +289,41 @@ class AuthApiIntegrationTest extends IntegrationTest {
             mvc.perform(post("/api/auth/refresh").cookie(first))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
             mvc.perform(post("/api/auth/refresh").cookie(second)).andExpect(status().isOk());
+        }
+
+        @Test
+        void anOldTokenComingBackLaterEndsTheWholeSession() throws Exception {
+            UserAccount owner = createUser("owner", Role.OWNER, null, false);
+            MvcResult signIn = login("owner", PASSWORD).andReturn();
+            Cookie first = signIn.getResponse().getCookie(COOKIE);
+            Cookie second = mvc.perform(post("/api/auth/refresh").cookie(first))
+                    .andExpect(status().isOk()).andReturn().getResponse().getCookie(COOKIE);
+
+            clock.advance(Duration.ofSeconds(11));
+            mvc.perform(post("/api/auth/refresh").cookie(first))
+                    .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
+
+            // Neither the copy nor the rightful owner can go on with this session.
+            mvc.perform(post("/api/auth/refresh").cookie(second)).andExpect(status().isUnauthorized());
+            me(accessToken(signIn)).andExpect(status().isUnauthorized());
+            assertThat(jdbc.queryForObject("SELECT revoke_reason FROM auth_session WHERE user_id = ?", String.class,
+                    owner.getId())).isEqualTo("REFRESH_TOKEN_REUSED");
+            login("owner", PASSWORD).andExpect(status().isOk());
+        }
+
+        @Test
+        void refreshCannotKeepASessionAlivePastThirtyDays() throws Exception {
+            createUser("owner", Role.OWNER, null, false);
+            Cookie cookie = login("owner", PASSWORD).andReturn().getResponse().getCookie(COOKIE);
+            for (int day = 6; day <= 24; day += 6) {
+                clock.advance(Duration.ofDays(6));
+                cookie = mvc.perform(post("/api/auth/refresh").cookie(cookie))
+                        .andExpect(status().isOk()).andReturn().getResponse().getCookie(COOKIE);
+            }
+
+            clock.advance(Duration.ofDays(6)); // day 30
+            mvc.perform(post("/api/auth/refresh").cookie(cookie))
+                    .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
         }
 
         @Test

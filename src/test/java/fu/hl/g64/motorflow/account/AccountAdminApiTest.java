@@ -3,7 +3,12 @@ package fu.hl.g64.motorflow.account;
 import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
+import fu.hl.g64.motorflow.account.dto.UpdatePermissionsRequest;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
+import fu.hl.g64.motorflow.account.service.AccountService;
+import fu.hl.g64.motorflow.account.service.PermissionService;
+import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
 import fu.hl.g64.motorflow.support.IntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,8 +27,10 @@ import tools.jackson.databind.json.JsonMapper;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
@@ -47,6 +54,10 @@ class AccountAdminApiTest extends IntegrationTest {
     private PasswordEncoder passwordEncoder;
     @Autowired
     private JsonMapper jsonMapper;
+    @Autowired
+    private AccountService accountService;
+    @Autowired
+    private PermissionService permissionService;
 
     private UserAccount admin;
     private String adminToken;
@@ -198,7 +209,7 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.user.mustChangePassword").value(true));
 
             Map<String, Object> audit = jdbc.queryForMap("SELECT action, actor_id, reason FROM audit_log "
-                    + "WHERE entity_type = 'USER_ACCOUNT' AND entity_id = ?", staff.getId());
+                    + "WHERE entity_type = 'USER_ACCOUNT' AND entity_id = ? AND action = 'PASSWORD_RESET'", staff.getId());
             assertThat(audit).containsEntry("action", "PASSWORD_RESET")
                     .containsEntry("actor_id", admin.getId())
                     .containsEntry("reason", "Quên mật khẩu");
@@ -284,7 +295,7 @@ class AccountAdminApiTest extends IntegrationTest {
             login("staff01", PASSWORD).andExpect(status().isLocked()).andExpect(jsonPath("$.code").value("MSG10"));
             listAccounts("?state=LOCKED").andExpect(jsonPath("$[*].username", contains("staff01")));
             Map<String, Object> audit = jdbc.queryForMap("SELECT action, actor_id, reason FROM audit_log "
-                    + "WHERE entity_type = 'USER_ACCOUNT' AND entity_id = ?", staff.getId());
+                    + "WHERE entity_type = 'USER_ACCOUNT' AND entity_id = ? AND action = 'ACCOUNT_LOCKED'", staff.getId());
             assertThat(audit).containsEntry("action", "ACCOUNT_LOCKED")
                     .containsEntry("actor_id", admin.getId())
                     .containsEntry("reason", "Nghỉ việc");
@@ -357,6 +368,36 @@ class AccountAdminApiTest extends IntegrationTest {
                     .containsExactly("ROLE_CHANGED:BRANCH_MANAGER", "PERMISSION_GRANTED:CATALOG_EDIT",
                             "ROLE_CHANGED:STAFF", "PERMISSION_REVOKED:CATALOG_EDIT", "PERMISSION_REVOKED:RETAIL_PRICE_EDIT");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM user_permission", Long.class)).isZero();
+        }
+
+        @Test
+        void grantingAndRemovingTheAdminRoleIsKeptInTheHistory() throws Exception {
+            String body = createAccount(Map.of("username", "admin02", "fullName", "Admin hai", "role", "ADMIN"))
+                    .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+            long secondAdmin = ((Number) JsonPath.read(body, "$.account.id")).longValue();
+
+            updatePermissions(secondAdmin, Map.of("role", "OWNER")).andExpect(status().isOk());
+
+            assertThat(jdbc.queryForList("SELECT change_type || ':' || coalesce(old_value, '') || '>' || new_value "
+                    + "FROM permission_history WHERE user_id = ? ORDER BY id", String.class, secondAdmin))
+                    .containsExactly("ACCOUNT_CREATED:>ADMIN", "ROLE_CHANGED:ADMIN>OWNER");
+        }
+
+        @Test
+        void theLastActiveAdminCannotBeLockedOrDemoted() throws Exception {
+            // Reachable only when two Admins act on each other at once: the caller here is already locked.
+            UserAccount caller = createUser("admin02", Role.ADMIN, null);
+            caller.lockByAdmin(LocalDateTime.now(clock));
+            users.save(caller);
+            AuthenticatedUser lockedCaller = new AuthenticatedUser(caller.getId(), 0, "admin02", "Admin hai",
+                    Role.ADMIN, null, Set.of(), false);
+
+            assertThatThrownBy(() -> accountService.lockAccount(lockedCaller, admin.getId(), null))
+                    .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG69"));
+            assertThatThrownBy(() -> permissionService.updatePermissions(lockedCaller, admin.getId(),
+                    new UpdatePermissionsRequest(Role.OWNER, null, false, null, false)))
+                    .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG69"));
+            assertThat(users.findById(admin.getId()).orElseThrow().getRole()).isEqualTo(Role.ADMIN);
         }
 
         @Test

@@ -9,7 +9,7 @@ description: |-
 variables:
   baseUrl: http://localhost:8080
   adminUsername: admin
-  adminTempPassword: MfhgN22bPgMIKA7
+  adminTempPassword: MfhgN22b@PgMIKA7
   adminPassword: Motoflow@2026
   password: Motoflow@2026
   run: ""
