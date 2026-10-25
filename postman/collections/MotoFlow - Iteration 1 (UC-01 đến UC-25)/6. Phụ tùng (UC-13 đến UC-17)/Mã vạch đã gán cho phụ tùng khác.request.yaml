@@ -1,0 +1,31 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "sku": "bt-{{run}}-02",
+      "partName": "Bố thắng đĩa trước {{run}}",
+      "categoryId": {{catLeafId}},
+      "brand": "Nissin",
+      "countryOfOrigin": "Thái Lan",
+      "baseUnit": "Bộ",
+      "specifications": "Dùng cho phanh đĩa trước",
+      "barcodes": [
+        "893{{run}}01"
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã lỗi MSG54', () => pm.expect(pm.response.json().code).to.eql('MSG54'));
+    language: text/javascript
+order: 3000

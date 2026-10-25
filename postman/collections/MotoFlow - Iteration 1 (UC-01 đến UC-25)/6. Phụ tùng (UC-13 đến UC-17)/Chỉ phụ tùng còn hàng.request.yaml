@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products?q={{run}}&inStockOnly=true"
+method: GET
+queryParams:
+  q: "{{run}}"
+  inStockOnly: "true"
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test("Chưa nhập kho nên không có", () => pm.expect(pm.response.json().totalItems).to.eql(0));
+    language: text/javascript
+order: 16000

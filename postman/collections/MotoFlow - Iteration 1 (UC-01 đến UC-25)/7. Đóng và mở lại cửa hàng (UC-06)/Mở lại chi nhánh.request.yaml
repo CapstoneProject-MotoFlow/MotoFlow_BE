@@ -1,0 +1,27 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores/{{branchStoreId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "Chi nhánh {{run}}",
+      "address": "Đà Nẵng",
+      "phone": "",
+      "status": "ACTIVE",
+      "warehouseName": "Kho chi nhánh {{run}}",
+      "central": false
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));
+    language: text/javascript
+order: 6000

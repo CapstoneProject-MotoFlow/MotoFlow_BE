@@ -1,0 +1,43 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products/{{productId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "sku": "KHONG-DOI",
+      "partName": "Bố thắng đĩa trước {{run}} (sửa)",
+      "categoryId": {{catLeafId}},
+      "brand": "Nissin",
+      "countryOfOrigin": "Thái Lan",
+      "baseUnit": "Bộ",
+      "specifications": "Dùng cho phanh đĩa trước",
+      "oemCodes": [
+        "06455-{{run}}",
+        "06455-{{run}}-B"
+      ],
+      "barcodes": [],
+      "vehicleModelIds": [
+        {{vmId}}
+      ],
+      "imageUrls": []
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('SKU giữ nguyên, mã OEM và mã vạch được thay', () => {
+          pm.expect(b.sku).to.eql('BT-' + pm.collectionVariables.get('RUN') + '-01');
+          pm.expect(b.oemCodes.length).to.eql(2);
+          pm.expect(b.barcodes.length).to.eql(0);
+          pm.expect(b.imageUrls.length).to.eql(0);
+      });
+    language: text/javascript
+order: 22000

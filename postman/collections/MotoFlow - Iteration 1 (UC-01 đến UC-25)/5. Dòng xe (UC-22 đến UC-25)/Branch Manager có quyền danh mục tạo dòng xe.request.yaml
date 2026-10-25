@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/vehicle-models"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "manufacturer": "Honda",
+      "modelName": "Vision {{run}}",
+      "vehicleType": "MOTORCYCLE"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('vm2Id', pm.response.json().id);
+    language: text/javascript
+order: 4000

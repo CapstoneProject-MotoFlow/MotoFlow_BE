@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/accounts?q={{run}}"
+method: GET
+queryParams:
+  q: "{{run}}"
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test("4 tài khoản vừa tạo", () => pm.expect(pm.response.json().length).to.eql(4));
+    language: text/javascript
+order: 9000

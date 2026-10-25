@@ -1,0 +1,16 @@
+$kind: collection
+description: |-
+  Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng id và token request trước lưu vào biến collection.
+
+  - Mỗi lần chạy tạo hậu tố mới ({{run}}) nên chạy lại nhiều lần trên cùng DB được.
+  - DB mới: request đầu tự đổi mật khẩu tạm của Admin khởi tạo (adminTempPassword, profile dev) sang adminPassword. Nếu Admin của bạn đã đổi sang mật khẩu khác, sửa biến adminPassword.
+  - Chuỗi chỉ có một kho tổng: nếu DB đã có, request tạo kho tổng nhận 409 MSG50 và vẫn tính là đạt; collection dùng kho tổng sẵn có (không sửa gì nó).
+  - Dữ liệu thử được giữ lại trong DB (không có API xóa).
+variables:
+  baseUrl: http://localhost:8080
+  adminUsername: admin
+  adminTempPassword: MfhgN22bPgMIKA7
+  adminPassword: Motoflow@2026
+  password: Motoflow@2026
+  run: ""
+  RUN: ""

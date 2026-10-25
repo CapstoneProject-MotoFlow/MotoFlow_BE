@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "Kho tổng 2 {{run}}",
+      "address": "Huế",
+      "warehouseName": "Kho",
+      "central": true
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã lỗi MSG50', () => pm.expect(pm.response.json().code).to.eql('MSG50'));
+      pm.test('Báo tên cửa hàng đang có kho tổng', () => pm.expect(pm.response.json().message).to.eql('Chuỗi đã có kho tổng tại cửa hàng ' + pm.collectionVariables.get('centralStoreName') + '; mỗi chuỗi chỉ có một kho tổng.'));
+    language: text/javascript
+order: 5000

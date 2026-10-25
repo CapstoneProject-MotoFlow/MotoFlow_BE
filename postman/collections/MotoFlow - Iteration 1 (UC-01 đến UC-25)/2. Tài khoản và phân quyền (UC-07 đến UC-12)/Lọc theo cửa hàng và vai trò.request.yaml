@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/accounts?storeId={{branchStoreId}}&role=STAFF"
+method: GET
+queryParams:
+  storeId: "{{branchStoreId}}"
+  role: STAFF
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('Có Staff vừa tạo', () => pm.expect(pm.response.json().map(a => a.id)).to.include(Number(pm.collectionVariables.get('staffId'))));
+    language: text/javascript
+order: 10000

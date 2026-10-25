@@ -1,0 +1,33 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": " Chi nhánh {{run}} ",
+      "address": "Đà Nẵng",
+      "phone": "",
+      "warehouseName": "Kho chi nhánh {{run}}",
+      "central": false
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('branchStoreId', b.id);
+      pm.test('Tên bỏ khoảng trắng hai đầu, trạng thái PLANNED, có đúng một kho thường', () => {
+          pm.expect(b.storeName).to.eql('Chi nhánh ' + pm.collectionVariables.get('run'));
+          pm.expect(b.status).to.eql('PLANNED');
+          pm.expect(b.warehouse.central).to.eql(false);
+          pm.expect(b.productsInStock).to.eql(0);
+      });
+    language: text/javascript
+order: 3000

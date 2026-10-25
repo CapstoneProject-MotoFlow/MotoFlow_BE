@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/part-categories?vehicleType=MOTORCYCLE"
+method: GET
+queryParams:
+  vehicleType: MOTORCYCLE
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const parent = pm.response.json().find(c => c.id === Number(pm.collectionVariables.get('catParentId')));
+      pm.test('Nhóm cha có nhóm con', () => pm.expect(parent.children.map(c => c.id)).to.include(Number(pm.collectionVariables.get('catLeafId'))));
+    language: text/javascript
+order: 8000

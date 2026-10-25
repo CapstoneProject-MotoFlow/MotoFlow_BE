@@ -1,0 +1,28 @@
+$kind: http-request
+url: "{{baseUrl}}/api/accounts/{{staffId}}/reset-password"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "reason": "Quên mật khẩu"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const t = pm.response.json().temporaryPassword;
+      pm.test('Mật khẩu tạm mới, khác mật khẩu cũ', () => {
+          pm.expect(t).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);
+          pm.expect(t).to.not.eql(pm.collectionVariables.get('staffTemp'));
+      });
+      pm.collectionVariables.set('staffOldTemp', pm.collectionVariables.get('staffTemp'));
+      pm.collectionVariables.set('staffTemp', t);
+    language: text/javascript
+order: 18000

@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products/{{productId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('ACTIVE, không còn ngày ngừng', () => {
+          pm.expect(pm.response.json().status).to.eql('ACTIVE');
+          pm.expect(pm.response.json().discontinuedAt).to.eql(null);
+      });
+    language: text/javascript
+order: 27000

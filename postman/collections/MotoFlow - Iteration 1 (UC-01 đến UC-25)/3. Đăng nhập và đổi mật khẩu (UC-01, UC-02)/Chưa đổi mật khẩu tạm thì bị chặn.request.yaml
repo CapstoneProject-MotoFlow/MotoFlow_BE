@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 403', () => pm.response.to.have.status(403));
+      pm.test('Mã lỗi MSG13', () => pm.expect(pm.response.json().code).to.eql('MSG13'));
+    language: text/javascript
+order: 2000

@@ -1,0 +1,3 @@
+$kind: collection
+description: MSG66 (còn tồn kho) chưa thử được qua API vì chưa có API nhập kho; xem StoreApiTest.
+order: 8000

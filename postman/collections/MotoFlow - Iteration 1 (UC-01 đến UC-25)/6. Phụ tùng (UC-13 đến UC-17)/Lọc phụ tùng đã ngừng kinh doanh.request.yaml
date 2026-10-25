@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products?q={{run}}&status=DISCONTINUED"
+method: GET
+queryParams:
+  q: "{{run}}"
+  status: DISCONTINUED
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test("1 phụ tùng ngừng kinh doanh", () => pm.expect(pm.response.json().totalItems).to.eql(1));
+    language: text/javascript
+order: 25000

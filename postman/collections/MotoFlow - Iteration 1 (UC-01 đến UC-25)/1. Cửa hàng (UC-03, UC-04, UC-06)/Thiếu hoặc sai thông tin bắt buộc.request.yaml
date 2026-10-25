@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "",
+      "central": false
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));
+      pm.test('Liệt kê từng trường lỗi', () => pm.expect(pm.response.json().fieldErrors).to.have.keys('storeName', 'address', 'warehouseName'));
+    language: text/javascript
+order: 6000

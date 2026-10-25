@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "staff.{{run}}",
+      "password": "{{staffTemp}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 423', () => pm.response.to.have.status(423));
+      pm.test('Mã lỗi MSG10', () => pm.expect(pm.response.json().code).to.eql('MSG10'));
+    language: text/javascript
+order: 16000

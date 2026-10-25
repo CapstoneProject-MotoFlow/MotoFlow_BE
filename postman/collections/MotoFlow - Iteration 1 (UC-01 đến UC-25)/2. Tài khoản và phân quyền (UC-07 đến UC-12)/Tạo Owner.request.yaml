@@ -1,0 +1,32 @@
+$kind: http-request
+url: "{{baseUrl}}/api/accounts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "owner.{{run}}",
+      "fullName": "Test owner.{{run}}",
+      "role": "OWNER"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('ownerId', b.account.id);
+      pm.collectionVariables.set('ownerTemp', b.temporaryPassword);
+      pm.test('Hệ thống sinh mật khẩu tạm 12 ký tự, phải đổi khi đăng nhập', () => {
+          pm.expect(b.temporaryPassword).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);
+          pm.expect(b.account.mustChangePassword).to.eql(true);
+      });
+      pm.test('Owner không gán cửa hàng', () => pm.expect(b.account.storeId).to.eql(null));
+      pm.test('Không lưu cache', () => pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store'));
+    language: text/javascript
+order: 1000

@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products?q=06455-{{run}}"
+method: GET
+queryParams:
+  q: 06455-{{run}}
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const page = pm.response.json();
+      pm.test("1 kết quả", () => pm.expect(page.totalItems).to.eql(1));
+      pm.test('Đúng phụ tùng, tồn 0, chưa có giá', () => {
+          pm.expect(page.items[0].id).to.eql(Number(pm.collectionVariables.get('productId')));
+          pm.expect(page.items[0].availableQty).to.eql(0);
+          pm.expect(page.items[0].retailPrice).to.eql(null);
+      });
+    language: text/javascript
+order: 12000

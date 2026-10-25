@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/accounts/{{staffId}}/permissions"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "role": "STAFF",
+      "storeId": {{branchStoreId}},
+      "catalogEdit": true
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      pm.test('Mã lỗi MSG17', () => pm.expect(pm.response.json().code).to.eql('MSG17'));
+    language: text/javascript
+order: 12000

@@ -1,0 +1,28 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores/{{branchStoreId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "Chi nhánh {{run}}",
+      "address": "Đà Nẵng",
+      "phone": "",
+      "status": "INACTIVE",
+      "warehouseName": "Kho chi nhánh {{run}}",
+      "central": false
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã lỗi MSG67', () => pm.expect(pm.response.json().code).to.eql('MSG67'));
+      pm.test('Báo 2 tài khoản (Branch Manager và Staff)', () => pm.expect(pm.response.json().message).to.include('còn 2 tài khoản'));
+    language: text/javascript
+order: 1000

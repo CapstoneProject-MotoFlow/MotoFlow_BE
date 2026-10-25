@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products?vehicleModelId={{vmId}}"
+method: GET
+queryParams:
+  vehicleModelId: "{{vmId}}"
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test("Chỉ phụ tùng lắp được Air Blade", () => pm.expect(pm.response.json().totalItems).to.eql(1));
+    language: text/javascript
+order: 14000

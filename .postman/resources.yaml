@@ -1,0 +1,13 @@
+# Use this workspace to collaborate
+workspace:
+  id: cb0bd9b4-9471-45c8-8f79-7bb665e98f10
+
+cloudResources:
+  collections:
+    ../postman/collections/MotoFlow - Iteration 1 (UC-01 đến UC-25): 26d18814-d9aa-4cf6-bb3d-8b5d66c2e416
+
+# All resources in the `postman/` folder are automatically registered in Local View.
+# Point to additional files outside the `postman/` folder to register them individually. Example:
+#localResources:
+#  collections:
+#    - ../tests/E2E Test Collection/

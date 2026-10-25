@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/part-categories"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryName": "Phanh {{run}}",
+      "vehicleType": "MOTORCYCLE",
+      "description": "Nhóm thử"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('catParentId', pm.response.json().id);
+    language: text/javascript
+order: 1000

@@ -1,0 +1,35 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "sku": "bt-{{run}}-02",
+      "partName": "Bố thắng đĩa trước {{run}}",
+      "categoryId": {{catLeafId}},
+      "brand": "Nissin",
+      "countryOfOrigin": "Thái Lan",
+      "baseUnit": "Bộ",
+      "specifications": "Dùng cho phanh đĩa trước",
+      "imageUrls": [
+        "https://img.example/1.jpg",
+        "https://img.example/2.jpg",
+        "https://img.example/3.jpg",
+        "https://img.example/4.jpg"
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));
+      pm.test('Lỗi ở imageUrls', () => pm.expect(pm.response.json().fieldErrors).to.have.property('imageUrls'));
+    language: text/javascript
+order: 7000

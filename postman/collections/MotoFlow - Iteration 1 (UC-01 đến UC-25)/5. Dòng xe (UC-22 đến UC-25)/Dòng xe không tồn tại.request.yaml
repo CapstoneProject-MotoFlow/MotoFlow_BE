@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/vehicle-models/999999999"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "manufacturer": "Honda",
+      "modelName": "Không có",
+      "vehicleType": "MOTORCYCLE"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 404', () => pm.response.to.have.status(404));
+      pm.test('Mã lỗi MSG63', () => pm.expect(pm.response.json().code).to.eql('MSG63'));
+    language: text/javascript
+order: 9000
