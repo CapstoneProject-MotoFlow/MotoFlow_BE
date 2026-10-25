@@ -42,6 +42,12 @@ public class VehicleModelController {
         return vehicleModelService.list(q, vehicleType, status);
     }
 
+    @Operation(summary = "One vehicle model")
+    @GetMapping("/{id}")
+    public VehicleModelResponse detail(@PathVariable long id) {
+        return vehicleModelService.get(id);
+    }
+
     @Operation(summary = "Create a vehicle model (UC-23)")
     @PostMapping
     @PreAuthorize(CatalogAccess.EDIT)

@@ -83,6 +83,17 @@ public class AccountService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public AccountResponse getAccount(long accountId) {
+        UserAccount account = users.findById(accountId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
+        String storeName = account.getStoreId() == null ? null
+                : stores.findById(account.getStoreId()).map(Store::getStoreName).orElse(null);
+        Set<PermissionCode> codes = userPermissions.findByUserId(accountId).stream().map(UserPermission::getPermissionCode)
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(PermissionCode.class)));
+        return AccountResponse.from(account, storeName, codes, LocalDateTime.now(clock));
+    }
+
     @Transactional
     public CreatedAccountResponse createAccount(AuthenticatedUser admin, CreateAccountRequest request) {
         String username = UserAccount.normalizeUsername(request.username());

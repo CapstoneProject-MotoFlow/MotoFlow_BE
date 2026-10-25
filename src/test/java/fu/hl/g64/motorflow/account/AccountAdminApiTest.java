@@ -34,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -73,6 +74,21 @@ class AccountAdminApiTest extends IntegrationTest {
 
     @Nested
     class CreateAccount {
+
+        @Test
+        void theLocationOfANewAccountShowsItAndAnUnknownIdGivesMsg48() throws Exception {
+            String location = createAccount(Map.of("username", "staff01", "fullName", "Nguyễn Văn A",
+                    "role", "STAFF", "storeId", storeId))
+                    .andExpect(status().isCreated()).andReturn().getResponse().getHeader(HttpHeaders.LOCATION);
+
+            mvc.perform(get(location).header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.username").value("staff01"))
+                    .andExpect(jsonPath("$.storeName").value("Cửa hàng CH01"))
+                    .andExpect(jsonPath("$.permissions", hasSize(0)));
+            mvc.perform(get("/api/accounts/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG48"));
+        }
 
         @Test
         void newEmployeeMustChangeTheGeneratedPasswordAtFirstSignIn() throws Exception {
@@ -276,6 +292,42 @@ class AccountAdminApiTest extends IntegrationTest {
             createUser("owner", Role.OWNER, null);
             mvc.perform(get("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + signIn("owner", PASSWORD)))
                     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        }
+    }
+
+    /** Errors raised by Spring itself use the same body and MSG codes as the rest of the API. */
+    @Nested
+    class ErrorBodies {
+
+        @Test
+        void unknownUrlAndWrongMethodGiveMsg70AndMsg71() throws Exception {
+            mvc.perform(get("/api/no-such-thing").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                    .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG70"))
+                    .andExpect(jsonPath("$.message").value("Không tìm thấy chức năng được yêu cầu."));
+            mvc.perform(delete("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                    .andExpect(status().isMethodNotAllowed()).andExpect(jsonPath("$.code").value("MSG71"))
+                    .andExpect(jsonPath("$.message").value("Chức năng này không hỗ trợ phương thức DELETE."));
+        }
+
+        @Test
+        void unsupportedBodyTypeAndBrokenJsonGiveMsg02() throws Exception {
+            mvc.perform(post("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                            .contentType(MediaType.TEXT_PLAIN).content("staff01"))
+                    .andExpect(status().isUnsupportedMediaType()).andExpect(jsonPath("$.code").value("MSG02"));
+            mvc.perform(post("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+                            .contentType(MediaType.APPLICATION_JSON).content("{\"username\":"))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"))
+                    .andExpect(jsonPath("$.fieldErrors").doesNotExist());
+        }
+
+        @Test
+        void wrongValuesNameTheirField() throws Exception {
+            createAccount(Map.of("username", "staff01", "fullName", "A", "role", "KING"))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"))
+                    .andExpect(jsonPath("$.fieldErrors.role").value("Giá trị không hợp lệ."));
+            listAccounts("?role=KING")
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"))
+                    .andExpect(jsonPath("$.fieldErrors.role").value("Giá trị không hợp lệ."));
         }
     }
 

@@ -51,6 +51,12 @@ public class AccountController {
         return accountService.listAccounts(q, role, storeId, state);
     }
 
+    @Operation(summary = "One account with its store and permissions")
+    @GetMapping("/{id}")
+    public AccountResponse detail(@PathVariable long id) {
+        return accountService.getAccount(id);
+    }
+
     @Operation(summary = "Create an account; the generated temporary password is returned only here (UC-08)")
     @PostMapping
     public ResponseEntity<CreatedAccountResponse> create(@AuthenticationPrincipal AuthenticatedUser admin,

@@ -40,6 +40,12 @@ public class PartCategoryController {
         return categoryService.tree(vehicleType);
     }
 
+    @Operation(summary = "One category with its sub-categories")
+    @GetMapping("/{id}")
+    public PartCategoryResponse detail(@PathVariable long id) {
+        return categoryService.get(id);
+    }
+
     @Operation(summary = "Create a category, optionally under a parent of the same vehicle type (UC-19)")
     @PostMapping
     @PreAuthorize(CatalogAccess.EDIT)
