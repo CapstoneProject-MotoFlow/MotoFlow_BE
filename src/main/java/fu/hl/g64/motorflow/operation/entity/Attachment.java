@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/** Photo or document attached to a business record as evidence (NFR External Interfaces, NFR-S05). */
+/** Photo or document attached to a business record as evidence (NFR External Interfaces, NFR-S07). */
 @Entity
 @Table(name = "attachment")
 @Getter

@@ -27,9 +27,6 @@ public class ReplenishmentRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "request_code", nullable = false, unique = true, length = 30)
-    private String requestCode;
-
     @Column(name = "requesting_store_id", nullable = false)
     private Long requestingStoreId;
 

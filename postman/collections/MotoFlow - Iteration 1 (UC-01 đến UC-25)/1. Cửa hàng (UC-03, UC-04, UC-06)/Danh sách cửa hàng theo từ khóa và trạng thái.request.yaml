@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores?q={{run}}&status=ACTIVE"
+method: GET
+queryParams:
+  q: "{{run}}"
+  status: ACTIVE
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const list = pm.response.json();
+      pm.test('Có chi nhánh vừa mở, chỉ cửa hàng ACTIVE', () => {
+          pm.expect(list.map(s => s.id)).to.include(Number(pm.collectionVariables.get('branchStoreId')));
+          list.forEach(s => pm.expect(s.status).to.eql('ACTIVE'));
+      });
+    language: text/javascript
+order: 11000

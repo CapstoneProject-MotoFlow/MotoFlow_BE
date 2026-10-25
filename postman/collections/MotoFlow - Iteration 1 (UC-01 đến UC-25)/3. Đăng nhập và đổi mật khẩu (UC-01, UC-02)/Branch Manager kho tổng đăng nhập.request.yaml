@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "bmc.{{run}}",
+      "password": "{{bmcTemp}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.collectionVariables.set('bmcToken', b.accessToken);
+      pm.test('mustChangePassword = true', () => pm.expect(b.user.mustChangePassword).to.eql(true));
+    language: text/javascript
+order: 9000

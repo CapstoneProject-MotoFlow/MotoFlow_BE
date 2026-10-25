@@ -1,0 +1,50 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "sku": " bt-{{run}}-01 ",
+      "partName": "Bố thắng đĩa trước {{run}}",
+      "categoryId": {{catLeafId}},
+      "brand": "Nissin",
+      "countryOfOrigin": "Thái Lan",
+      "baseUnit": "Bộ",
+      "specifications": "Dùng cho phanh đĩa trước",
+      "oemCodes": [
+        "06455-{{run}}"
+      ],
+      "barcodes": [
+        "893{{run}}01"
+      ],
+      "vehicleModelIds": [
+        {{vmId}}
+      ],
+      "imageUrls": [
+        "https://res.cloudinary.com/demo/image/upload/sample.jpg"
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('productId', b.id);
+      pm.test('SKU viết hoa, đủ mã OEM, mã vạch, dòng xe, ảnh; chưa có tồn kho', () => {
+          pm.expect(b.sku).to.eql('BT-' + pm.collectionVariables.get('RUN') + '-01');
+          pm.expect(b.status).to.eql('ACTIVE');
+          pm.expect(b.oemCodes).to.eql(['06455-' + pm.collectionVariables.get('run')]);
+          pm.expect(b.barcodes.length).to.eql(1);
+          pm.expect(b.vehicleModels[0].id).to.eql(Number(pm.collectionVariables.get('vmId')));
+          pm.expect(b.imageUrls.length).to.eql(1);
+          pm.expect(b.stock).to.eql(null);
+      });
+    language: text/javascript
+order: 1000

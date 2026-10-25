@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/part-categories"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryName": "Phanh đĩa {{run}}",
+      "vehicleType": "MOTORCYCLE",
+      "parentId": {{catParentId}}
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('catLeafId', pm.response.json().id);
+      pm.test('Nằm dưới nhóm cha', () => pm.expect(pm.response.json().parentId).to.eql(Number(pm.collectionVariables.get('catParentId'))));
+    language: text/javascript
+order: 2000

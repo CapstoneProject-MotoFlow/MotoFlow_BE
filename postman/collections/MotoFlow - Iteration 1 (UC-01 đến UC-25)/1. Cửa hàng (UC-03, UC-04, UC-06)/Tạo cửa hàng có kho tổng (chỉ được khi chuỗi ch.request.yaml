@@ -1,0 +1,29 @@
+$kind: http-request
+name: Tạo cửa hàng có kho tổng (chỉ được khi chuỗi chưa có kho tổng)
+url: "{{baseUrl}}/api/stores"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "Kho tổng {{run}}",
+      "address": "Hà Nội",
+      "phone": "0241234567",
+      "warehouseName": "Kho tổng {{run}}",
+      "central": true
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('201, hoặc 409 MSG50 nếu chuỗi đã có kho tổng', () => {
+          if (pm.response.code === 409) pm.expect(pm.response.json().code).to.eql('MSG50');
+          else pm.response.to.have.status(201);
+      });
+    language: text/javascript
+order: 1000

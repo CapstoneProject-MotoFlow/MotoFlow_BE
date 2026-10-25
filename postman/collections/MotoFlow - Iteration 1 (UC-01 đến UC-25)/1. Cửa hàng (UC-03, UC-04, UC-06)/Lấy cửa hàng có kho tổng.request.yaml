@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores?central=true"
+method: GET
+queryParams:
+  central: "true"
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const list = pm.response.json();
+      pm.test('Chuỗi có đúng một kho tổng', () => pm.expect(list.length).to.eql(1));
+      const s = list[0];
+      pm.collectionVariables.set('centralStoreId', s.id);
+      pm.collectionVariables.set('centralStoreName', s.storeName);
+      pm.collectionVariables.set('centralAddress', s.address);
+      pm.collectionVariables.set('centralPhone', s.phone || '');
+      pm.collectionVariables.set('centralWarehouseName', s.warehouse.name);
+      pm.collectionVariables.set('centralStatus', s.status);
+    language: text/javascript
+order: 2000

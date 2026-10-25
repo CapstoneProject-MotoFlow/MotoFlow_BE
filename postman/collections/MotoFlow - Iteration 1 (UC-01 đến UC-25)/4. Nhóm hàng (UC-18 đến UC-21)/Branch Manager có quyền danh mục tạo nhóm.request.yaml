@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/part-categories"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryName": "Nhông xích {{run}}",
+      "vehicleType": "MOTORCYCLE"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('catChainId', pm.response.json().id);
+    language: text/javascript
+order: 5000

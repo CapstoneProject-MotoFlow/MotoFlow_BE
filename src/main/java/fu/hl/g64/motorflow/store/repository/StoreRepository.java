@@ -5,5 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface StoreRepository extends JpaRepository<Store, Long> {
 
-    boolean existsByStoreCode(String storeCode);
+    boolean existsByStoreNameIgnoreCase(String storeName);
+
+    boolean existsByStoreNameIgnoreCaseAndIdNot(String storeName, Long id);
 }

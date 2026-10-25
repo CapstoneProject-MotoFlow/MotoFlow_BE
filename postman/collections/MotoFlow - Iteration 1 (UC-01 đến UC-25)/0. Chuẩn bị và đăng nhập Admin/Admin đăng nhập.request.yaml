@@ -1,0 +1,55 @@
+$kind: http-request
+url: "{{baseUrl}}/api/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "{{adminUsername}}",
+      "password": "{{adminPassword}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: beforeRequest
+    code: |-
+      // Each run uses a new suffix so store codes, usernames and SKUs never clash with earlier runs.
+      pm.collectionVariables.set('run', Date.now().toString(36).slice(-6));
+      pm.collectionVariables.set('RUN', pm.collectionVariables.get('run').toUpperCase());
+
+      // Fresh database: the bootstrap Admin still has its temporary password, so change it to {{adminPassword}} first.
+      const base = pm.collectionVariables.get('baseUrl');
+      const username = pm.collectionVariables.get('adminUsername');
+      const adminPassword = pm.collectionVariables.get('adminPassword');
+      const tempPassword = pm.collectionVariables.get('adminTempPassword');
+      const login = password => ({
+          url: base + '/api/auth/login', method: 'POST',
+          header: { 'Content-Type': 'application/json' },
+          body: { mode: 'raw', raw: JSON.stringify({ username, password }) }
+      });
+      pm.sendRequest(login(adminPassword), (err, res) => {
+          if (!err && res.code === 200) return;
+          pm.sendRequest(login(tempPassword), (err2, res2) => {
+              if (err2 || res2.code !== 200) return; // The login request below fails and shows why.
+              pm.sendRequest({
+                  url: base + '/api/auth/change-password', method: 'POST',
+                  header: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + res2.json().accessToken },
+                  body: { mode: 'raw', raw: JSON.stringify({ currentPassword: tempPassword, newPassword: adminPassword }) }
+              }, () => {});
+          });
+      });
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.collectionVariables.set('adminToken', b.accessToken);
+      pm.collectionVariables.set('adminId', b.user.id);
+      pm.test('Vai trò ADMIN, đã đổi mật khẩu tạm', () => {
+          pm.expect(b.user.role).to.eql('ADMIN');
+          pm.expect(b.user.mustChangePassword).to.eql(false);
+      });
+    language: text/javascript
+order: 1000

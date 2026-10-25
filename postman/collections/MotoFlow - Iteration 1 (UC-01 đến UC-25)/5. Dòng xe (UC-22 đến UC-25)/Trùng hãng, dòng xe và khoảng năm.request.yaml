@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/vehicle-models"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "manufacturer": "HONDA",
+      "modelName": "air blade {{run}}",
+      "vehicleType": "MOTORCYCLE",
+      "yearFrom": 2020,
+      "yearTo": 2024
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã lỗi MSG62', () => pm.expect(pm.response.json().code).to.eql('MSG62'));
+    language: text/javascript
+order: 2000

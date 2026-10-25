@@ -1,0 +1,4382 @@
+{
+  "info": {
+    "name": "MotoFlow - Iteration 1 (UC-01 đến UC-25)",
+    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng id và token request trước lưu vào biến collection.\n\n- Mỗi lần chạy tạo hậu tố mới ({{run}}) nên chạy lại nhiều lần trên cùng DB được.\n- DB mới: request đầu tự đổi mật khẩu tạm của Admin khởi tạo (adminTempPassword, profile dev) sang adminPassword. Nếu Admin của bạn đã đổi sang mật khẩu khác, sửa biến adminPassword.\n- Chuỗi chỉ có một kho tổng: nếu DB đã có, request tạo kho tổng nhận 409 MSG50 và vẫn tính là đạt; collection dùng kho tổng sẵn có (không sửa gì nó).\n- Dữ liệu thử được giữ lại trong DB (không có API xóa).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Chuẩn bị và đăng nhập Admin",
+      "item": [
+        {
+          "name": "Admin đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{adminPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Each run uses a new suffix so store codes, usernames and SKUs never clash with earlier runs.",
+                  "pm.collectionVariables.set('run', Date.now().toString(36).slice(-6));",
+                  "pm.collectionVariables.set('RUN', pm.collectionVariables.get('run').toUpperCase());",
+                  "",
+                  "// Fresh database: the bootstrap Admin still has its temporary password, so change it to {{adminPassword}} first.",
+                  "const base = pm.collectionVariables.get('baseUrl');",
+                  "const username = pm.collectionVariables.get('adminUsername');",
+                  "const adminPassword = pm.collectionVariables.get('adminPassword');",
+                  "const tempPassword = pm.collectionVariables.get('adminTempPassword');",
+                  "const login = password => ({",
+                  "    url: base + '/api/auth/login', method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: { mode: 'raw', raw: JSON.stringify({ username, password }) }",
+                  "});",
+                  "pm.sendRequest(login(adminPassword), (err, res) => {",
+                  "    if (!err && res.code === 200) return;",
+                  "    pm.sendRequest(login(tempPassword), (err2, res2) => {",
+                  "        if (err2 || res2.code !== 200) return; // The login request below fails and shows why.",
+                  "        pm.sendRequest({",
+                  "            url: base + '/api/auth/change-password', method: 'POST',",
+                  "            header: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + res2.json().accessToken },",
+                  "            body: { mode: 'raw', raw: JSON.stringify({ currentPassword: tempPassword, newPassword: adminPassword }) }",
+                  "        }, () => {});",
+                  "    });",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('adminToken', b.accessToken);",
+                  "pm.collectionVariables.set('adminId', b.user.id);",
+                  "pm.test('Vai trò ADMIN, đã đổi mật khẩu tạm', () => {",
+                  "    pm.expect(b.user.role).to.eql('ADMIN');",
+                  "    pm.expect(b.user.mustChangePassword).to.eql(false);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sai tên đăng nhập hoặc mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"khongco.{{run}}\",\n  \"password\": \"Sai12345\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Mã lỗi MSG09', () => pm.expect(pm.response.json().code).to.eql('MSG09'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thiếu tên đăng nhập hoặc mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"\",\n  \"password\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG08', () => pm.expect(pm.response.json().code).to.eql('MSG08'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thông tin tài khoản đang đăng nhập",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Đúng Admin', () => pm.expect(pm.response.json().role).to.eql('ADMIN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gọi API không có token",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/stores",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Cửa hàng (UC-03, UC-04, UC-06)",
+      "item": [
+        {
+          "name": "Tạo cửa hàng có kho tổng (chỉ được khi chuỗi chưa có kho tổng)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Kho tổng {{run}}\",\n  \"address\": \"Hà Nội\",\n  \"phone\": \"0241234567\",\n  \"warehouseName\": \"Kho tổng {{run}}\",\n  \"central\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201, hoặc 409 MSG50 nếu chuỗi đã có kho tổng', () => {",
+                  "    if (pm.response.code === 409) pm.expect(pm.response.json().code).to.eql('MSG50');",
+                  "    else pm.response.to.have.status(201);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lấy cửa hàng có kho tổng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/stores?central=true",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "pm.test('Chuỗi có đúng một kho tổng', () => pm.expect(list.length).to.eql(1));",
+                  "const s = list[0];",
+                  "pm.collectionVariables.set('centralStoreId', s.id);",
+                  "pm.collectionVariables.set('centralStoreName', s.storeName);",
+                  "pm.collectionVariables.set('centralAddress', s.address);",
+                  "pm.collectionVariables.set('centralPhone', s.phone || '');",
+                  "pm.collectionVariables.set('centralWarehouseName', s.warehouse.name);",
+                  "pm.collectionVariables.set('centralStatus', s.status);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo chi nhánh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \" Chi nhánh {{run}} \",\n  \"address\": \"Đà Nẵng\",\n  \"phone\": \"\",\n  \"warehouseName\": \"Kho chi nhánh {{run}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('branchStoreId', b.id);",
+                  "pm.test('Tên bỏ khoảng trắng hai đầu, trạng thái PLANNED, có đúng một kho thường', () => {",
+                  "    pm.expect(b.storeName).to.eql('Chi nhánh ' + pm.collectionVariables.get('run'));",
+                  "    pm.expect(b.status).to.eql('PLANNED');",
+                  "    pm.expect(b.warehouse.central).to.eql(false);",
+                  "    pm.expect(b.productsInStock).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trùng tên cửa hàng (không phân biệt hoa thường)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"chi nhánh {{RUN}}\",\n  \"address\": \"Huế\",\n  \"warehouseName\": \"Kho\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG49', () => pm.expect(pm.response.json().code).to.eql('MSG49'));",
+                  "pm.test('Báo tên đã dùng', () => pm.expect(pm.response.json().message).to.eql('Tên cửa hàng chi nhánh ' + pm.collectionVariables.get('RUN') + ' đã được sử dụng.'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thêm kho tổng thứ hai",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Kho tổng 2 {{run}}\",\n  \"address\": \"Huế\",\n  \"warehouseName\": \"Kho\",\n  \"central\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG50', () => pm.expect(pm.response.json().code).to.eql('MSG50'));",
+                  "pm.test('Báo tên cửa hàng đang có kho tổng', () => pm.expect(pm.response.json().message).to.eql('Chuỗi đã có kho tổng tại cửa hàng ' + pm.collectionVariables.get('centralStoreName') + '; mỗi chuỗi chỉ có một kho tổng.'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thiếu hoặc sai thông tin bắt buộc",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));",
+                  "pm.test('Liệt kê từng trường lỗi', () => pm.expect(pm.response.json().fieldErrors).to.have.keys('storeName', 'address', 'warehouseName'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mở chi nhánh (PLANNED -> ACTIVE)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Chi nhánh {{run}}\",\n  \"address\": \"Đà Nẵng\",\n  \"phone\": \"\",\n  \"status\": \"ACTIVE\",\n  \"warehouseName\": \"Kho chi nhánh {{run}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Trạng thái ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không quay lại PLANNED",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Chi nhánh {{run}}\",\n  \"address\": \"Đà Nẵng\",\n  \"phone\": \"\",\n  \"status\": \"PLANNED\",\n  \"warehouseName\": \"Kho chi nhánh {{run}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG68', () => pm.expect(pm.response.json().code).to.eql('MSG68'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không đóng cửa hàng có kho tổng",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/{{centralStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"{{centralStoreName}}\",\n  \"address\": \"{{centralAddress}}\",\n  \"phone\": \"{{centralPhone}}\",\n  \"status\": \"INACTIVE\",\n  \"warehouseName\": \"{{centralWarehouseName}}\",\n  \"central\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG65', () => pm.expect(pm.response.json().code).to.eql('MSG65'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không bỏ kho tổng",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/{{centralStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"{{centralStoreName}}\",\n  \"address\": \"{{centralAddress}}\",\n  \"phone\": \"{{centralPhone}}\",\n  \"status\": \"{{centralStatus}}\",\n  \"warehouseName\": \"{{centralWarehouseName}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG51', () => pm.expect(pm.response.json().code).to.eql('MSG51'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Danh sách cửa hàng theo từ khóa và trạng thái",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/stores?q={{run}}&status=ACTIVE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "pm.test('Có chi nhánh vừa mở, chỉ cửa hàng ACTIVE', () => {",
+                  "    pm.expect(list.map(s => s.id)).to.include(Number(pm.collectionVariables.get('branchStoreId')));",
+                  "    list.forEach(s => pm.expect(s.status).to.eql('ACTIVE'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trạng thái lọc sai định dạng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/stores?status=OPEN",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sửa cửa hàng không tồn tại",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/999999999",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Chi nhánh {{run}}\",\n  \"address\": \"Đà Nẵng\",\n  \"phone\": \"\",\n  \"status\": \"ACTIVE\",\n  \"warehouseName\": \"Kho chi nhánh {{run}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG52', () => pm.expect(pm.response.json().code).to.eql('MSG52'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Tài khoản và phân quyền (UC-07 đến UC-12)",
+      "item": [
+        {
+          "name": "Tạo Owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"owner.{{run}}\",\n  \"fullName\": \"Test owner.{{run}}\",\n  \"role\": \"OWNER\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('ownerId', b.account.id);",
+                  "pm.collectionVariables.set('ownerTemp', b.temporaryPassword);",
+                  "pm.test('Hệ thống sinh mật khẩu tạm 12 ký tự, phải đổi khi đăng nhập', () => {",
+                  "    pm.expect(b.temporaryPassword).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);",
+                  "    pm.expect(b.account.mustChangePassword).to.eql(true);",
+                  "});",
+                  "pm.test('Owner không gán cửa hàng', () => pm.expect(b.account.storeId).to.eql(null));",
+                  "pm.test('Không lưu cache', () => pm.expect(pm.response.headers.get('Cache-Control')).to.include('no-store'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner không được gán cửa hàng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"owner2.{{run}}\",\n  \"fullName\": \"Test owner2.{{run}}\",\n  \"role\": \"OWNER\",\n  \"storeId\": {{branchStoreId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG16', () => pm.expect(pm.response.json().code).to.eql('MSG16'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo Branch Manager chi nhánh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"bm.{{run}}\",\n  \"fullName\": \"Test bm.{{run}}\",\n  \"role\": \"BRANCH_MANAGER\",\n  \"storeId\": {{branchStoreId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('bmId', b.account.id);",
+                  "pm.collectionVariables.set('bmTemp', b.temporaryPassword);",
+                  "pm.test('Hệ thống sinh mật khẩu tạm 12 ký tự, phải đổi khi đăng nhập', () => {",
+                  "    pm.expect(b.temporaryPassword).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);",
+                  "    pm.expect(b.account.mustChangePassword).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo Branch Manager kho tổng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"bmc.{{run}}\",\n  \"fullName\": \"Test bmc.{{run}}\",\n  \"role\": \"BRANCH_MANAGER\",\n  \"storeId\": {{centralStoreId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('bmcId', b.account.id);",
+                  "pm.collectionVariables.set('bmcTemp', b.temporaryPassword);",
+                  "pm.test('Hệ thống sinh mật khẩu tạm 12 ký tự, phải đổi khi đăng nhập', () => {",
+                  "    pm.expect(b.temporaryPassword).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);",
+                  "    pm.expect(b.account.mustChangePassword).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo Staff chi nhánh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"staff.{{run}}\",\n  \"fullName\": \"Test staff.{{run}}\",\n  \"role\": \"STAFF\",\n  \"storeId\": {{branchStoreId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('staffId', b.account.id);",
+                  "pm.collectionVariables.set('staffTemp', b.temporaryPassword);",
+                  "pm.test('Hệ thống sinh mật khẩu tạm 12 ký tự, phải đổi khi đăng nhập', () => {",
+                  "    pm.expect(b.temporaryPassword).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);",
+                  "    pm.expect(b.account.mustChangePassword).to.eql(true);",
+                  "});",
+                  "pm.test('Trả về tên cửa hàng', () => pm.expect(b.account.storeName).to.eql('Chi nhánh ' + pm.collectionVariables.get('run')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff phải có cửa hàng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"staff2.{{run}}\",\n  \"fullName\": \"Test staff2.{{run}}\",\n  \"role\": \"STAFF\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG16', () => pm.expect(pm.response.json().code).to.eql('MSG16'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trùng tên đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"staff.{{run}}\",\n  \"fullName\": \"Test staff.{{run}}\",\n  \"role\": \"STAFF\",\n  \"storeId\": {{branchStoreId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG45', () => pm.expect(pm.response.json().code).to.eql('MSG45'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Danh sách tài khoản theo từ khóa",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/accounts?q={{run}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"4 tài khoản vừa tạo\", () => pm.expect(pm.response.json().length).to.eql(4));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lọc theo cửa hàng và vai trò",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/accounts?storeId={{branchStoreId}}&role=STAFF",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Có Staff vừa tạo', () => pm.expect(pm.response.json().map(a => a.id)).to.include(Number(pm.collectionVariables.get('staffId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cấp quyền danh mục cho Branch Manager chi nhánh",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{bmId}}/permissions",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"BRANCH_MANAGER\",\n  \"storeId\": {{branchStoreId}},\n  \"catalogEdit\": true,\n  \"reason\": \"Phụ trách danh mục\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Có quyền CATALOG_EDIT', () => pm.expect(pm.response.json().permissions).to.include('CATALOG_EDIT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không cấp quyền danh mục cho Staff",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{staffId}}/permissions",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"STAFF\",\n  \"storeId\": {{branchStoreId}},\n  \"catalogEdit\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG17', () => pm.expect(pm.response.json().code).to.eql('MSG17'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không tự đổi quyền của chính mình",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{adminId}}/permissions",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"ADMIN\",\n  \"catalogEdit\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG15', () => pm.expect(pm.response.json().code).to.eql('MSG15'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lịch sử phân quyền",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/accounts/{{bmId}}/permission-history",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Có lần tạo và lần cấp quyền', () => pm.expect(pm.response.json().length).to.be.at.least(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Khóa Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{staffId}}/lock",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Thử khóa\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff bị khóa không đăng nhập được",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"staff.{{run}}\",\n  \"password\": \"{{staffTemp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 423', () => pm.response.to.have.status(423));",
+                  "pm.test('Mã lỗi MSG10', () => pm.expect(pm.response.json().code).to.eql('MSG10'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mở khóa Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{staffId}}/unlock",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Thử mở khóa\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cấp lại mật khẩu tạm cho Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{staffId}}/reset-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Quên mật khẩu\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().temporaryPassword;",
+                  "pm.test('Mật khẩu tạm mới, khác mật khẩu cũ', () => {",
+                  "    pm.expect(t).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);",
+                  "    pm.expect(t).to.not.eql(pm.collectionVariables.get('staffTemp'));",
+                  "});",
+                  "pm.collectionVariables.set('staffOldTemp', pm.collectionVariables.get('staffTemp'));",
+                  "pm.collectionVariables.set('staffTemp', t);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mật khẩu tạm cũ hết hiệu lực",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"staff.{{run}}\",\n  \"password\": \"{{staffOldTemp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 401', () => pm.response.to.have.status(401));",
+                  "pm.test('Mã lỗi MSG09', () => pm.expect(pm.response.json().code).to.eql('MSG09'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không cấp lại mật khẩu cho chính mình",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/accounts/{{adminId}}/reset-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG47', () => pm.expect(pm.response.json().code).to.eql('MSG47'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tài khoản không tồn tại",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/accounts/999999999/lock",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG48', () => pm.expect(pm.response.json().code).to.eql('MSG48'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Đăng nhập và đổi mật khẩu (UC-01, UC-02)",
+      "item": [
+        {
+          "name": "Owner đăng nhập bằng mật khẩu tạm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"owner.{{run}}\",\n  \"password\": \"{{ownerTemp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('ownerToken', b.accessToken);",
+                  "pm.test('mustChangePassword = true', () => pm.expect(b.user.mustChangePassword).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chưa đổi mật khẩu tạm thì bị chặn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG13', () => pm.expect(pm.response.json().code).to.eql('MSG13'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mật khẩu mới không đạt chính sách",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/change-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{ownerTemp}}\",\n  \"newPassword\": \"abc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG43', () => pm.expect(pm.response.json().code).to.eql('MSG43'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sai mật khẩu hiện tại",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/change-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Sai12345\",\n  \"newPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG42', () => pm.expect(pm.response.json().code).to.eql('MSG42'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner đổi mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/change-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{ownerTemp}}\",\n  \"newPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner dùng tiếp phiên hiện tại",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Hết mật khẩu tạm', () => pm.expect(pm.response.json().mustChangePassword).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager chi nhánh đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"bm.{{run}}\",\n  \"password\": \"{{bmTemp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('bmToken', b.accessToken);",
+                  "pm.test('mustChangePassword = true', () => pm.expect(b.user.mustChangePassword).to.eql(true));",
+                  "pm.test('Có quyền CATALOG_EDIT', () => pm.expect(b.user.permissions).to.include('CATALOG_EDIT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager chi nhánh đổi mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/change-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{bmTemp}}\",\n  \"newPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager kho tổng đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"bmc.{{run}}\",\n  \"password\": \"{{bmcTemp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('bmcToken', b.accessToken);",
+                  "pm.test('mustChangePassword = true', () => pm.expect(b.user.mustChangePassword).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager kho tổng đổi mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/change-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmcToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{bmcTemp}}\",\n  \"newPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff đăng nhập bằng mật khẩu được cấp lại",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"staff.{{run}}\",\n  \"password\": \"{{staffTemp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('staffToken', b.accessToken);",
+                  "pm.test('mustChangePassword = true', () => pm.expect(b.user.mustChangePassword).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff đổi mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/change-password",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{staffTemp}}\",\n  \"newPassword\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager không quản lý cửa hàng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff không quản lý tài khoản",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Nhóm hàng (UC-18 đến UC-21)",
+      "item": [
+        {
+          "name": "Tạo nhóm cha",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Phanh {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"description\": \"Nhóm thử\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('catParentId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạo nhóm con",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Phanh đĩa {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"parentId\": {{catParentId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('catLeafId', pm.response.json().id);",
+                  "pm.test('Nằm dưới nhóm cha', () => pm.expect(pm.response.json().parentId).to.eql(Number(pm.collectionVariables.get('catParentId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trùng tên trong cùng nhóm cha",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Phanh đĩa {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"parentId\": {{catParentId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG58', () => pm.expect(pm.response.json().code).to.eql('MSG58'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nhóm con khác loại xe với nhóm cha",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Phanh xe đạp {{run}}\",\n  \"vehicleType\": \"BICYCLE\",\n  \"parentId\": {{catParentId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG59', () => pm.expect(pm.response.json().code).to.eql('MSG59'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager có quyền danh mục tạo nhóm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Nhông xích {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('catChainId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager không có quyền danh mục",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmcToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Lốp {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff không sửa danh mục",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Lốp {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cây nhóm hàng (Staff xem được)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/part-categories?vehicleType=MOTORCYCLE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const parent = pm.response.json().find(c => c.id === Number(pm.collectionVariables.get('catParentId')));",
+                  "pm.test('Nhóm cha có nhóm con', () => pm.expect(parent.children.map(c => c.id)).to.include(Number(pm.collectionVariables.get('catLeafId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đổi tên nhóm",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories/{{catChainId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Nhông xích sên đĩa {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tên mới', () => pm.expect(pm.response.json().categoryName).to.eql('Nhông xích sên đĩa ' + pm.collectionVariables.get('run')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không chuyển nhóm vào nhóm con của chính nó",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories/{{catParentId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Phanh {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"parentId\": {{catLeafId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG59', () => pm.expect(pm.response.json().code).to.eql('MSG59'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tạm ngừng nhóm",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/part-categories/{{catChainId}}/deactivate",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nhóm không tồn tại",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/part-categories/999999999",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryName\": \"Không có\",\n  \"vehicleType\": \"MOTORCYCLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG61', () => pm.expect(pm.response.json().code).to.eql('MSG61'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Dòng xe (UC-22 đến UC-25)",
+      "item": [
+        {
+          "name": "Tạo dòng xe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/vehicle-models",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manufacturer\": \"Honda\",\n  \"modelName\": \"Air Blade {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"yearFrom\": 2020,\n  \"yearTo\": 2024\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('vmId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trùng hãng, dòng xe và khoảng năm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/vehicle-models",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manufacturer\": \"HONDA\",\n  \"modelName\": \"air blade {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"yearFrom\": 2020,\n  \"yearTo\": 2024\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG62', () => pm.expect(pm.response.json().code).to.eql('MSG62'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Năm bắt đầu lớn hơn năm kết thúc",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/vehicle-models",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manufacturer\": \"Honda\",\n  \"modelName\": \"Vision {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"yearFrom\": 2024,\n  \"yearTo\": 2020\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG64', () => pm.expect(pm.response.json().code).to.eql('MSG64'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager có quyền danh mục tạo dòng xe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/vehicle-models",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manufacturer\": \"Honda\",\n  \"modelName\": \"Vision {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('vm2Id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm dòng xe (Staff xem được)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/vehicle-models?q={{run}}&vehicleType=MOTORCYCLE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"2 dòng xe vừa tạo\", () => pm.expect(pm.response.json().length).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sửa dòng xe",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/vehicle-models/{{vmId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manufacturer\": \"Honda\",\n  \"modelName\": \"Air Blade {{run}}\",\n  \"vehicleType\": \"MOTORCYCLE\",\n  \"yearFrom\": 2020,\n  \"yearTo\": 2025\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"Năm kết thúc mới\", () => pm.expect(pm.response.json().yearTo).to.eql(2025));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ngừng dùng dòng xe thứ hai",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/vehicle-models/{{vm2Id}}/deactivate",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lọc dòng xe đã ngừng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/vehicle-models?q={{run}}&status=INACTIVE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Chỉ dòng xe thứ hai', () => pm.expect(pm.response.json().map(v => v.id)).to.eql([Number(pm.collectionVariables.get('vm2Id'))]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dòng xe không tồn tại",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/vehicle-models/999999999",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"manufacturer\": \"Honda\",\n  \"modelName\": \"Không có\",\n  \"vehicleType\": \"MOTORCYCLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG63', () => pm.expect(pm.response.json().code).to.eql('MSG63'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Phụ tùng (UC-13 đến UC-17)",
+      "item": [
+        {
+          "name": "Tạo phụ tùng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \" bt-{{run}}-01 \",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"oemCodes\": [\n    \"06455-{{run}}\"\n  ],\n  \"barcodes\": [\n    \"893{{run}}01\"\n  ],\n  \"vehicleModelIds\": [\n    {{vmId}}\n  ],\n  \"imageUrls\": [\n    \"https://res.cloudinary.com/demo/image/upload/sample.jpg\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('productId', b.id);",
+                  "pm.test('SKU viết hoa, đủ mã OEM, mã vạch, dòng xe, ảnh; chưa có tồn kho', () => {",
+                  "    pm.expect(b.sku).to.eql('BT-' + pm.collectionVariables.get('RUN') + '-01');",
+                  "    pm.expect(b.status).to.eql('ACTIVE');",
+                  "    pm.expect(b.oemCodes).to.eql(['06455-' + pm.collectionVariables.get('run')]);",
+                  "    pm.expect(b.barcodes.length).to.eql(1);",
+                  "    pm.expect(b.vehicleModels[0].id).to.eql(Number(pm.collectionVariables.get('vmId')));",
+                  "    pm.expect(b.imageUrls.length).to.eql(1);",
+                  "    pm.expect(b.stock).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trùng SKU",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"BT-{{RUN}}-01\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG53', () => pm.expect(pm.response.json().code).to.eql('MSG53'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mã vạch đã gán cho phụ tùng khác",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"bt-{{run}}-02\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"barcodes\": [\n    \"893{{run}}01\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG54', () => pm.expect(pm.response.json().code).to.eql('MSG54'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nhóm hàng còn nhóm con",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"bt-{{run}}-02\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catParentId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG55', () => pm.expect(pm.response.json().code).to.eql('MSG55'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nhóm hàng đang tạm ngừng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"bt-{{run}}-02\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catChainId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG55', () => pm.expect(pm.response.json().code).to.eql('MSG55'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dòng xe đã ngừng dùng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"bt-{{run}}-02\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"vehicleModelIds\": [\n    {{vm2Id}}\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG56', () => pm.expect(pm.response.json().code).to.eql('MSG56'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quá 3 ảnh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"bt-{{run}}-02\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"imageUrls\": [\n    \"https://img.example/1.jpg\",\n    \"https://img.example/2.jpg\",\n    \"https://img.example/3.jpg\",\n    \"https://img.example/4.jpg\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));",
+                  "pm.test('Lỗi ở imageUrls', () => pm.expect(pm.response.json().fieldErrors).to.have.property('imageUrls'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thiếu SKU",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": null,\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dùng lại nhóm đã tạm ngừng",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/part-categories/{{catChainId}}/activate",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager có quyền danh mục tạo phụ tùng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"xich-{{run}}-01\",\n  \"partName\": \"Bộ nhông xích {{run}}\",\n  \"categoryId\": {{catChainId}},\n  \"brand\": \"DID\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('product2Id', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff không tạo phụ tùng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"bt-{{run}}-03\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm theo mã OEM (Staff, tồn kho của cửa hàng mình)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?q=06455-{{run}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test(\"1 kết quả\", () => pm.expect(page.totalItems).to.eql(1));",
+                  "pm.test('Đúng phụ tùng, tồn 0, chưa có giá', () => {",
+                  "    pm.expect(page.items[0].id).to.eql(Number(pm.collectionVariables.get('productId')));",
+                  "    pm.expect(page.items[0].availableQty).to.eql(0);",
+                  "    pm.expect(page.items[0].retailPrice).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm theo nhóm cha (gồm nhóm con)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?categoryId={{catParentId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"Chỉ phụ tùng của nhóm phanh\", () => pm.expect(pm.response.json().totalItems).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm theo dòng xe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?vehicleModelId={{vmId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"Chỉ phụ tùng lắp được Air Blade\", () => pm.expect(pm.response.json().totalItems).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Phân trang, sắp theo SKU",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?q={{run}}&size=1&page=1",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test(\"Tổng 2 phụ tùng\", () => pm.expect(page.totalItems).to.eql(2));",
+                  "pm.test('Trang 2 là phụ tùng nhông xích', () => pm.expect(page.items.map(p => p.id)).to.eql([Number(pm.collectionVariables.get('product2Id'))]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chỉ phụ tùng còn hàng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?q={{run}}&inStockOnly=true",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"Chưa nhập kho nên không có\", () => pm.expect(pm.response.json().totalItems).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem chi tiết (Staff)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Tồn kho của chi nhánh Staff, có dòng xe', () => {",
+                  "    pm.expect(b.stock.storeId).to.eql(Number(pm.collectionVariables.get('branchStoreId')));",
+                  "    pm.expect(b.stock.availableQty).to.eql(0);",
+                  "    pm.expect(b.vehicleModels.length).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff không xem tồn kho cửa hàng khác",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/{{productId}}?storeId={{centralStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager kho tổng xem tồn chi nhánh",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?q={{run}}&storeId={{branchStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmcToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"Có số tồn\", () => pm.expect(pm.response.json().items[0].availableQty).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem tồn chi nhánh",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/{{productId}}?storeId={{branchStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tồn của chi nhánh', () => pm.expect(pm.response.json().stock.storeId).to.eql(Number(pm.collectionVariables.get('branchStoreId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin không xem danh mục",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sửa phụ tùng (SKU không đổi)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"KHONG-DOI\",\n  \"partName\": \"Bố thắng đĩa trước {{run}} (sửa)\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"oemCodes\": [\n    \"06455-{{run}}\",\n    \"06455-{{run}}-B\"\n  ],\n  \"barcodes\": [],\n  \"vehicleModelIds\": [\n    {{vmId}}\n  ],\n  \"imageUrls\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('SKU giữ nguyên, mã OEM và mã vạch được thay', () => {",
+                  "    pm.expect(b.sku).to.eql('BT-' + pm.collectionVariables.get('RUN') + '-01');",
+                  "    pm.expect(b.oemCodes.length).to.eql(2);",
+                  "    pm.expect(b.barcodes.length).to.eql(0);",
+                  "    pm.expect(b.imageUrls.length).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff không sửa phụ tùng",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"KHONG-DOI\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ngừng kinh doanh",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/{{productId}}/discontinue",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lọc phụ tùng đã ngừng kinh doanh",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?q={{run}}&status=DISCONTINUED",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test(\"1 phụ tùng ngừng kinh doanh\", () => pm.expect(pm.response.json().totalItems).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kinh doanh lại",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/{{productId}}/reactivate",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đã kinh doanh lại",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ACTIVE, không còn ngày ngừng', () => {",
+                  "    pm.expect(pm.response.json().status).to.eql('ACTIVE');",
+                  "    pm.expect(pm.response.json().discontinuedAt).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Phụ tùng không tồn tại",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products/999999999",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG57', () => pm.expect(pm.response.json().code).to.eql('MSG57'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Trạng thái lọc sai định dạng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/products?status=OPEN",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. Đóng và mở lại cửa hàng (UC-06)",
+      "item": [
+        {
+          "name": "Không đóng khi còn tài khoản đang hoạt động",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Chi nhánh {{run}}\",\n  \"address\": \"Đà Nẵng\",\n  \"phone\": \"\",\n  \"status\": \"INACTIVE\",\n  \"warehouseName\": \"Kho chi nhánh {{run}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG67', () => pm.expect(pm.response.json().code).to.eql('MSG67'));",
+                  "pm.test('Báo 2 tài khoản (Branch Manager và Staff)', () => pm.expect(pm.response.json().message).to.include('còn 2 tài khoản'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Khóa Branch Manager chi nhánh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{bmId}}/lock",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Đóng chi nhánh\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Khóa Staff chi nhánh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts/{{staffId}}/lock",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Đóng chi nhánh\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đóng chi nhánh",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Chi nhánh {{run}}\",\n  \"address\": \"Đà Nẵng\",\n  \"phone\": \"\",\n  \"status\": \"INACTIVE\",\n  \"warehouseName\": \"Kho chi nhánh {{run}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('INACTIVE', () => pm.expect(pm.response.json().status).to.eql('INACTIVE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Không tạo tài khoản ở cửa hàng đã đóng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/accounts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"staff4.{{run}}\",\n  \"fullName\": \"Test staff4.{{run}}\",\n  \"role\": \"STAFF\",\n  \"storeId\": {{branchStoreId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG46', () => pm.expect(pm.response.json().code).to.eql('MSG46'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mở lại chi nhánh",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Chi nhánh {{run}}\",\n  \"address\": \"Đà Nẵng\",\n  \"phone\": \"\",\n  \"status\": \"ACTIVE\",\n  \"warehouseName\": \"Kho chi nhánh {{run}}\",\n  \"central\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ACTIVE', () => pm.expect(pm.response.json().status).to.eql('ACTIVE'));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "MSG66 (còn tồn kho) chưa thử được qua API vì chưa có API nhập kho; xem StoreApiTest."
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin",
+      "type": "string"
+    },
+    {
+      "key": "adminTempPassword",
+      "value": "MfhgN22b@PgMIKA7",
+      "type": "string"
+    },
+    {
+      "key": "adminPassword",
+      "value": "Motoflow@2026",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Motoflow@2026",
+      "type": "string"
+    }
+  ]
+}

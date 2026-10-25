@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/vehicle-models?q={{run}}&vehicleType=MOTORCYCLE"
+method: GET
+queryParams:
+  q: "{{run}}"
+  vehicleType: MOTORCYCLE
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test("2 dòng xe vừa tạo", () => pm.expect(pm.response.json().length).to.eql(2));
+    language: text/javascript
+order: 5000

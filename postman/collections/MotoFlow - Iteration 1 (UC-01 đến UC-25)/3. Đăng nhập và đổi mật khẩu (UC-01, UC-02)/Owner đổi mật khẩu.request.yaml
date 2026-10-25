@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/auth/change-password"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "currentPassword": "{{ownerTemp}}",
+      "newPassword": "{{password}}"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: pm.test('HTTP 204', () => pm.response.to.have.status(204));
+    language: text/javascript
+order: 5000

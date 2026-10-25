@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/part-categories/{{catChainId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryName": "Nhông xích sên đĩa {{run}}",
+      "vehicleType": "MOTORCYCLE"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('Tên mới', () => pm.expect(pm.response.json().categoryName).to.eql('Nhông xích sên đĩa ' + pm.collectionVariables.get('run')));
+    language: text/javascript
+order: 9000

@@ -26,9 +26,6 @@ public class Customer {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "customer_code", nullable = false, unique = true, length = 20)
-    private String customerCode;
-
     @Column(name = "customer_name", nullable = false, length = 150)
     private String customerName;
 
@@ -44,6 +41,10 @@ public class Customer {
     @Enumerated(EnumType.STRING)
     @Column(name = "credit_status", nullable = false, length = 20)
     private CreditStatus creditStatus;
+
+    /** Current tier, set only by Owner together with a customer_tier_change row. */
+    @Column(name = "customer_tier_id")
+    private Long customerTierId;
 
     @Column(name = "created_by", nullable = false)
     private Long createdBy;

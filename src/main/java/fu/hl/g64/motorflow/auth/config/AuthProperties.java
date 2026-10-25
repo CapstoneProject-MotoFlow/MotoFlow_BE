@@ -18,6 +18,8 @@ public record AuthProperties(
         @NotBlank String issuer,
         @NotNull Duration accessTokenTtl,
         @NotNull Duration refreshTokenTtl,
+        /* Absolute limit from sign-in; refreshing cannot extend a session past it. */
+        @NotNull Duration sessionMaxLifetime,
         /* SEC-02: wrong passwords in a row before the temporary lock. */
         @Min(1) int maxFailedAttempts,
         @NotNull Duration lockDuration,

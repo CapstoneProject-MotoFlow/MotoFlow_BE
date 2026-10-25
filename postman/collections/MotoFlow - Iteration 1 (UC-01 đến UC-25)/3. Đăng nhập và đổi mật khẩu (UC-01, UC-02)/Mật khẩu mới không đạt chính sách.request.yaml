@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/auth/change-password"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "currentPassword": "{{ownerTemp}}",
+      "newPassword": "abc"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      pm.test('Mã lỗi MSG43', () => pm.expect(pm.response.json().code).to.eql('MSG43'));
+    language: text/javascript
+order: 3000

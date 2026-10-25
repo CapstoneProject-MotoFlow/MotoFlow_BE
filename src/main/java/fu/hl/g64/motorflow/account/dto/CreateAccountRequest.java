@@ -8,8 +8,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * UC-08. Admin types the temporary password and hands it to the employee; the system never
- * shows it back (NFR-S03). {@code storeId} is required for Branch Manager and Staff only.
+ * UC-08. The system generates the temporary password and returns it once in the response
+ * (NFR-S04). {@code storeId} is required for Branch Manager and Staff only.
  */
 public record CreateAccountRequest(
         @NotBlank(message = "Vui lòng nhập tên đăng nhập.")
@@ -17,8 +17,6 @@ public record CreateAccountRequest(
                 message = "Tên đăng nhập dài 3–50 ký tự, chỉ gồm chữ không dấu, số và . _ -")
         String username,
 
-        @NotBlank(message = "Vui lòng nhập mật khẩu tạm.")
-        String temporaryPassword,
 
         @NotBlank(message = "Vui lòng nhập họ tên.")
         @Size(max = 100, message = "Họ tên tối đa 100 ký tự.")

@@ -13,7 +13,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * Who did what to which record, and when (NFR-S06). Rows are never updated or deleted.
+ * Who did what to which record, and when (NFR-S09). Rows are never updated or deleted.
  * The JSONB columns old_data / new_data are not mapped yet; map them when a feature needs
  * before/after values.
  */

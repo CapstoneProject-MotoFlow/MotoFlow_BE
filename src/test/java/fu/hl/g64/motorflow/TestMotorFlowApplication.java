@@ -16,6 +16,8 @@ public class TestMotorFlowApplication {
     public static void main(String[] args) throws IOException {
         // DevTools would call main() again in a new class loader and start a second database.
         System.setProperty("spring.devtools.restart.enabled", "false");
+        // Only applies when no profile is set explicitly.
+        System.setProperty("spring.profiles.default", "dev");
         EmbeddedPostgres postgres = EmbeddedPostgres.builder()
                 .setDataDirectory(Path.of(".dev-postgres"))
                 .setCleanDataDirectory(false)

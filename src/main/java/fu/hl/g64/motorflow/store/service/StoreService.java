@@ -34,7 +34,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/** UC-03 View Store List, UC-04 Create Store, UC-06 Update Store. */
+/** UC-03 View Store List, UC-04 Create Store, UC-06 Update Store (including closing a store). */
 @Service
 @RequiredArgsConstructor
 public class StoreService {
@@ -47,7 +47,7 @@ public class StoreService {
     private final Clock clock;
 
     /**
-     * Every filter is optional. {@code q} matches store name, code, address or Branch Manager name.
+     * Every filter is optional. {@code q} matches store id, name, address or Branch Manager name.
      * shortcut: filters in memory, fine for a chain of a few dozen stores; move to a query if stores reach hundreds.
      */
     @Transactional(readOnly = true)
@@ -59,7 +59,7 @@ public class StoreService {
         Map<Long, Long> productsByWarehouse = productsInStockByWarehouse();
         String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
 
-        return stores.findAll(Sort.by("storeCode")).stream()
+        return stores.findAll(Sort.by("id")).stream()
                 .map(store -> {
                     Warehouse warehouse = warehouseByStore.get(store.getId());
                     return StoreResponse.from(store, warehouse, managersByStore.getOrDefault(store.getId(), List.of()),
@@ -68,7 +68,7 @@ public class StoreService {
                 .filter(s -> status == null || s.status() == status)
                 .filter(s -> central == null || (s.warehouse() != null && s.warehouse().central() == central))
                 .filter(s -> needle == null || Stream.concat(
-                                Stream.of(s.storeName(), s.storeCode(), s.address()),
+                                Stream.of(s.storeName(), String.valueOf(s.id()), s.address()),
                                 s.managers().stream().map(StoreResponse.ManagerInfo::fullName))
                         .anyMatch(text -> text != null && text.toLowerCase(Locale.ROOT).contains(needle)))
                 .toList();
@@ -77,9 +77,9 @@ public class StoreService {
     /** A new store is planned, has exactly one warehouse and no stock (BR-04, BR-64). */
     @Transactional
     public StoreResponse createStore(AuthenticatedUser actor, CreateStoreRequest request) {
-        String code = request.storeCode().strip().toUpperCase(Locale.ROOT);
-        if (stores.existsByStoreCode(code)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", code);
+        String name = request.storeName().strip();
+        if (stores.existsByStoreNameIgnoreCase(name)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", name);
         }
         if (request.central()) {
             requireNoOtherCentral(null);
@@ -87,12 +87,12 @@ public class StoreService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
-        Store store = Store.create(code, request.storeName().strip(), request.address().strip(), phone, now);
+        Store store = Store.create(name, request.address().strip(), phone, now);
         try {
             store = stores.saveAndFlush(store);
         } catch (DataIntegrityViolationException e) {
-            // Another user created the same code a moment earlier.
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", code);
+            // Another user created the same name a moment earlier.
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", name);
         }
         Warehouse warehouse = warehouses.save(Warehouse.create(store.getId(), request.warehouseName().strip(),
                 store.getAddress(), phone, request.central(), now));
@@ -113,10 +113,20 @@ public class StoreService {
         if (!isCentral && request.central()) {
             requireNoOtherCentral(storeId);
         }
+        String name = request.storeName().strip();
+        if (stores.existsByStoreNameIgnoreCaseAndIdNot(name, storeId)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", name);
+        }
+        if (request.status() == StoreStatus.PLANNED && store.getStatus() != StoreStatus.PLANNED) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG68");
+        }
+        if (request.status() == StoreStatus.INACTIVE) {
+            requireClosable(store, warehouse, request.central());
+        }
 
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
-        store.update(request.storeName().strip(), request.address().strip(), phone, request.status(), now);
+        store.update(name, request.address().strip(), phone, request.status(), now);
         if (warehouse == null) {
             // Stores inserted before BR-04 was enforced get their warehouse now.
             warehouse = warehouses.save(Warehouse.create(storeId, request.warehouseName().strip(), store.getAddress(),
@@ -134,12 +144,33 @@ public class StoreService {
                 productsInStockByWarehouse().getOrDefault(warehouse.getId(), 0L));
     }
 
-    // shortcut: checked here, not by a unique index, so two parallel requests could both pass; add a partial unique index on warehouse(is_central) if that matters.
+    /**
+     * A store closes only when nothing is left behind (soft delete; stores are never removed).
+     * shortcut: documents still open at the store (orders, transfers, receipts) are not checked yet; add them with those modules.
+     */
+    private void requireClosable(Store store, Warehouse warehouse, boolean central) {
+        if (central) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG65");
+        }
+        if (store.getStatus() == StoreStatus.INACTIVE) {
+            return; // Already closed: only the name, address or phone change.
+        }
+        long held = warehouse == null ? 0 : stockBalances.countProductsHeldBy(warehouse.getId());
+        if (held > 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG66", held);
+        }
+        long accounts = users.countByStoreIdAndStatus(store.getId(), AccountStatus.ACTIVE);
+        if (accounts > 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG67", accounts);
+        }
+    }
+
+    // Parallel requests that both pass this check are stopped by the unique index ux_warehouse_1 (V6).
     private void requireNoOtherCentral(Long storeId) {
         warehouses.findByIsCentralTrue()
                 .filter(central -> !central.getStoreId().equals(storeId))
                 .ifPresent(central -> {
-                    String code = stores.findById(central.getStoreId()).map(Store::getStoreCode).orElse("?");
+                    String code = stores.findById(central.getStoreId()).map(Store::getStoreName).orElse("?");
                     throw new BusinessException(HttpStatus.CONFLICT, "MSG50", code);
                 });
     }

@@ -1,0 +1,31 @@
+$kind: http-request
+url: "{{baseUrl}}/api/accounts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "bmc.{{run}}",
+      "fullName": "Test bmc.{{run}}",
+      "role": "BRANCH_MANAGER",
+      "storeId": {{centralStoreId}}
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('bmcId', b.account.id);
+      pm.collectionVariables.set('bmcTemp', b.temporaryPassword);
+      pm.test('Hệ thống sinh mật khẩu tạm 12 ký tự, phải đổi khi đăng nhập', () => {
+          pm.expect(b.temporaryPassword).to.match(/^[A-Za-z0-9!@#$%&*?]{12}$/);
+          pm.expect(b.account.mustChangePassword).to.eql(true);
+      });
+    language: text/javascript
+order: 4000

@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/part-categories"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "categoryName": "Lốp {{run}}",
+      "vehicleType": "MOTORCYCLE"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 403', () => pm.response.to.have.status(403));
+      pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));
+    language: text/javascript
+order: 7000

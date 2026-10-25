@@ -25,7 +25,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AuthSession {
 
-    public enum RevokeReason { LOGOUT, PASSWORD_CHANGED, PASSWORD_RESET, ACCOUNT_LOCKED }
+    public enum RevokeReason { LOGOUT, PASSWORD_CHANGED, PASSWORD_RESET, ACCOUNT_LOCKED, REFRESH_TOKEN_REUSED }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -37,6 +37,10 @@ public class AuthSession {
 
     @Column(name = "refresh_token_hash", nullable = false, unique = true, length = 64)
     private String refreshTokenHash;
+
+    /** The token replaced by the last rotation; seeing it again means it was copied (reuse detection). */
+    @Column(name = "previous_refresh_token_hash", length = 64)
+    private String previousRefreshTokenHash;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -79,6 +83,7 @@ public class AuthSession {
 
     /** Each refresh replaces the token, so a stolen old token stops working. */
     public void rotate(String newRefreshTokenHash, LocalDateTime now, LocalDateTime newExpiresAt) {
+        previousRefreshTokenHash = refreshTokenHash;
         refreshTokenHash = newRefreshTokenHash;
         lastRefreshedAt = now;
         expiresAt = newExpiresAt;

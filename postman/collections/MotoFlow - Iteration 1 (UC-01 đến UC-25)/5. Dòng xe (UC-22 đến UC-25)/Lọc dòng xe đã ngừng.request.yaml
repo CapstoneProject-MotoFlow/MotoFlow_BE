@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/vehicle-models?q={{run}}&status=INACTIVE"
+method: GET
+queryParams:
+  q: "{{run}}"
+  status: INACTIVE
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('Chỉ dòng xe thứ hai', () => pm.expect(pm.response.json().map(v => v.id)).to.eql([Number(pm.collectionVariables.get('vm2Id'))]));
+    language: text/javascript
+order: 8000

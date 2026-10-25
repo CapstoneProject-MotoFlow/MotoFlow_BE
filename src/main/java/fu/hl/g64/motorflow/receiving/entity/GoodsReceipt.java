@@ -27,9 +27,6 @@ public class GoodsReceipt {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "receipt_code", nullable = false, unique = true, length = 30)
-    private String receiptCode;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "receipt_type", nullable = false, length = 20)
     private ReceiptType receiptType;
@@ -50,10 +47,10 @@ public class GoodsReceipt {
     @Column(nullable = false, length = 25)
     private GoodsReceiptStatus status;
 
-    @Column(name = "recorded_by", nullable = false)
+    @Column(name = "recorded_by")
     private Long recordedBy;
 
-    @Column(name = "submitted_at", nullable = false)
+    @Column(name = "submitted_at")
     private LocalDateTime submittedAt;
 
     @Column(name = "recount_reason")

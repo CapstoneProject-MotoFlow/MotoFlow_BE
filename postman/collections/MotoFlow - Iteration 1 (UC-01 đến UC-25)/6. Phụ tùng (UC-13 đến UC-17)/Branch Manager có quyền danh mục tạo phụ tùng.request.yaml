@@ -1,0 +1,28 @@
+$kind: http-request
+url: "{{baseUrl}}/api/products"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "sku": "xich-{{run}}-01",
+      "partName": "Bộ nhông xích {{run}}",
+      "categoryId": {{catChainId}},
+      "brand": "DID",
+      "countryOfOrigin": "Thái Lan",
+      "baseUnit": "Bộ",
+      "specifications": "Dùng cho phanh đĩa trước"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('product2Id', pm.response.json().id);
+    language: text/javascript
+order: 10000

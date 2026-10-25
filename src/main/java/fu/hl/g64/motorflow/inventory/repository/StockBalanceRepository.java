@@ -17,5 +17,13 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
             group by b.warehouseId""")
     List<Object[]> countProductsInStockByWarehouse();
 
+    /** Products a warehouse still holds or is about to receive; a store cannot close while this is above zero. */
+    @Query("""
+            select count(b) from StockBalance b
+            where b.warehouseId = :warehouseId
+              and b.availableQty + b.awaitingInspectionQty + b.wrongItemQty + b.damagedQty
+                  + b.awaitingSupplierReturnQty + b.inTransitQty > 0""")
+    long countProductsHeldBy(Long warehouseId);
+
     List<StockBalance> findByWarehouseIdAndProductIdIn(Long warehouseId, Collection<Long> productIds);
 }

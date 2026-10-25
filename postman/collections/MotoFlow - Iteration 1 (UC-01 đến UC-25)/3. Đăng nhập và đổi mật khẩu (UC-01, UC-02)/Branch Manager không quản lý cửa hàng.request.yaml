@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 403', () => pm.response.to.have.status(403));
+      pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));
+    language: text/javascript
+order: 13000

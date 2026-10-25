@@ -1,0 +1,27 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores/{{centralStoreId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "{{centralStoreName}}",
+      "address": "{{centralAddress}}",
+      "phone": "{{centralPhone}}",
+      "status": "{{centralStatus}}",
+      "warehouseName": "{{centralWarehouseName}}",
+      "central": false
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      pm.test('Mã lỗi MSG51', () => pm.expect(pm.response.json().code).to.eql('MSG51'));
+    language: text/javascript
+order: 10000

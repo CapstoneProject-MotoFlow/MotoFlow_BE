@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/vehicle-models"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "manufacturer": "Honda",
+      "modelName": "Air Blade {{run}}",
+      "vehicleType": "MOTORCYCLE",
+      "yearFrom": 2020,
+      "yearTo": 2024
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('vmId', pm.response.json().id);
+    language: text/javascript
+order: 1000

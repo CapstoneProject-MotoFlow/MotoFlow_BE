@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/vehicle-models/{{vmId}}"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "manufacturer": "Honda",
+      "modelName": "Air Blade {{run}}",
+      "vehicleType": "MOTORCYCLE",
+      "yearFrom": 2020,
+      "yearTo": 2025
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test("Năm kết thúc mới", () => pm.expect(pm.response.json().yearTo).to.eql(2025));
+    language: text/javascript
+order: 6000

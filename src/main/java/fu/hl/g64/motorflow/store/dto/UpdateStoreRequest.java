@@ -6,7 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** UC-06. The store code never changes. {@code central} can only be switched on while the chain has no central warehouse. */
+/** UC-06. The store id never changes; the name stays unique. {@code central} can only be switched on while the chain has no central warehouse. */
 public record UpdateStoreRequest(
         @NotBlank(message = "Vui lòng nhập tên cửa hàng.")
         @Size(max = 150, message = "Tên cửa hàng tối đa 150 ký tự.")

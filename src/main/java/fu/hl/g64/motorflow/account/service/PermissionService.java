@@ -78,15 +78,16 @@ public class PermissionService {
         Role oldRole = account.getRole();
         Long oldStoreId = account.getStoreId();
         boolean storeChanged = !Objects.equals(oldStoreId, storeId);
+        if (oldRole == Role.ADMIN && role != Role.ADMIN && account.getStatus() == AccountStatus.ACTIVE) {
+            AccountService.requireAnotherActiveAdmin(users, account);
+        }
         if (role != oldRole || storeChanged) {
             releaseAssignedTasks(account, request.releaseAssignedTasks(), now);
             if (role != oldRole) {
                 permissionHistory.save(PermissionHistory.roleChanged(accountId, oldRole, role, reason, admin.id(), now));
             }
             if (storeChanged) {
-                String oldCode = oldStoreId == null ? null : stores.findById(oldStoreId).map(Store::getStoreCode).orElse(null);
-                permissionHistory.save(PermissionHistory.storeChanged(accountId, oldCode,
-                        store == null ? null : store.getStoreCode(), reason, admin.id(), now));
+                permissionHistory.save(PermissionHistory.storeChanged(accountId, oldStoreId, storeId, reason, admin.id(), now));
             }
             account.changeRoleAndStore(role, storeId, now);
         }

@@ -28,9 +28,6 @@ public class Payment {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "payment_code", nullable = false, unique = true, length = 30)
-    private String paymentCode;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_type", nullable = false, length = 20)
     private PaymentType paymentType;

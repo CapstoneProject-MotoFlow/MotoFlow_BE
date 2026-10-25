@@ -28,9 +28,6 @@ public class DiscrepancyCase {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "case_code", nullable = false, unique = true, length = 30)
-    private String caseCode;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "source_type", nullable = false, length = 10)
     private SourceType sourceType;

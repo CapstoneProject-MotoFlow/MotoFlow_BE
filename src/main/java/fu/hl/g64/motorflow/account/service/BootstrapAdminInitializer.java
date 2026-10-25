@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.repository.PermissionHistoryRepository;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
+import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,9 +49,14 @@ public class BootstrapAdminInitializer implements ApplicationRunner {
         if (!StringUtils.hasText(username) || !StringUtils.hasText(password) || users.existsByRole(Role.ADMIN)) {
             return;
         }
+        String normalized = UserAccount.normalizeUsername(username);
+        // Fail the start-up rather than create an Admin with a guessable password.
+        if (!PasswordPolicy.isAcceptable(password, normalized)) {
+            throw new IllegalStateException("motoflow.bootstrap.admin.password does not meet the password policy");
+        }
         LocalDateTime now = LocalDateTime.now(clock);
         UserAccount admin = users.save(UserAccount.create(
-                UserAccount.normalizeUsername(username), passwordEncoder.encode(password), fullName, Role.ADMIN, null, null, now));
+                normalized, passwordEncoder.encode(password), fullName, Role.ADMIN, null, null, now));
         permissionHistory.save(PermissionHistory.accountCreated(admin, admin.getId(), "Bootstrap admin", now));
         log.info("Created bootstrap Admin account '{}'; its temporary password must be changed at first sign-in",
                 admin.getUsername());

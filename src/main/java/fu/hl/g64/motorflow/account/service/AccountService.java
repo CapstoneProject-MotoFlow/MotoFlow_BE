@@ -3,7 +3,8 @@ package fu.hl.g64.motorflow.account.service;
 import fu.hl.g64.motorflow.account.dto.AccountResponse;
 import fu.hl.g64.motorflow.account.dto.AccountState;
 import fu.hl.g64.motorflow.account.dto.CreateAccountRequest;
-import fu.hl.g64.motorflow.account.dto.ResetPasswordRequest;
+import fu.hl.g64.motorflow.account.dto.CreatedAccountResponse;
+import fu.hl.g64.motorflow.account.dto.TemporaryPasswordResponse;
 import fu.hl.g64.motorflow.account.entity.PermissionHistory;
 import fu.hl.g64.motorflow.account.entity.UserPermission;
 import fu.hl.g64.motorflow.account.entity.enums.PermissionCode;
@@ -83,7 +84,7 @@ public class AccountService {
     }
 
     @Transactional
-    public AccountResponse createAccount(AuthenticatedUser admin, CreateAccountRequest request) {
+    public CreatedAccountResponse createAccount(AuthenticatedUser admin, CreateAccountRequest request) {
         String username = UserAccount.normalizeUsername(request.username());
         Role role = request.role();
         // BR-02: Branch Manager and Staff work at exactly one store; Owner and Admin at none.
@@ -96,13 +97,13 @@ public class AccountService {
                     .filter(Store::acceptsStaff)
                     .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG46"));
         }
-        requireAcceptablePassword(request.temporaryPassword(), username);
         if (users.existsByUsername(username)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG45", username);
         }
 
         LocalDateTime now = LocalDateTime.now(clock);
-        UserAccount account = UserAccount.create(username, passwordEncoder.encode(request.temporaryPassword()),
+        String temporaryPassword = PasswordPolicy.randomTemporary(username);
+        UserAccount account = UserAccount.create(username, passwordEncoder.encode(temporaryPassword),
                 request.fullName().strip(), role, request.storeId(), admin.id(), now);
         account.updateContactDetails(blankToNull(request.phone()), blankToNull(request.email()), now);
         try {
@@ -112,7 +113,9 @@ public class AccountService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG45", username);
         }
         permissionHistory.save(PermissionHistory.accountCreated(account, admin.id(), null, now));
-        return AccountResponse.from(account, store == null ? null : store.getStoreName(), Set.of(), now);
+        return new CreatedAccountResponse(
+                AccountResponse.from(account, store == null ? null : store.getStoreName(), Set.of(), now),
+                temporaryPassword);
     }
 
     /** UC-10. The user is signed out on every device at once. Locking a locked account changes nothing. */
@@ -121,6 +124,9 @@ public class AccountService {
         UserAccount account = otherAccount(admin, accountId);
         if (account.isLockedByAdmin()) {
             return;
+        }
+        if (account.getRole() == Role.ADMIN) {
+            requireAnotherActiveAdmin(users, account);
         }
         LocalDateTime now = LocalDateTime.now(clock);
         account.lockByAdmin(now);
@@ -147,19 +153,19 @@ public class AccountService {
      * are signed in on is signed out, because whoever knew the old password must lose access.
      */
     @Transactional
-    public void resetPassword(AuthenticatedUser admin, long accountId, ResetPasswordRequest request) {
+    public TemporaryPasswordResponse resetPassword(AuthenticatedUser admin, long accountId, String reason) {
         if (accountId == admin.id()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG47");
         }
         UserAccount account = users.findById(accountId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
-        requireAcceptablePassword(request.temporaryPassword(), account.getUsername());
-
         LocalDateTime now = LocalDateTime.now(clock);
-        account.resetPassword(passwordEncoder.encode(request.temporaryPassword()), now);
+        String temporaryPassword = PasswordPolicy.randomTemporary(account.getUsername());
+        account.resetPassword(passwordEncoder.encode(temporaryPassword), now);
         sessions.revokeAllSessions(account.getId(), now, AuthSession.RevokeReason.PASSWORD_RESET);
         auditLog.save(AuditLog.record("USER_ACCOUNT", account.getId(), "PASSWORD_RESET", admin.id(),
-                blankToNull(request.reason()), now));
+                blankToNull(reason), now));
+        return new TemporaryPasswordResponse(temporaryPassword);
     }
 
     /** Admin cannot lock themself out (MSG15). */
@@ -171,10 +177,10 @@ public class AccountService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
     }
 
-    private static void requireAcceptablePassword(String password, String username) {
-        if (!PasswordPolicy.isAcceptable(password, username)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG43",
-                    PasswordPolicy.MIN_LENGTH, PasswordPolicy.MAX_LENGTH);
+    /** Locking or demoting this Admin must leave at least one active Admin (MSG69). */
+    static void requireAnotherActiveAdmin(UserAccountRepository users, UserAccount admin) {
+        if (users.findActiveAdminsForUpdate().stream().noneMatch(a -> !a.getId().equals(admin.getId()))) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG69");
         }
     }
 

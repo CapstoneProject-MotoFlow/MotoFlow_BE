@@ -6,11 +6,6 @@ import jakarta.validation.constraints.Size;
 
 /** UC-04. The store and its only warehouse are created together (BR-04); the warehouse uses the store's address and phone. */
 public record CreateStoreRequest(
-        @NotBlank(message = "Vui lòng nhập mã cửa hàng.")
-        @Pattern(regexp = "^\s*[A-Za-z0-9_-]{2,20}\s*$",
-                message = "Mã cửa hàng dài 2–20 ký tự, chỉ gồm chữ không dấu, số và _ -")
-        String storeCode,
-
         @NotBlank(message = "Vui lòng nhập tên cửa hàng.")
         @Size(max = 150, message = "Tên cửa hàng tối đa 150 ký tự.")
         String storeName,

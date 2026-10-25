@@ -256,7 +256,8 @@ MOTOFLOW_JWT_SECRET=$(secret)
 MOTOFLOW_CORS_ORIGINS=$ORIGIN
 # First Admin: created only while the database has no Admin; the password must be changed at first sign-in.
 MOTOFLOW_ADMIN_USERNAME=admin
-MOTOFLOW_ADMIN_PASSWORD=$(alnum 16)
+# alnum alone has no symbol; PasswordPolicy needs a letter, a digit and a symbol.
+MOTOFLOW_ADMIN_PASSWORD=$(alnum 14)a1@
 # false only while SITE_ADDRESS is plain HTTP; browsers drop Secure cookies over http.
 REFRESH_COOKIE_SECURE=$SECURE
 BACKEND_MEM_LIMIT=1g

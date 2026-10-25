@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/stores"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "chi nhánh {{RUN}}",
+      "address": "Huế",
+      "warehouseName": "Kho",
+      "central": false
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã lỗi MSG49', () => pm.expect(pm.response.json().code).to.eql('MSG49'));
+      pm.test('Báo tên đã dùng', () => pm.expect(pm.response.json().message).to.eql('Tên cửa hàng chi nhánh ' + pm.collectionVariables.get('RUN') + ' đã được sử dụng.'));
+    language: text/javascript
+order: 4000

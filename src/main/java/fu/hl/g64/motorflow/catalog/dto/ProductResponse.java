@@ -7,14 +7,14 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * UC-14. {@code wholesalePrice} and {@code stock} belong to the store being viewed and are null when no store is
- * viewed; prices are null while none is in effect.
+ * UC-14. {@code stock} belongs to the store being viewed and is null when no store is viewed; {@code retailPrice}
+ * is null while none is in effect. There is no per-store wholesale price (BR-10).
  */
 public record ProductResponse(long id, String sku, String partName, long categoryId, String categoryName,
                               String brand, String countryOfOrigin, String baseUnit, String specifications,
                               ProductStatus status, LocalDateTime discontinuedAt, List<String> oemCodes,
                               List<String> barcodes, List<String> imageUrls, List<VehicleModelResponse> vehicleModels,
-                              Long retailPrice, Long wholesalePrice, Stock stock,
+                              Long retailPrice, Stock stock,
                               LocalDateTime createdAt, LocalDateTime updatedAt) {
 
     /** Quantities by stock status (BR-29) and where the part is kept in the viewed store. */
