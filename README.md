@@ -84,13 +84,13 @@ src/main/java/fu/hl/g64/motorflow/
 ├── store/               Store, Warehouse
 ├── catalog/             PartCategory, VehicleModel, Product, ProductIdentifier, ProductImage, ProductVehicleModel
 ├── pricing/             PricingPolicy
-├── partner/             Customer, CustomerTier, CustomerTierChange, CreditEligibilityEvent, Supplier
+├── partner/             Customer, CreditEligibilityEvent, Supplier
 ├── sales/               SalesOrder, SalesOrderVersion, SalesOrderLine, UnmetDemand
 ├── receivable/          Receivable, Payment
 ├── receiving/           GoodsReceiptRequest(+Line), GoodsReceipt(+Line)
 ├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line)
 ├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent
-├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line),
+├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
 │                        PeriodStockBalance, DailyStockBalance
 ├── adjustment/          AdjustmentRequest, AdjustmentStockLine, AdjustmentAmountLine
 └── operation/           WarehouseTask, Notification, Attachment

@@ -53,9 +53,6 @@ public class PricingPolicy {
     @Column(name = "rounding_rule", length = 20)
     private RoundingRule roundingRule;
 
-    @Column(name = "order_value_from")
-    private Long orderValueFrom;
-
     @Column(precision = 5, scale = 2)
     private BigDecimal rate;
 
