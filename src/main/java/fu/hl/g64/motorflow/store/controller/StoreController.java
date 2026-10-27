@@ -42,6 +42,12 @@ public class StoreController {
         return storeService.listStores(q, status, central);
     }
 
+    @Operation(summary = "One store with its warehouse, Branch Managers and stock count")
+    @GetMapping("/{id}")
+    public StoreResponse detail(@PathVariable long id) {
+        return storeService.getStore(id);
+    }
+
     @Operation(summary = "Create a planned store and its warehouse (UC-04)")
     @PostMapping
     public ResponseEntity<StoreResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,

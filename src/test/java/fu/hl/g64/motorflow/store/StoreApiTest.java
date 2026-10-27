@@ -56,6 +56,19 @@ class StoreApiTest extends IntegrationTest {
     }
 
     @Test
+    void theLocationOfANewStoreShowsItAndAnUnknownIdGivesMsg52() throws Exception {
+        String location = createStore(store("ch01", true)).andExpect(status().isCreated())
+                .andReturn().getResponse().getHeader(HttpHeaders.LOCATION);
+
+        mvc.perform(get(location).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.storeName").value("Cửa hàng ch01"))
+                .andExpect(jsonPath("$.warehouse.central").value(true));
+        mvc.perform(get("/api/stores/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG52"));
+    }
+
+    @Test
     void createsAPlannedStoreWithItsOnlyWarehouse() throws Exception {
         Map<String, Object> body = new HashMap<>(store("ch01", true));
         body.put("storeName", " Cửa hàng ch01 ");

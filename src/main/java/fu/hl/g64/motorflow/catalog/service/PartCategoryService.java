@@ -50,6 +50,12 @@ public class PartCategoryService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public PartCategoryResponse get(long id) {
+        PartCategory category = find(id);
+        return node(category, byParent(categories.findAll(Sort.by("categoryName"))));
+    }
+
     @Transactional
     public PartCategoryResponse create(AuthenticatedUser actor, PartCategoryRequest request) {
         String name = request.categoryName().strip();

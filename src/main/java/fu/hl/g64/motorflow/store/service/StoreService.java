@@ -74,6 +74,16 @@ public class StoreService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public StoreResponse getStore(long storeId) {
+        Store store = stores.findById(storeId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG52"));
+        Warehouse warehouse = warehouses.findByStoreId(storeId).orElse(null);
+        List<UserAccount> managers = users.findByRoleAndStoreIdAndStatus(Role.BRANCH_MANAGER, storeId, AccountStatus.ACTIVE);
+        return StoreResponse.from(store, warehouse, managers,
+                warehouse == null ? 0 : productsInStockByWarehouse().getOrDefault(warehouse.getId(), 0L));
+    }
+
     /** A new store is planned, has exactly one warehouse and no stock (BR-04, BR-64). */
     @Transactional
     public StoreResponse createStore(AuthenticatedUser actor, CreateStoreRequest request) {
