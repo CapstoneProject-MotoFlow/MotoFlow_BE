@@ -1,7 +1,7 @@
 # Runtime image of the MotoFlow backend.
 # CI builds and tests the JAR first (./mvnw verify) and builds this image from that same JAR,
 # so there is no Maven stage here. Local build: ./mvnw -DskipTests package && docker build -t motoflow-backend .
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 
 WORKDIR /app
 RUN groupadd --system --gid 10001 app \
