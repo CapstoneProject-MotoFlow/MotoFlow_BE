@@ -42,10 +42,6 @@ public class Customer {
     @Column(name = "credit_status", nullable = false, length = 20)
     private CreditStatus creditStatus;
 
-    /** Current tier, set only by Owner together with a customer_tier_change row. */
-    @Column(name = "customer_tier_id")
-    private Long customerTierId;
-
     @Column(name = "created_by", nullable = false)
     private Long createdBy;
 

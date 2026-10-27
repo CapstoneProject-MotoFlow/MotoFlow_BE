@@ -37,6 +37,10 @@ public class StockCount {
     @Column(name = "inventory_period_id")
     private Long inventoryPeriodId;
 
+    /** Set only for a cycle count made from an approved request; Owner-created counts have none. */
+    @Column(name = "stock_count_request_id", unique = true)
+    private Long stockCountRequestId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "count_type", nullable = false, length = 10)
     private CountType countType;
