@@ -50,4 +50,24 @@ public class Customer {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /** UC-27. A new customer may not buy on credit until Owner grants it (UC-63). */
+    public static Customer create(String customerName, String phone, String address, String taxCode, Long createdBy,
+                                  LocalDateTime now) {
+        Customer customer = new Customer();
+        customer.creditStatus = CreditStatus.NOT_GRANTED;
+        customer.createdBy = createdBy;
+        customer.createdAt = now;
+        customer.update(customerName, phone, address, taxCode, now);
+        return customer;
+    }
+
+    /** UC-29. Orders keep the name, phone and address recorded on their own version. */
+    public void update(String newCustomerName, String newPhone, String newAddress, String newTaxCode, LocalDateTime now) {
+        customerName = newCustomerName;
+        phone = newPhone;
+        address = newAddress;
+        taxCode = newTaxCode;
+        updatedAt = now;
+    }
 }

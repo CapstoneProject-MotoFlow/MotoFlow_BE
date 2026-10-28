@@ -178,15 +178,11 @@ public class SupplierService {
             if (StringUtils.hasText(q)) {
                 String needle = q.strip().toLowerCase(Locale.ROOT);
                 String like = "%" + needle + "%";
-                List<Predicate> any = new ArrayList<>(List.of(
+                where.add(cb.or(
                         cb.like(cb.lower(root.get("supplierCode")), like),
-                        cb.like(cb.lower(root.get("supplierName")), like)));
-                String digits = needle.replace(" ", "");
-                if (!digits.isEmpty()) {
-                    any.add(cb.like(cb.function("replace", String.class, root.get("phone"), cb.literal(" "), cb.literal("")),
-                            "%" + digits + "%"));
-                }
-                where.add(cb.or(any.toArray(Predicate[]::new)));
+                        cb.like(cb.lower(root.get("supplierName")), like),
+                        cb.like(cb.function("replace", String.class, root.get("phone"), cb.literal(" "), cb.literal("")),
+                                "%" + needle.replace(" ", "") + "%")));
             }
             if (status != null) {
                 where.add(cb.equal(root.get("status"), status));
