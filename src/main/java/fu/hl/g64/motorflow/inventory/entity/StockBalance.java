@@ -58,4 +58,16 @@ public class StockBalance {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /** UC-05: the template's storage area, bin location and low-stock threshold in another warehouse, with no stock. */
+    public static StockBalance withSettingsOf(StockBalance template, Long warehouseId, LocalDateTime now) {
+        StockBalance balance = new StockBalance();
+        balance.warehouseId = warehouseId;
+        balance.productId = template.productId;
+        balance.storageArea = template.storageArea;
+        balance.binLocation = template.binLocation;
+        balance.lowStockThreshold = template.lowStockThreshold;
+        balance.updatedAt = now;
+        return balance;
+    }
 }
