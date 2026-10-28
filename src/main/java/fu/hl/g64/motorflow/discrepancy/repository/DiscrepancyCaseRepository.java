@@ -23,4 +23,13 @@ public interface DiscrepancyCaseRepository extends JpaRepository<DiscrepancyCase
               and c.goodsReceiptId in (select r.id from GoodsReceipt r where r.goodsReceiptRequestId in
                   (select q.id from GoodsReceiptRequest q where q.supplierId = :supplierId))""")
     long countBySupplierAndStatus(Long supplierId, DiscrepancyCaseStatus status);
+
+    /** Open cases on supplier deliveries received at the warehouse. */
+    @Query("""
+            select count(c) from DiscrepancyCase c
+            where c.sourceType = fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType.SUPPLIER
+              and c.status = fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus.OPEN
+              and c.goodsReceiptId in (select r.id from GoodsReceipt r where r.goodsReceiptRequestId in
+                  (select q.id from GoodsReceiptRequest q where q.warehouseId = :warehouseId))""")
+    long countOpenSupplierCasesAtWarehouse(Long warehouseId);
 }
