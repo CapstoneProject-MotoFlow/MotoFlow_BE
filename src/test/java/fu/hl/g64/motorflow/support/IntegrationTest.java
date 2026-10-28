@@ -52,7 +52,12 @@ public abstract class IntegrationTest {
 
     private static EmbeddedPostgres startPostgres() {
         try {
-            return EmbeddedPostgres.builder().start();
+            return EmbeddedPostgres.builder()
+                    // upper()/lower() must know Vietnamese letters on every machine, as on the server's postgres image;
+                    // initdb otherwise takes the machine's locale, and under C/POSIX "CỬA" and "Cửa" stay different.
+                    .setLocaleConfig("locale-provider", "builtin")
+                    .setLocaleConfig("builtin-locale", "C.UTF-8")
+                    .start();
         } catch (IOException e) {
             throw new UncheckedIOException("Could not start embedded PostgreSQL", e);
         }
