@@ -22,6 +22,9 @@ public class TestMotorFlowApplication {
                 .setDataDirectory(Path.of(".dev-postgres"))
                 .setCleanDataDirectory(false)
                 .setPort(5433)
+                // Same Unicode upper()/lower() as the tests and the server; applies when .dev-postgres/ is created.
+                .setLocaleConfig("locale-provider", "builtin")
+                .setLocaleConfig("builtin-locale", "C.UTF-8")
                 .start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {

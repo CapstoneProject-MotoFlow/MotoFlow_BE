@@ -60,6 +60,13 @@ public class Store {
         return store;
     }
 
+    /** UC-05: a new planned store that keeps which store it was copied from; only configuration is copied. */
+    public static Store copyOf(Store template, String storeName, String address, String phone, LocalDateTime now) {
+        Store store = create(storeName, address, phone, now);
+        store.copiedFromStoreId = template.getId();
+        return store;
+    }
+
     /** UC-06. The id never changes, so documents and permission history keep pointing at the same store. */
     public void update(String newName, String newAddress, String newPhone, StoreStatus newStatus, LocalDateTime now) {
         storeName = newName;

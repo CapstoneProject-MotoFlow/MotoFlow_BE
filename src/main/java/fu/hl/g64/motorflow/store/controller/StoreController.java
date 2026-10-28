@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.store.controller;
 
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.store.dto.CopiedStoreResponse;
+import fu.hl.g64.motorflow.store.dto.CopyStoreRequest;
 import fu.hl.g64.motorflow.store.dto.CreateStoreRequest;
 import fu.hl.g64.motorflow.store.dto.StoreResponse;
 import fu.hl.g64.motorflow.store.dto.UpdateStoreRequest;
@@ -25,7 +27,8 @@ import org.springframework.web.bind.annotation.RestController;
 import java.net.URI;
 import java.util.List;
 
-@Tag(name = "Stores", description = "UC-03 View Store List, UC-04 Create Store, UC-06 Update Store (Admin, Owner)")
+@Tag(name = "Stores", description = "UC-03 View Store List, UC-04 Create Store, UC-05 Copy Store Configuration, "
+        + "UC-06 Update Store (Admin, Owner)")
 @RestController
 @RequestMapping("/api/stores")
 @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
@@ -54,6 +57,15 @@ public class StoreController {
                                                 @Valid @RequestBody CreateStoreRequest request) {
         StoreResponse created = storeService.createStore(actor, request);
         return ResponseEntity.created(URI.create("/api/stores/" + created.id())).body(created);
+    }
+
+    @Operation(summary = "Create a planned store from the configuration of store {id}: storage locations and "
+            + "low-stock thresholds, never stock, documents or debts (UC-05)")
+    @PostMapping("/{id}/copy")
+    public ResponseEntity<CopiedStoreResponse> copy(@AuthenticationPrincipal AuthenticatedUser actor, @PathVariable long id,
+                                                    @Valid @RequestBody CopyStoreRequest request) {
+        CopiedStoreResponse copied = storeService.copyStore(actor, id, request);
+        return ResponseEntity.created(URI.create("/api/stores/" + copied.store().id())).body(copied);
     }
 
     @Operation(summary = "Update a store and its warehouse (UC-06)")

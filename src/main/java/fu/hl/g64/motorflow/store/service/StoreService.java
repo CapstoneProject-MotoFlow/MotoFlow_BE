@@ -8,7 +8,10 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
+import fu.hl.g64.motorflow.inventory.service.StockBalanceService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.store.dto.CopiedStoreResponse;
+import fu.hl.g64.motorflow.store.dto.CopyStoreRequest;
 import fu.hl.g64.motorflow.store.dto.CreateStoreRequest;
 import fu.hl.g64.motorflow.store.dto.StoreResponse;
 import fu.hl.g64.motorflow.store.dto.UpdateStoreRequest;
@@ -34,7 +37,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/** UC-03 View Store List, UC-04 Create Store, UC-06 Update Store (including closing a store). */
+/** UC-03 View Store List, UC-04 Create Store, UC-05 Copy Store Configuration, UC-06 Update Store (including closing a store). */
 @Service
 @RequiredArgsConstructor
 public class StoreService {
@@ -43,6 +46,7 @@ public class StoreService {
     private final WarehouseRepository warehouses;
     private final UserAccountRepository users;
     private final StockBalanceRepository stockBalances;
+    private final StockBalanceService stockBalanceService;
     private final AuditLogRepository auditLog;
     private final Clock clock;
 
@@ -97,17 +101,37 @@ public class StoreService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
-        Store store = Store.create(name, request.address().strip(), phone, now);
-        try {
-            store = stores.saveAndFlush(store);
-        } catch (DataIntegrityViolationException e) {
-            // Another user created the same name a moment earlier.
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", name);
-        }
+        Store store = saveNew(Store.create(name, request.address().strip(), phone, now));
         Warehouse warehouse = warehouses.save(Warehouse.create(store.getId(), request.warehouseName().strip(),
                 store.getAddress(), phone, request.central(), now));
         auditLog.save(AuditLog.record("STORE", store.getId(), "STORE_CREATED", actor.id(), null, now));
         return StoreResponse.from(store, warehouse, List.of(), 0);
+    }
+
+    /**
+     * UC-05: a planned store whose warehouse stores parts where the template's does, with the same low-stock
+     * thresholds. Stock, documents and debts are never copied (BR-64), and the copy is never the central warehouse.
+     */
+    @Transactional
+    public CopiedStoreResponse copyStore(AuthenticatedUser actor, long templateId, CopyStoreRequest request) {
+        Store template = stores.findById(templateId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG52"));
+        String name = request.storeName().strip();
+        if (stores.existsByStoreNameIgnoreCase(name)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", name);
+        }
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        String phone = blankToNull(request.phone());
+        Store store = saveNew(Store.copyOf(template, name, request.address().strip(), phone, now));
+        Warehouse warehouse = warehouses.save(Warehouse.create(store.getId(), request.warehouseName().strip(),
+                store.getAddress(), phone, false, now));
+        int copied = warehouses.findByStoreId(templateId)
+                .map(from -> stockBalanceService.copySettings(from.getId(), warehouse.getId(), now))
+                .orElse(0);
+        auditLog.save(AuditLog.record("STORE", store.getId(), "STORE_COPIED", actor.id(),
+                "Sao chép cấu hình từ cửa hàng #" + templateId, now));
+        return new CopiedStoreResponse(StoreResponse.from(store, warehouse, List.of(), 0), copied);
     }
 
     /** The warehouse follows the store's address and phone. */
@@ -183,6 +207,15 @@ public class StoreService {
                     String code = stores.findById(central.getStoreId()).map(Store::getStoreName).orElse("?");
                     throw new BusinessException(HttpStatus.CONFLICT, "MSG50", code);
                 });
+    }
+
+    private Store saveNew(Store store) {
+        try {
+            return stores.saveAndFlush(store);
+        } catch (DataIntegrityViolationException e) {
+            // Another user created the same name a moment earlier.
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG49", store.getStoreName());
+        }
     }
 
     private Map<Long, Long> productsInStockByWarehouse() {

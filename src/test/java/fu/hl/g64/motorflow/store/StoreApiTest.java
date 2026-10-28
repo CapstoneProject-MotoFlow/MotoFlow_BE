@@ -215,6 +215,71 @@ class StoreApiTest extends IntegrationTest {
     }
 
     @Test
+    void aCopyTakesWhereTheTemplateStoresPartsButNoStock() throws Exception {
+        long template = createdId(createStore(store("CH01", true)));
+        Long templateWarehouse = jdbc.queryForObject("SELECT id FROM warehouse WHERE store_id = ?", Long.class, template);
+        long placed = addProduct("SKU1", "ACTIVE");
+        long discontinued = addProduct("SKU2", "DISCONTINUED");
+        long stockOnly = addProduct("SKU3", "ACTIVE");
+        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, available_qty, damaged_qty, storage_area, "
+                + "bin_location, low_stock_threshold) VALUES (?, ?, 10, 2, 'Khu A', 'A-01', 5)", templateWarehouse, placed);
+        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, bin_location) VALUES (?, ?, 'B-01')",
+                templateWarehouse, discontinued);
+        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, available_qty) VALUES (?, ?, 3)",
+                templateWarehouse, stockOnly);
+
+        String body = copyStore(template, store("CH02", false))
+                .andExpect(status().isCreated())
+                .andExpect(header().string(HttpHeaders.LOCATION, startsWith("/api/stores/")))
+                .andExpect(jsonPath("$.store.storeName").value("Cửa hàng CH02"))
+                .andExpect(jsonPath("$.store.status").value("PLANNED"))
+                .andExpect(jsonPath("$.store.copiedFromStoreId").value(template))
+                .andExpect(jsonPath("$.store.warehouse.name").value("Kho CH02"))
+                .andExpect(jsonPath("$.store.warehouse.central").value(false))
+                .andExpect(jsonPath("$.store.productsInStock").value(0))
+                .andExpect(jsonPath("$.copiedPartSettings").value(1))
+                .andReturn().getResponse().getContentAsString();
+        long copy = ((Number) JsonPath.read(body, "$.store.id")).longValue();
+
+        Long copyWarehouse = jdbc.queryForObject("SELECT id FROM warehouse WHERE store_id = ?", Long.class, copy);
+        assertThat(jdbc.queryForList("SELECT * FROM stock_balance WHERE warehouse_id = ?", copyWarehouse))
+                .singleElement()
+                .satisfies(row -> assertThat(row)
+                        .containsEntry("product_id", placed)
+                        .containsEntry("storage_area", "Khu A").containsEntry("bin_location", "A-01")
+                        .containsEntry("low_stock_threshold", 5)
+                        .containsEntry("available_qty", 0).containsEntry("damaged_qty", 0));
+        assertThat(jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE warehouse_id = ? AND product_id = ?",
+                Integer.class, templateWarehouse, placed)).isEqualTo(10);
+        assertThat(jdbc.queryForMap("SELECT entity_id, actor_id FROM audit_log WHERE action = 'STORE_COPIED'"))
+                .containsEntry("entity_id", copy).containsEntry("actor_id", owner.getId());
+        mvc.perform(get("/api/stores/{id}", copy).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.copiedFromStoreId").value(template));
+        mvc.perform(get("/api/stores/{id}", template).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(jsonPath("$.copiedFromStoreId").doesNotExist());
+    }
+
+    @Test
+    void aCopyNeedsAnExistingTemplateAndAFreeName() throws Exception {
+        long template = createdId(createStore(store("CH01", false)));
+        copyStore(999999L, store("CH02", false))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG52"));
+        copyStore(template, store("ch01", false))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG49"));
+        copyStore(template, Map.of("storeName", " "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"))
+                .andExpect(jsonPath("$.fieldErrors.storeName").exists())
+                .andExpect(jsonPath("$.fieldErrors.warehouseName").exists());
+
+        createUser("admin01", Role.ADMIN, null);
+        copyStore(signIn("admin01"), template, store("CH02", false))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.copiedPartSettings").value(0));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_balance", Long.class)).isZero();
+    }
+
+    @Test
     void invalidFieldsAreListed() throws Exception {
         createStore(Map.of("storeName", "", "central", false))
                 .andExpect(status().isBadRequest())
@@ -228,7 +293,10 @@ class StoreApiTest extends IntegrationTest {
     void branchManagersMayNotManageStores() throws Exception {
         long id = createdId(createStore(store("CH01", false)));
         createUser("bm01", Role.BRANCH_MANAGER, id);
-        mvc.perform(get("/api/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + signIn("bm01")))
+        String bm = signIn("bm01");
+        mvc.perform(get("/api/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + bm))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        copyStore(bm, id, store("CH02", false))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
     }
 
@@ -249,6 +317,13 @@ class StoreApiTest extends IntegrationTest {
                 + "VALUES (?, 'Phụ tùng', ?, 'Cái', ?) RETURNING id", Long.class, sku, categoryId, owner.getId());
         jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, available_qty, in_transit_qty) VALUES (?, ?, ?, ?)",
                 warehouseId, productId, available, inTransit);
+    }
+
+    private long addProduct(String sku, String status) {
+        Long categoryId = jdbc.queryForObject("INSERT INTO part_category (category_name, vehicle_type) "
+                + "VALUES (?, 'MOTORCYCLE') RETURNING id", Long.class, "Nhóm " + sku);
+        return jdbc.queryForObject("INSERT INTO product (sku, part_name, category_id, base_unit, status, created_by) "
+                + "VALUES (?, 'Phụ tùng', ?, 'Cái', ?, ?) RETURNING id", Long.class, sku, categoryId, status, owner.getId());
     }
 
     private UserAccount createUser(String username, Role role, Long store) {
@@ -273,6 +348,18 @@ class StoreApiTest extends IntegrationTest {
     private ResultActions createStore(Map<String, Object> body) throws Exception {
         return mvc.perform(post("/api/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(body)));
+    }
+
+    private ResultActions copyStore(long templateId, Map<String, Object> body) throws Exception {
+        return copyStore(token, templateId, body);
+    }
+
+    /** {@code body} as for {@link #store}; a copy has no {@code central} flag. */
+    private ResultActions copyStore(String bearer, long templateId, Map<String, Object> body) throws Exception {
+        Map<String, Object> request = new HashMap<>(body);
+        request.remove("central");
+        return mvc.perform(post("/api/stores/{id}/copy", templateId).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer)
+                .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(request)));
     }
 
     /** Without a {@code storeName} in the body, the store is renamed to "Cửa hàng mới {id}" (names are unique). */

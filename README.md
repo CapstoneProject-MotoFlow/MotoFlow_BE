@@ -81,10 +81,11 @@ src/main/java/fu/hl/g64/motorflow/
 │   └── config/          Clock (giờ Việt Nam), OpenAPI
 ├── auth/                UC-01 đăng nhập, UC-02 đổi mật khẩu, refresh token
 ├── account/             UC-08 tạo tài khoản, UC-11 cấp lại mật khẩu, quyền
-├── store/               Store, Warehouse
+├── home/                Trang chủ sau đăng nhập (SCR-03): thông báo chưa đọc, việc đang chờ theo vai trò
+├── store/               Store, Warehouse, UC-05 sao chép cấu hình cửa hàng
 ├── catalog/             PartCategory, VehicleModel, Product, ProductIdentifier, ProductImage, ProductVehicleModel
 ├── pricing/             PricingPolicy
-├── partner/             Customer, CreditEligibilityEvent, Supplier
+├── partner/             Customer, CreditEligibilityEvent, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
 ├── sales/               SalesOrder, SalesOrderVersion, SalesOrderLine, UnmetDemand
 ├── receivable/          Receivable, Payment
 ├── receiving/           GoodsReceiptRequest(+Line), GoodsReceipt(+Line)
