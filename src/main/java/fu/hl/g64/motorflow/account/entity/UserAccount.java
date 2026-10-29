@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.account.entity;
 
 import fu.hl.g64.motorflow.account.entity.enums.AccountStatus;
+import fu.hl.g64.motorflow.account.entity.enums.PermissionCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -16,7 +17,9 @@ import lombok.NoArgsConstructor;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.Locale;
+import java.util.Set;
 
 @Entity
 @Table(name = "user_account")
@@ -62,6 +65,12 @@ public class UserAccount {
 
     @Column(name = "must_change_password", nullable = false)
     private boolean mustChangePassword;
+
+    @Column(name = "can_edit_catalog", nullable = false)
+    private boolean canEditCatalog;
+
+    @Column(name = "can_edit_retail_price", nullable = false)
+    private boolean canEditRetailPrice;
 
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
@@ -176,6 +185,31 @@ public class UserAccount {
         role = newRole;
         storeId = newStoreId;
         updatedAt = now;
+    }
+
+    /** Operation permissions held on top of the role (BR-05, BR-08). */
+    public Set<PermissionCode> permissions() {
+        Set<PermissionCode> codes = EnumSet.noneOf(PermissionCode.class);
+        if (canEditCatalog) {
+            codes.add(PermissionCode.CATALOG_EDIT);
+        }
+        if (canEditRetailPrice) {
+            codes.add(PermissionCode.RETAIL_PRICE_EDIT);
+        }
+        return codes;
+    }
+
+    /** @return true if the permission changed */
+    public boolean setPermission(PermissionCode code, boolean granted, LocalDateTime now) {
+        if (permissions().contains(code) == granted) {
+            return false;
+        }
+        switch (code) {
+            case CATALOG_EDIT -> canEditCatalog = granted;
+            case RETAIL_PRICE_EDIT -> canEditRetailPrice = granted;
+        }
+        updatedAt = now;
+        return true;
     }
 
     /** Usernames are stored in lower case, so "Staff01" and "staff01" are the same account. */

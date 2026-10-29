@@ -29,7 +29,7 @@ import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
 import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
-import fu.hl.g64.motorflow.store.entity.Warehouse;
+import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.service.StoreScope;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
@@ -79,8 +79,8 @@ public class ProductService {
     /** By SKU. Stock and storage location are those of the viewed store (BR-03). */
     @Transactional(readOnly = true)
     public PageResponse<ProductSummaryResponse> search(AuthenticatedUser user, ProductSearch filter, int page, int size) {
-        Warehouse warehouse = storeScope.viewableWarehouse(user, filter.storeId());
-        Page<Product> found = products.findAll(matching(filter, warehouse),
+        Store store = storeScope.viewableStore(user, filter.storeId());
+        Page<Product> found = products.findAll(matching(filter, store),
                 PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100), Sort.by("sku")));
         List<Long> ids = found.map(Product::getId).getContent();
         if (ids.isEmpty()) {
@@ -94,8 +94,8 @@ public class ProductService {
                 .collect(Collectors.groupingBy(ProductIdentifier::getProductId,
                         Collectors.mapping(ProductIdentifier::getIdentifierValue, Collectors.toList())));
         Map<Long, Long> prices = retailPricesInEffect(ids);
-        Map<Long, StockBalance> stock = warehouse == null ? Map.of()
-                : stockBalances.findByWarehouseIdAndProductIdIn(warehouse.getId(), ids).stream()
+        Map<Long, StockBalance> stock = store == null ? Map.of()
+                : stockBalances.findByStoreIdAndProductIdIn(store.getId(), ids).stream()
                 .collect(Collectors.toMap(StockBalance::getProductId, Function.identity()));
 
         return PageResponse.of(found, found.getContent().stream().map(p -> {
@@ -103,7 +103,7 @@ public class ProductService {
             return new ProductSummaryResponse(p.getId(), p.getSku(), p.getPartName(), p.getBrand(), p.getBaseUnit(),
                     p.getCategoryId(), categoryNames.get(p.getCategoryId()), oemCodes.getOrDefault(p.getId(), List.of()),
                     p.getStatus(), prices.get(p.getId()),
-                    warehouse == null ? null : balance == null ? 0 : balance.getAvailableQty(),
+                    store == null ? null : balance == null ? 0 : balance.getAvailableQty(),
                     balance == null ? null : balance.getStorageArea(), balance == null ? null : balance.getBinLocation());
         }).toList());
     }
@@ -111,7 +111,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     public ProductResponse detail(AuthenticatedUser user, long id, Long storeId) {
         Product product = find(id);
-        Warehouse warehouse = storeScope.viewableWarehouse(user, storeId);
+        Store store = storeScope.viewableStore(user, storeId);
 
         List<ProductIdentifier> codes = identifiers.findByProductIdIn(List.of(id));
         List<String> imageUrls = images.findByProductIdIn(List.of(id)).stream()
@@ -120,8 +120,8 @@ public class ProductService {
                         .map(ProductVehicleModel::getVehicleModelId).toList()).stream()
                 .sorted(Comparator.comparing(VehicleModel::getManufacturer).thenComparing(VehicleModel::getModelName))
                 .map(VehicleModelResponse::from).toList();
-        ProductResponse.Stock stock = warehouse == null ? null : ProductResponse.Stock.of(warehouse.getStoreId(),
-                stockBalances.findByWarehouseIdAndProductIdIn(warehouse.getId(), List.of(id)).stream().findFirst().orElse(null));
+        ProductResponse.Stock stock = store == null ? null : ProductResponse.Stock.of(store.getId(),
+                stockBalances.findByStoreIdAndProductIdIn(store.getId(), List.of(id)).stream().findFirst().orElse(null));
 
         return new ProductResponse(product.getId(), product.getSku(), product.getPartName(), product.getCategoryId(),
                 categories.findById(product.getCategoryId()).map(PartCategory::getCategoryName).orElse(null),
@@ -198,7 +198,7 @@ public class ProductService {
         auditLog.save(AuditLog.record("PRODUCT", id, action, actor.id(), null, now));
     }
 
-    private Specification<Product> matching(ProductSearch filter, Warehouse warehouse) {
+    private Specification<Product> matching(ProductSearch filter, Store store) {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             if (StringUtils.hasText(filter.q())) {
@@ -230,10 +230,10 @@ public class ProductService {
             if (filter.status() != null) {
                 where.add(cb.equal(root.get("status"), filter.status()));
             }
-            if (Boolean.TRUE.equals(filter.inStockOnly()) && warehouse != null) {
+            if (Boolean.TRUE.equals(filter.inStockOnly()) && store != null) {
                 Subquery<Long> sellable = query.subquery(Long.class);
                 Root<StockBalance> balance = sellable.from(StockBalance.class);
-                sellable.select(balance.get("productId")).where(cb.equal(balance.get("warehouseId"), warehouse.getId()),
+                sellable.select(balance.get("productId")).where(cb.equal(balance.get("storeId"), store.getId()),
                         cb.greaterThan(balance.get("availableQty"), 0));
                 where.add(root.get("id").in(sellable));
             }

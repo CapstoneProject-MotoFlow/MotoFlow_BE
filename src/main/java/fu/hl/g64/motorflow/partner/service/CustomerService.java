@@ -2,8 +2,6 @@ package fu.hl.g64.motorflow.partner.service;
 
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
-import fu.hl.g64.motorflow.catalog.entity.Product;
-import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
@@ -11,20 +9,19 @@ import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.partner.dto.CustomerDetailResponse;
 import fu.hl.g64.motorflow.partner.dto.CustomerRequest;
 import fu.hl.g64.motorflow.partner.dto.CustomerResponse;
-import fu.hl.g64.motorflow.partner.entity.CreditEligibilityEvent;
 import fu.hl.g64.motorflow.partner.entity.Customer;
 import fu.hl.g64.motorflow.partner.entity.enums.CreditStatus;
-import fu.hl.g64.motorflow.partner.repository.CreditEligibilityEventRepository;
+import fu.hl.g64.motorflow.partner.entity.enums.EventType;
 import fu.hl.g64.motorflow.partner.repository.CustomerRepository;
 import fu.hl.g64.motorflow.receivable.entity.Payment;
+import fu.hl.g64.motorflow.receivable.entity.PaymentAllocation;
 import fu.hl.g64.motorflow.receivable.entity.Receivable;
+import fu.hl.g64.motorflow.receivable.repository.PaymentAllocationRepository;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
 import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
-import fu.hl.g64.motorflow.sales.entity.UnmetDemand;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
-import fu.hl.g64.motorflow.sales.repository.UnmetDemandRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
@@ -49,7 +46,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -61,14 +58,16 @@ public class CustomerService {
     /** Rows of the order and payment lists on the detail screen; older ones are counted but not listed. */
     public static final int HISTORY_SIZE = 20;
 
+    /** Credit grants and revocations by Owner (UC-63, UC-64) are kept in audit_log as CREDIT_ + event type. */
+    private static final String CREDIT_PREFIX = "CREDIT_";
+    private static final Set<String> CREDIT_ACTIONS = Set.of(CREDIT_PREFIX + EventType.GRANTED, CREDIT_PREFIX + EventType.REVOKED);
+
     private final CustomerRepository customers;
-    private final CreditEligibilityEventRepository creditEvents;
     private final ReceivableRepository receivables;
     private final PaymentRepository payments;
+    private final PaymentAllocationRepository allocations;
     private final SalesOrderRepository salesOrders;
     private final SalesOrderLineRepository salesOrderLines;
-    private final UnmetDemandRepository unmetDemands;
-    private final ProductRepository products;
     private final StoreRepository stores;
     private final UserAccountRepository users;
     private final StoreScope storeScope;
@@ -98,24 +97,26 @@ public class CustomerService {
         List<OpenDebt> debts = unsettledDebts(List.of(id));
         List<OpenDebt> visibleDebts = debts.stream()
                 .filter(d -> storeId == null || d.receivable().getStoreId().equals(storeId)).toList();
-        List<CreditEligibilityEvent> credit = creditEvents.findByCustomerIdOrderByDecidedAtDescIdDesc(id);
+        List<AuditLog> credit = auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc("CUSTOMER", id,
+                CREDIT_ACTIONS);
 
         Pageable newest = PageRequest.of(0, HISTORY_SIZE, Sort.by(Sort.Direction.DESC, "id"));
         Page<SalesOrder> orders = salesOrders.findByCustomer(id, storeId, newest);
         Page<Payment> paid = payments.findByCustomer(id, storeId, newest);
-        List<UnmetDemand> waiting = unmetDemands.findWaitingByCustomer(id, storeId);
+        Map<Long, List<Long>> receivablesByPayment = allocations.findByPaymentIdIn(paid.map(Payment::getId).getContent())
+                .stream().collect(Collectors.groupingBy(PaymentAllocation::getPaymentId,
+                        Collectors.mapping(PaymentAllocation::getReceivableId, Collectors.toList())));
 
         Map<Long, String> storeNames = storeNames(Stream.concat(
                 visibleDebts.stream().map(d -> d.receivable().getStoreId()), orders.stream().map(SalesOrder::getStoreId)));
-        Map<Long, String> deciders = users.findAllById(credit.stream().map(CreditEligibilityEvent::getDecidedBy)
+        Map<Long, String> deciders = users.findAllById(credit.stream().map(AuditLog::getActorId)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
         Map<Long, Long> totals = orderTotals(orders.map(SalesOrder::getId).getContent());
-        Map<Long, Product> productById = products.findAllById(waiting.stream().map(UnmetDemand::getProductId)
-                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
 
         return new CustomerDetailResponse(withDebts(customer, debts, user),
-                credit.stream().map(e -> new CustomerDetailResponse.CreditEvent(e.getEventType(), e.getReason(),
-                        deciders.get(e.getDecidedBy()), e.getDecidedAt())).toList(),
+                credit.stream().map(e -> new CustomerDetailResponse.CreditEvent(
+                        EventType.valueOf(e.getAction().substring(CREDIT_PREFIX.length())), e.getReason(),
+                        deciders.get(e.getActorId()), e.getOccurredAt())).toList(),
                 visibleDebts.stream().map(d -> {
                     Receivable r = d.receivable();
                     return new CustomerDetailResponse.DebtRow(r.getId(), r.getOriginType(), r.getStoreId(),
@@ -127,14 +128,10 @@ public class CustomerService {
                         o.getCompletedAt())).getContent(),
                 orders.getTotalElements(),
                 paid.map(p -> new CustomerDetailResponse.PaymentRow(p.getId(), p.getPaymentType(), p.getSalesOrderId(),
-                        p.getReceivableId(), p.getAmount(), p.getPaymentMethod(), p.getStatus(), p.getRecordedAt()))
+                        receivablesByPayment.getOrDefault(p.getId(), List.of()), p.getAmount(), p.getPaymentMethod(),
+                        p.getStatus(), p.getRecordedAt()))
                         .getContent(),
-                paid.getTotalElements(),
-                waiting.stream().map(u -> {
-                    Product product = productById.get(u.getProductId());
-                    return new CustomerDetailResponse.UnmetDemandRow(u.getId(), u.getSalesOrderId(), u.getProductId(),
-                            product.getSku(), product.getPartName(), u.getUnmetQty(), u.getRecordedAt());
-                }).toList());
+                paid.getTotalElements());
     }
 
     /** UC-27, also used while creating a sales order for a customer without a profile. */
@@ -147,7 +144,7 @@ public class CustomerService {
         return withDebts(customer, List.of(), actor);
     }
 
-    /** UC-29. Completed orders keep the details recorded on their version (customer snapshot). */
+    /** UC-29. Orders keep the customer details recorded on them (customer snapshot). */
     @Transactional
     public CustomerResponse update(AuthenticatedUser actor, long id, CustomerRequest request) {
         Customer customer = find(id);

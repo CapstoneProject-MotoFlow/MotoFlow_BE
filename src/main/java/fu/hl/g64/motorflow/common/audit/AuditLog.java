@@ -9,13 +9,15 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * Who did what to which record, and when (NFR-S09). Rows are never updated or deleted.
- * The JSONB columns old_data / new_data are not mapped yet; map them when a feature needs
- * before/after values.
+ * old_data / new_data hold before/after values where a feature needs them (permission and credit history).
  */
 @Entity
 @Table(name = "audit_log")
@@ -45,9 +47,24 @@ public class AuditLog {
     @Column(updatable = false, length = 500)
     private String reason;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "old_data", updatable = false)
+    private Map<String, Object> oldData;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "new_data", updatable = false)
+    private Map<String, Object> newData;
+
     public static AuditLog record(String entityType, Long entityId, String action, Long actorId,
                                   String reason, LocalDateTime now) {
+        return record(entityType, entityId, action, actorId, reason, null, null, now);
+    }
+
+    public static AuditLog record(String entityType, Long entityId, String action, Long actorId, String reason,
+                                  Map<String, Object> oldData, Map<String, Object> newData, LocalDateTime now) {
         AuditLog entry = new AuditLog();
+        entry.oldData = oldData;
+        entry.newData = newData;
         entry.entityType = entityType;
         entry.entityId = entityId;
         entry.action = action;

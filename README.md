@@ -82,17 +82,17 @@ src/main/java/fu/hl/g64/motorflow/
 ├── auth/                UC-01 đăng nhập, UC-02 đổi mật khẩu, refresh token
 ├── account/             UC-08 tạo tài khoản, UC-11 cấp lại mật khẩu, quyền
 ├── home/                Trang chủ sau đăng nhập (SCR-03): thông báo chưa đọc, việc đang chờ theo vai trò
-├── store/               Store, Warehouse, UC-05 sao chép cấu hình cửa hàng
+├── store/               Store (mỗi cửa hàng là một kho, có cờ kho tổng), UC-05 sao chép cấu hình cửa hàng
 ├── catalog/             PartCategory, VehicleModel, Product, ProductIdentifier, ProductImage, ProductVehicleModel
 ├── pricing/             PricingPolicy
-├── partner/             Customer, CreditEligibilityEvent, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
-├── sales/               SalesOrder, SalesOrderVersion, SalesOrderLine, UnmetDemand
-├── receivable/          Receivable, Payment
+├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
+├── sales/               SalesOrder, SalesOrderLine (phiên bản cũ của đơn nằm trong audit_log)
+├── receivable/          Receivable, Payment, PaymentAllocation
 ├── receiving/           GoodsReceiptRequest(+Line), GoodsReceipt(+Line)
 ├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line)
 ├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent
 ├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
-│                        PeriodStockBalance, DailyStockBalance
+│                        PeriodStockBalance
 ├── adjustment/          AdjustmentRequest, AdjustmentStockLine, AdjustmentAmountLine
 └── operation/           WarehouseTask, Notification, Attachment
 ```
@@ -134,6 +134,8 @@ Các migration nằm trong `src/main/resources/db/migration/`:
 | `V5__remaining_tables.sql` | 36 bảng còn lại |
 | `V6__single_central_warehouse.sql` | Chuỗi chỉ có một kho tổng |
 | `V7__r4_database_design_50_tables.sql` | Report 4 mục 3: 43 → 50 bảng (bỏ mã do hệ thống cấp, `pricing_policy`, hạng khách hàng, lô, kỳ kho, kiểm kê, số dư kỳ/ngày) |
+| `V10__receivable_due_date_payment_allocation.sql` | `receivable.due_date`; `payment_allocation` thay `payment.receivable_id` (một lần trả nợ trả được nhiều khoản nợ) |
+| `V11__reduce_to_44_tables.sql` | 51 → 44 bảng: `warehouse` gộp vào `store` (`is_central`, cột `*_warehouse_id` thành `*_store_id`); `user_permission` thành 2 cờ trên `user_account`; `permission_history`, `credit_eligibility_event`, `sales_order_version` chuyển vào `audit_log`; bỏ `unmet_demand`, `daily_stock_balance` |
 
 **Quy tắc:**
 - **Không sửa migration đã có** (Flyway sẽ báo checksum sai trên mọi máy đã chạy nó).
@@ -160,8 +162,8 @@ public class TransferOrder {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "source_warehouse_id", nullable = false)
-    private Long sourceWarehouseId;          // FK giữ dạng id, không dùng @ManyToOne
+    @Column(name = "source_store_id", nullable = false)
+    private Long sourceStoreId;              // FK giữ dạng id, không dùng @ManyToOne
     ...
     public static TransferOrder create(..., LocalDateTime now) { ... }   // tạo mới
     public void dispatch(Long by, LocalDateTime now) { ... }             // đổi trạng thái

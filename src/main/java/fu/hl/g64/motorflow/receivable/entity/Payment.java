@@ -17,7 +17,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/** Money received from or refunded to a customer, for exactly one order or one receivable (BR-45, BR-52). */
+/** Money received from or refunded to a customer, for one order or, as a debt payment, for the receivables of its payment_allocation rows (BR-45, BR-52). */
 @Entity
 @Table(name = "payment")
 @Getter
@@ -34,9 +34,6 @@ public class Payment {
 
     @Column(name = "sales_order_id")
     private Long salesOrderId;
-
-    @Column(name = "receivable_id")
-    private Long receivableId;
 
     @Column(nullable = false)
     private long amount;

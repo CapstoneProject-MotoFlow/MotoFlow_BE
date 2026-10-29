@@ -43,7 +43,7 @@ class BootstrapAdminInitializerTest extends IntegrationTest {
         assertThat(admin.getStoreId()).isNull();
         assertThat(admin.isMustChangePassword()).isTrue();
         assertThat(passwordEncoder.matches(TEMPORARY_PASSWORD, admin.getPasswordHash())).isTrue();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM permission_history WHERE change_type = 'ACCOUNT_CREATED'",
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'ACCOUNT_CREATED'",
                 Integer.class)).isEqualTo(1);
     }
 

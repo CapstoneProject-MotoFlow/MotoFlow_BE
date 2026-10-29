@@ -3,8 +3,8 @@ package fu.hl.g64.motorflow.store.service;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
-import fu.hl.g64.motorflow.store.entity.Warehouse;
-import fu.hl.g64.motorflow.store.repository.WarehouseRepository;
+import fu.hl.g64.motorflow.store.entity.Store;
+import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -14,20 +14,20 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class StoreScope {
 
-    private final WarehouseRepository warehouses;
+    private final StoreRepository stores;
 
     /**
-     * The warehouse of the requested store, or of the user's own store when none is requested.
+     * The requested store, or the user's own store when none is requested.
      * Null when nothing is requested and the user has no store (Owner).
      */
-    public Warehouse viewableWarehouse(AuthenticatedUser user, Long requestedStoreId) {
+    public Store viewableStore(AuthenticatedUser user, Long requestedStoreId) {
         if (requestedStoreId == null || requestedStoreId.equals(user.storeId())) {
-            return user.storeId() == null ? null : warehouses.findByStoreId(user.storeId()).orElse(null);
+            return user.storeId() == null ? null : stores.findById(user.storeId()).orElse(null);
         }
         if (!seesEveryStore(user)) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
-        return warehouses.findByStoreId(requestedStoreId)
+        return stores.findById(requestedStoreId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG52"));
     }
 
@@ -35,6 +35,6 @@ public class StoreScope {
     public boolean seesEveryStore(AuthenticatedUser user) {
         return user.role() == Role.OWNER
                 || (user.role() == Role.BRANCH_MANAGER && user.storeId() != null
-                && warehouses.findByStoreId(user.storeId()).map(Warehouse::isCentral).orElse(false));
+                && stores.findById(user.storeId()).map(Store::isCentral).orElse(false));
     }
 }

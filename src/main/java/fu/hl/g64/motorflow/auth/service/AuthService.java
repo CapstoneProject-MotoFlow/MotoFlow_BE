@@ -1,10 +1,8 @@
 package fu.hl.g64.motorflow.auth.service;
 
-import fu.hl.g64.motorflow.account.entity.enums.PermissionCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
-import fu.hl.g64.motorflow.account.repository.UserPermissionRepository;
 import fu.hl.g64.motorflow.auth.config.AuthProperties;
 import fu.hl.g64.motorflow.auth.dto.AuthResponse;
 import fu.hl.g64.motorflow.auth.dto.ChangePasswordRequest;
@@ -40,7 +38,6 @@ public class AuthService {
     private static final int MAX_UNKNOWN_USERNAMES = 10_000;
 
     private final UserAccountRepository users;
-    private final UserPermissionRepository permissions;
     private final AuthSessionRepository sessions;
     private final AuditLogRepository auditLog;
     private final PasswordEncoder passwordEncoder;
@@ -55,11 +52,9 @@ public class AuthService {
      */
     private final Map<String, UserAccount> unknownUsers = new ConcurrentHashMap<>();
 
-    public AuthService(UserAccountRepository users, UserPermissionRepository permissions,
-                       AuthSessionRepository sessions, AuditLogRepository auditLog, PasswordEncoder passwordEncoder,
+    public AuthService(UserAccountRepository users, AuthSessionRepository sessions, AuditLogRepository auditLog, PasswordEncoder passwordEncoder,
                        JwtService jwtService, AuthProperties properties, Clock clock) {
         this.users = users;
-        this.permissions = permissions;
         this.sessions = sessions;
         this.auditLog = auditLog;
         this.passwordEncoder = passwordEncoder;
@@ -245,9 +240,8 @@ public class AuthService {
     }
 
     private AuthenticatedUser toPrincipal(UserAccount user, long sessionId) {
-        Set<PermissionCode> codes = Set.copyOf(permissions.findCodesByUserId(user.getId()));
         return new AuthenticatedUser(user.getId(), sessionId, user.getUsername(), user.getFullName(),
-                user.getRole(), user.getStoreId(), codes, user.isMustChangePassword());
+                user.getRole(), user.getStoreId(), Set.copyOf(user.permissions()), user.isMustChangePassword());
     }
 
     private boolean passwordMatches(String rawPassword, String passwordHash) {

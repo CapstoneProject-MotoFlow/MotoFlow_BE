@@ -6,5 +6,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface TransferOrderRepository extends JpaRepository<TransferOrder, Long> {
 
-    long countBySourceWarehouseIdAndStatus(Long sourceWarehouseId, TransferOrderStatus status);
+    long countBySourceStoreIdAndStatus(Long sourceStoreId, TransferOrderStatus status);
 }

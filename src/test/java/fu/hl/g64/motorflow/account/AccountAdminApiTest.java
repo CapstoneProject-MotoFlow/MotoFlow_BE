@@ -112,8 +112,8 @@ class AccountAdminApiTest extends IntegrationTest {
             assertThat(passwordEncoder.matches(temporary, staff.getPasswordHash())).isTrue();
             assertThat(staff.getCreatedBy()).isEqualTo(admin.getId());
             assertThat(staff.getPhone()).isEqualTo("0912345678");
-            assertThat(jdbc.queryForObject("SELECT changed_by FROM permission_history WHERE user_id = ? "
-                    + "AND change_type = 'ACCOUNT_CREATED'", Long.class, staff.getId())).isEqualTo(admin.getId());
+            assertThat(jdbc.queryForObject("SELECT actor_id FROM audit_log WHERE entity_type = 'USER_ACCOUNT' "
+                    + "AND entity_id = ? AND action = 'ACCOUNT_CREATED'", Long.class, staff.getId())).isEqualTo(admin.getId());
 
             // First sign-in: allowed, but every business function is closed until the password is changed.
             String token = JsonPath.read(login("STAFF01", temporary)
@@ -261,8 +261,7 @@ class AccountAdminApiTest extends IntegrationTest {
             UserAccount manager = createUser("bm01", Role.BRANCH_MANAGER, storeId);
             UserAccount tempLocked = createUser("staff02", Role.STAFF, storeId);
             createUser("owner", Role.OWNER, null);
-            jdbc.update("INSERT INTO user_permission (user_id, permission_code, granted_by, granted_at) "
-                    + "VALUES (?, 'CATALOG_EDIT', ?, now())", manager.getId(), admin.getId());
+            jdbc.update("UPDATE user_account SET can_edit_catalog = TRUE WHERE id = ?", manager.getId());
             jdbc.update("UPDATE user_account SET locked_until = ? WHERE id = ?",
                     LocalDateTime.now(clock).plusMinutes(10), tempLocked.getId());
             clock.advance(Duration.ofMinutes(5));
@@ -392,10 +391,11 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.storeId").value(otherStore))
                     .andExpect(jsonPath("$.storeName").value("Cửa hàng CH02"));
 
-            Map<String, Object> entry = jdbc.queryForMap("SELECT old_value, new_value, reason, changed_by "
-                    + "FROM permission_history WHERE user_id = ? AND change_type = 'STORE_CHANGED'", staff.getId());
+            Map<String, Object> entry = jdbc.queryForMap("SELECT old_data ->> 'value' AS old_value, "
+                    + "new_data ->> 'value' AS new_value, reason, actor_id FROM audit_log "
+                    + "WHERE entity_id = ? AND action = 'STORE_CHANGED'", staff.getId());
             assertThat(entry).containsEntry("old_value", storeId.toString()).containsEntry("new_value", otherStore.toString())
-                    .containsEntry("reason", "Điều chuyển").containsEntry("changed_by", admin.getId());
+                    .containsEntry("reason", "Điều chuyển").containsEntry("actor_id", admin.getId());
         }
 
         @Test
@@ -407,19 +407,19 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.role").value("BRANCH_MANAGER"))
                     .andExpect(jsonPath("$.permissions", contains("CATALOG_EDIT")));
             // Granted by the Owner (BR-08).
-            jdbc.update("INSERT INTO user_permission (user_id, permission_code, granted_by, granted_at) "
-                    + "VALUES (?, 'RETAIL_PRICE_EDIT', ?, now())", staff.getId(), admin.getId());
+            jdbc.update("UPDATE user_account SET can_edit_retail_price = TRUE WHERE id = ?", staff.getId());
 
             updatePermissions(staff.getId(), Map.of("role", "STAFF", "storeId", storeId))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.permissions", hasSize(0)));
 
-            assertThat(jdbc.queryForList("SELECT change_type || ':' || coalesce(permission_code, new_value) "
-                    + "FROM permission_history WHERE user_id = ? AND change_type <> 'ACCOUNT_CREATED' ORDER BY id",
+            assertThat(jdbc.queryForList("SELECT action || ':' || coalesce(new_data ->> 'permission_code', "
+                    + "new_data ->> 'value') FROM audit_log WHERE entity_id = ? AND action <> 'ACCOUNT_CREATED' ORDER BY id",
                     String.class, staff.getId()))
                     .containsExactly("ROLE_CHANGED:BRANCH_MANAGER", "PERMISSION_GRANTED:CATALOG_EDIT",
                             "ROLE_CHANGED:STAFF", "PERMISSION_REVOKED:CATALOG_EDIT", "PERMISSION_REVOKED:RETAIL_PRICE_EDIT");
-            assertThat(jdbc.queryForObject("SELECT count(*) FROM user_permission", Long.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM user_account WHERE can_edit_catalog OR can_edit_retail_price",
+                    Long.class)).isZero();
         }
 
         @Test
@@ -430,8 +430,8 @@ class AccountAdminApiTest extends IntegrationTest {
 
             updatePermissions(secondAdmin, Map.of("role", "OWNER")).andExpect(status().isOk());
 
-            assertThat(jdbc.queryForList("SELECT change_type || ':' || coalesce(old_value, '') || '>' || new_value "
-                    + "FROM permission_history WHERE user_id = ? ORDER BY id", String.class, secondAdmin))
+            assertThat(jdbc.queryForList("SELECT action || ':' || coalesce(old_data ->> 'value', '') || '>' "
+                    + "|| (new_data ->> 'value') FROM audit_log WHERE entity_id = ? ORDER BY id", String.class, secondAdmin))
                     .containsExactly("ACCOUNT_CREATED:>ADMIN", "ROLE_CHANGED:ADMIN>OWNER");
         }
 
@@ -571,12 +571,10 @@ class AccountAdminApiTest extends IntegrationTest {
 
     /** An inspection task of a goods receipt at the main test store; returns the task id. */
     private Long assignInspectionTask(long assigneeId, long managerId) {
-        Long warehouseId = jdbc.queryForObject("INSERT INTO warehouse (store_id, warehouse_name) VALUES (?, 'Kho CH01') "
-                + "RETURNING id", Long.class, storeId);
         Long supplierId = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC01', 'NCC') "
                 + "RETURNING id", Long.class);
-        Long requestId = jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, warehouse_id, created_by) "
-                + "VALUES (?, ?, ?) RETURNING id", Long.class, supplierId, warehouseId, managerId);
+        Long requestId = jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, store_id, created_by) "
+                + "VALUES (?, ?, ?) RETURNING id", Long.class, supplierId, storeId, managerId);
         Long receiptId = jdbc.queryForObject("INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, "
                 + "delivery_document_no, arrived_at) VALUES ('SUPPLIER_DELIVERY', ?, 'PGH01', now()) RETURNING id",
                 Long.class, requestId);

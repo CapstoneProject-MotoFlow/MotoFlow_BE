@@ -27,8 +27,8 @@ public class AdjustmentStockLine {
     @Column(name = "adjustment_request_id", nullable = false)
     private Long adjustmentRequestId;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Column(name = "product_id", nullable = false)
     private Long productId;

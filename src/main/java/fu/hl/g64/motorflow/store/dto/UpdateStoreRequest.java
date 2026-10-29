@@ -22,9 +22,5 @@ public record UpdateStoreRequest(
         @NotNull(message = "Vui lòng chọn trạng thái.")
         StoreStatus status,
 
-        @NotBlank(message = "Vui lòng nhập tên kho.")
-        @Size(max = 150, message = "Tên kho tối đa 150 ký tự.")
-        String warehouseName,
-
         boolean central) {
 }

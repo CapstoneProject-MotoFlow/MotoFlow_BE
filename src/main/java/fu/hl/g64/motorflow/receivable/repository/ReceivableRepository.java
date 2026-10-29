@@ -11,7 +11,10 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
 
     /**
      * [receivable, remaining amount in VND] of each unsettled receivable of the customers: the original amount with its
-     * applied corrections, less the verified debt payments with theirs. Only verified payments count.
+     * applied corrections, less the verified debt payments allocated to it with their corrections. Only verified
+     * payments count.
+     * shortcut: a correction of a payment split over several receivables counts against each of them; settle how
+     * such a correction is shared when debt payments are built.
      */
     @Query("""
             select r, r.originalAmount
@@ -19,13 +22,15 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
                                join AdjustmentRequest q on q.id = l.adjustmentRequestId
                                where l.receivableId = r.id
                                  and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED), 0)
-                   - coalesce((select sum(p.amount) from Payment p
-                               where p.receivableId = r.id
+                   - coalesce((select sum(a.allocatedAmount) from PaymentAllocation a
+                               join Payment p on p.id = a.paymentId
+                               where a.receivableId = r.id
                                  and p.status = fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus.VERIFIED), 0)
                    - coalesce((select sum(l.amountChange) from AdjustmentAmountLine l
                                join AdjustmentRequest q on q.id = l.adjustmentRequestId
                                join Payment p on p.id = l.paymentId
-                               where p.receivableId = r.id
+                               join PaymentAllocation a on a.paymentId = p.id
+                               where a.receivableId = r.id
                                  and p.status = fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus.VERIFIED
                                  and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED), 0)
             from Receivable r

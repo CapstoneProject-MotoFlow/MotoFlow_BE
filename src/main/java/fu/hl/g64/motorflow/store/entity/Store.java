@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/** A branch of the chain (UC-03 View Store List, UC-04 Create Store, UC-06 Update Store). */
+/** A branch of the chain and its single warehouse (UC-03 View Store List, UC-04 Create Store, UC-06 Update Store). */
 @Entity
 @Table(name = "store")
 @Getter
@@ -39,6 +39,10 @@ public class Store {
     @Column(nullable = false, length = 20)
     private StoreStatus status;
 
+    /** The one store whose stock is the central warehouse of the chain (BR-04); never moved or removed. */
+    @Column(name = "is_central", nullable = false)
+    private boolean isCentral;
+
     @Column(name = "copied_from_store_id")
     private Long copiedFromStoreId;
 
@@ -49,11 +53,12 @@ public class Store {
     private LocalDateTime updatedAt;
 
     /** UC-04: a new store starts as planned, with no stock, documents or debts (BR-64). */
-    public static Store create(String storeName, String address, String phone, LocalDateTime now) {
+    public static Store create(String storeName, String address, String phone, boolean central, LocalDateTime now) {
         Store store = new Store();
         store.storeName = storeName;
         store.address = address;
         store.phone = phone;
+        store.isCentral = central;
         store.status = StoreStatus.PLANNED;
         store.createdAt = now;
         store.updatedAt = now;
@@ -62,7 +67,7 @@ public class Store {
 
     /** UC-05: a new planned store that keeps which store it was copied from; only configuration is copied. */
     public static Store copyOf(Store template, String storeName, String address, String phone, LocalDateTime now) {
-        Store store = create(storeName, address, phone, now);
+        Store store = create(storeName, address, phone, false, now);
         store.copiedFromStoreId = template.getId();
         return store;
     }
@@ -73,6 +78,12 @@ public class Store {
         address = newAddress;
         phone = newPhone;
         status = newStatus;
+        updatedAt = now;
+    }
+
+    /** Only while the chain has no central warehouse yet (BR-04). */
+    public void makeCentral(LocalDateTime now) {
+        isCentral = true;
         updatedAt = now;
     }
 

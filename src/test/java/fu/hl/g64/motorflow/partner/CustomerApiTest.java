@@ -106,7 +106,7 @@ class CustomerApiTest extends IntegrationTest {
     void anUpdateChangesTheProfileButNotWhatOrdersRecorded() throws Exception {
         long id = createdId(send(post("/api/customers"), bmToken, customer("Garage Hùng", "0912345678")));
         long order = order(branch, "COMPLETED", "PAID");
-        version(order, 1, id, "Garage Hùng");
+        forCustomer(order, id, "Garage Hùng");
 
         Map<String, Object> body = customer("Garage Hùng Thịnh", "");
         body.put("address", "  ");
@@ -115,7 +115,7 @@ class CustomerApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.customerName").value("Garage Hùng Thịnh"))
                 .andExpect(jsonPath("$.phone").doesNotExist())
                 .andExpect(jsonPath("$.address").doesNotExist());
-        assertThat(jdbc.queryForObject("SELECT customer_name_snapshot FROM sales_order_version", String.class))
+        assertThat(jdbc.queryForObject("SELECT customer_name_snapshot FROM sales_order", String.class))
                 .isEqualTo("Garage Hùng");
         assertThat(jdbc.queryForList("SELECT action FROM audit_log WHERE entity_type = 'CUSTOMER' ORDER BY id", String.class))
                 .containsExactly("CUSTOMER_CREATED", "CUSTOMER_UPDATED");
@@ -180,14 +180,14 @@ class CustomerApiTest extends IntegrationTest {
         long chain = addProduct("CHN-01", "Xích tải");
 
         long sold = order(branch, "COMPLETED", "CREDIT");
-        long soldVersion = version(sold, 1, hung, "Garage Hùng");
-        line(soldVersion, 1, brake, 3, 2, 100_000);
-        line(soldVersion, 2, chain, 1, null, 50_000);
+        forCustomer(sold, hung, "Garage Hùng");
+        line(sold, 1, brake, 3, 2, 100_000);
+        line(sold, 2, chain, 1, null, 50_000);
         long elsewhere = order(otherBranch, "AWAITING_PICKING", null);
-        line(version(elsewhere, 1, hung, "Garage Hùng"), 1, brake, 1, null, 120_000);
+        line(forCustomer(elsewhere, hung, "Garage Hùng"), 1, brake, 1, null, 120_000);
         long movedToBinh = order(branch, "AWAITING_PICKING", null);
-        version(movedToBinh, 1, hung, "Garage Hùng");
-        version(movedToBinh, 2, binh, "Nguyễn Văn Bình");
+        forCustomer(movedToBinh, hung, "Garage Hùng");
+        forCustomer(movedToBinh, binh, "Nguyễn Văn Bình");
 
         long debtHere = receivable(hung, branch, sold, 200_000);
         long debtThere = receivable(hung, otherBranch, null, 500_000);
@@ -195,10 +195,6 @@ class CustomerApiTest extends IntegrationTest {
         payment("DEBT_PAYMENT", null, debtHere, 80_000, "VERIFIED");
         payment("DEBT_PAYMENT", null, debtThere, 100_000, "UNVERIFIED");
         payment("ORDER_PAYMENT", movedToBinh, null, 10_000, "VERIFIED");
-        unmet(sold, chain, 2, "WAITING");
-        unmet(elsewhere, chain, 1, "WAITING");
-        long closedProduct = addProduct("OIL-01", "Nhớt");
-        unmet(sold, closedProduct, 1, "CLOSED");
         creditEvent(hung, "GRANTED", "Khách quen", "2026-10-01 08:00");
         creditEvent(hung, "REVOKED", "Trả chậm", "2026-10-05 08:00");
 
@@ -216,8 +212,8 @@ class CustomerApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.orderCount").value(1))
                 .andExpect(jsonPath("$.payments", hasSize(2)))
                 .andExpect(jsonPath("$.paymentCount").value(2))
-                .andExpect(jsonPath("$.unmetDemands[*].sku", contains("CHN-01")))
-                .andExpect(jsonPath("$.unmetDemands[0].unmetQty").value(2));
+                .andExpect(jsonPath("$.payments[0].receivableIds", contains((int) debtHere)))
+                .andExpect(jsonPath("$.payments[1].receivableIds", hasSize(0)));
 
         createUser("bm01", Role.BRANCH_MANAGER, central);
         for (String token : new String[] {ownerToken, signIn("bm01")}) {
@@ -227,8 +223,7 @@ class CustomerApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.orders[*].id", contains((int) elsewhere, (int) sold)))
                     .andExpect(jsonPath("$.orders[0].total").value(120_000))
                     .andExpect(jsonPath("$.orders[0].storeName").value("Cửa hàng CH03"))
-                    .andExpect(jsonPath("$.paymentCount").value(3))
-                    .andExpect(jsonPath("$.unmetDemands", hasSize(2)));
+                    .andExpect(jsonPath("$.paymentCount").value(3));
         }
         send(get("/api/customers/{id}", binh), bmToken)
                 .andExpect(jsonPath("$.orders[*].id", contains((int) movedToBinh)))
@@ -260,11 +255,8 @@ class CustomerApiTest extends IntegrationTest {
     }
 
     private long createStore(String code, boolean centralWarehouse) {
-        Long storeId = jdbc.queryForObject("INSERT INTO store (store_name, address, status) "
-                + "VALUES (?, 'Hà Nội', 'ACTIVE') RETURNING id", Long.class, "Cửa hàng " + code);
-        jdbc.update("INSERT INTO warehouse (store_id, warehouse_name, is_central) VALUES (?, ?, ?)",
-                storeId, "Kho " + code, centralWarehouse);
-        return storeId;
+        return jdbc.queryForObject("INSERT INTO store (store_name, address, status, is_central) "
+                + "VALUES (?, 'Hà Nội', 'ACTIVE', ?) RETURNING id", Long.class, "Cửa hàng " + code, centralWarehouse);
     }
 
     private long addProduct(String sku, String name) {
@@ -275,20 +267,21 @@ class CustomerApiTest extends IntegrationTest {
     }
 
     private long order(long storeId, String status, String completionType) {
-        return jdbc.queryForObject("INSERT INTO sales_order (store_id, status, completion_type, created_by) "
-                + "VALUES (?, ?, ?, ?) RETURNING id", Long.class, storeId, status, completionType, owner.getId());
+        return jdbc.queryForObject("INSERT INTO sales_order (store_id, status, completion_type, price_type, created_by) "
+                + "VALUES (?, ?, ?, 'RETAIL', ?) RETURNING id", Long.class, storeId, status, completionType, owner.getId());
     }
 
-    private long version(long orderId, int versionNo, long customerId, String nameSnapshot) {
-        return jdbc.queryForObject("INSERT INTO sales_order_version (sales_order_id, version_no, customer_id, "
-                        + "customer_name_snapshot, price_type, created_by) VALUES (?, ?, ?, ?, 'RETAIL', ?) RETURNING id",
-                Long.class, orderId, versionNo, customerId, nameSnapshot, owner.getId());
+    /** The order's current customer; a later call is a later version of the order. */
+    private long forCustomer(long orderId, long customerId, String nameSnapshot) {
+        jdbc.update("UPDATE sales_order SET customer_id = ?, customer_name_snapshot = ? WHERE id = ?",
+                customerId, nameSnapshot, orderId);
+        return orderId;
     }
 
-    private void line(long versionId, int lineNo, long productId, int requested, Integer delivered, long price) {
-        jdbc.update("INSERT INTO sales_order_line (sales_order_version_id, line_no, product_id, requested_qty, "
+    private void line(long orderId, int lineNo, long productId, int requested, Integer delivered, long price) {
+        jdbc.update("INSERT INTO sales_order_line (sales_order_id, line_no, product_id, requested_qty, "
                         + "delivered_qty, reference_price, actual_unit_price) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                versionId, lineNo, productId, requested, delivered, price, price);
+                orderId, lineNo, productId, requested, delivered, price, price);
     }
 
     /** A credit sale when {@code orderId} is given, otherwise an opening balance. */
@@ -299,10 +292,16 @@ class CustomerApiTest extends IntegrationTest {
                 owner.getId(), LocalDateTime.now(clock));
     }
 
+    /** A debt payment when {@code receivableId} is given: it settles that one receivable in full. */
     private long payment(String type, Long orderId, Long receivableId, long amount, String status) {
-        return jdbc.queryForObject("INSERT INTO payment (payment_type, sales_order_id, receivable_id, amount, "
-                        + "payment_method, status, recorded_by, recorded_at) VALUES (?, ?, ?, ?, 'CASH', ?, ?, ?) RETURNING id",
-                Long.class, type, orderId, receivableId, amount, status, owner.getId(), LocalDateTime.now(clock));
+        Long id = jdbc.queryForObject("INSERT INTO payment (payment_type, sales_order_id, amount, "
+                        + "payment_method, status, recorded_by, recorded_at) VALUES (?, ?, ?, 'CASH', ?, ?, ?) RETURNING id",
+                Long.class, type, orderId, amount, status, owner.getId(), LocalDateTime.now(clock));
+        if (receivableId != null) {
+            jdbc.update("INSERT INTO payment_allocation (payment_id, receivable_id, allocated_amount) VALUES (?, ?, ?)",
+                    id, receivableId, amount);
+        }
+        return id;
     }
 
     /** A document correction of one payment or one receivable. */
@@ -317,15 +316,9 @@ class CustomerApiTest extends IntegrationTest {
                 + "VALUES (?, ?, ?, ?)", adjustmentId, paymentId, receivableId, change);
     }
 
-    private void unmet(long orderId, long productId, int quantity, String status) {
-        jdbc.update("INSERT INTO unmet_demand (sales_order_id, product_id, unmet_qty, status, recorded_by, recorded_at, "
-                        + "closed_at) VALUES (?, ?, ?, ?, ?, ?, ?)", orderId, productId, quantity, status, owner.getId(),
-                LocalDateTime.now(clock), status.equals("CLOSED") ? LocalDateTime.now(clock) : null);
-    }
-
     private void creditEvent(long customerId, String type, String reason, String at) {
-        jdbc.update("INSERT INTO credit_eligibility_event (customer_id, event_type, reason, decided_by, decided_at) "
-                + "VALUES (?, ?, ?, ?, ?::timestamp)", customerId, type, reason, owner.getId(), at);
+        jdbc.update("INSERT INTO audit_log (entity_type, entity_id, action, reason, actor_id, occurred_at) "
+                + "VALUES ('CUSTOMER', ?, 'CREDIT_' || ?, ?, ?, ?::timestamp)", customerId, type, reason, owner.getId(), at);
     }
 
     private UserAccount createUser(String username, Role role, Long store) {

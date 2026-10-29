@@ -10,7 +10,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** A part on one order version. */
+/** A part on an order. */
 @Entity
 @Table(name = "sales_order_line")
 @Getter
@@ -21,8 +21,8 @@ public class SalesOrderLine {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "sales_order_version_id", nullable = false)
-    private Long salesOrderVersionId;
+    @Column(name = "sales_order_id", nullable = false)
+    private Long salesOrderId;
 
     @Column(name = "line_no", nullable = false)
     private short lineNo;

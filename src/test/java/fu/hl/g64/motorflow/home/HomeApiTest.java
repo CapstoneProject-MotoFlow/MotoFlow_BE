@@ -74,7 +74,7 @@ class HomeApiTest extends IntegrationTest {
 
     @Test
     void ownerGetsTheApprovalQueueAndUnreadNotifications() throws Exception {
-        long centralWarehouse = warehouseOf(central);
+        long centralWarehouse = central;
         adjustment(branch, "PENDING");
         adjustment(otherBranch, "PENDING");
         adjustment(branch, "APPROVED");
@@ -84,7 +84,7 @@ class HomeApiTest extends IntegrationTest {
         receiptLine(receipt, product, "AWAITING_OWNER");
         receiptLine(receipt, otherProduct, "AWAITING_OWNER");
         receiptLine(supplierDelivery(centralWarehouse, "CONFIRMED"), product, "ACCEPTED");
-        jdbc.update("INSERT INTO stock_count (warehouse_id, count_type, scope_type, status, created_by) "
+        jdbc.update("INSERT INTO stock_count (store_id, count_type, scope_type, status, created_by) "
                 + "VALUES (?, 'OPENING', 'WHOLE', 'AWAITING_APPROVAL', ?)", centralWarehouse, owner.getId());
         replenishment(branch, "AWAITING_COORDINATION");
         replenishment(branch, "IN_PROGRESS");
@@ -111,8 +111,8 @@ class HomeApiTest extends IntegrationTest {
     void aBranchManagerGetsTheWorkOfTheirOwnStore() throws Exception {
         UserAccount manager = createUser("bm02", Role.BRANCH_MANAGER, branch);
         UserAccount staff = createUser("staff02", Role.STAFF, branch);
-        long branchWarehouse = warehouseOf(branch);
-        long centralWarehouse = warehouseOf(central);
+        long branchWarehouse = branch;
+        long centralWarehouse = central;
 
         // Orders: one waiting with nobody on it, one already given to Staff, one whose task was cancelled.
         order(branch, "AWAITING_PICKING");
@@ -127,8 +127,11 @@ class HomeApiTest extends IntegrationTest {
         long debt = jdbc.queryForObject("INSERT INTO receivable (origin_type, customer_id, store_id, original_amount, "
                         + "recognized_by, recognized_at) VALUES ('OPENING_BALANCE', ?, ?, 100000, ?, ?) RETURNING id",
                 Long.class, customer(), branch, owner.getId(), LocalDateTime.now(clock));
-        jdbc.update("INSERT INTO payment (payment_type, receivable_id, amount, payment_method, recorded_by, recorded_at) "
-                + "VALUES ('DEBT_PAYMENT', ?, 50000, 'CASH', ?, ?)", debt, owner.getId(), LocalDateTime.now(clock));
+        Long debtPayment = jdbc.queryForObject("INSERT INTO payment (payment_type, amount, payment_method, recorded_by, "
+                + "recorded_at) VALUES ('DEBT_PAYMENT', 50000, 'CASH', ?, ?) RETURNING id", Long.class, owner.getId(),
+                LocalDateTime.now(clock));
+        jdbc.update("INSERT INTO payment_allocation (payment_id, receivable_id, allocated_amount) VALUES (?, ?, 50000)",
+                debtPayment, debt);
 
         // Receiving: a supplier delivery nobody inspects yet, a transfer already given to Staff, goods sent back
         // to this warehouse awaiting confirmation, and a delivery at another warehouse.
@@ -172,14 +175,14 @@ class HomeApiTest extends IntegrationTest {
     void staffGetTheTasksGivenToThemByType() throws Exception {
         UserAccount staff = createUser("staff02", Role.STAFF, branch);
         UserAccount colleague = createUser("staff03", Role.STAFF, branch);
-        long branchWarehouse = warehouseOf(branch);
+        long branchWarehouse = branch;
         task("PICKING", "sales_order_id", order(branch, "AWAITING_PICKING"), staff, "ASSIGNED");
         task("PICKING", "sales_order_id", order(branch, "AWAITING_PICKING"), staff, "ASSIGNED");
         task("PICKING", "sales_order_id", order(branch, "PICKED"), staff, "RESULT_SUBMITTED");
         task("PICKING", "sales_order_id", order(branch, "AWAITING_PICKING"), colleague, "ASSIGNED");
         task("INSPECTION", "goods_receipt_id", supplierDelivery(branchWarehouse, "AWAITING_INSPECTION"), staff,
                 "ASSIGNED");
-        task("DISPATCH_PREPARATION", "transfer_order_id", transfer(branchWarehouse, warehouseOf(central),
+        task("DISPATCH_PREPARATION", "transfer_order_id", transfer(branchWarehouse, central,
                 "AWAITING_DISPATCH"), staff, "DONE");
 
         home(signIn("staff02"))
@@ -204,15 +207,8 @@ class HomeApiTest extends IntegrationTest {
     }
 
     private long createStore(String code, boolean centralWarehouse, String status) {
-        Long storeId = jdbc.queryForObject("INSERT INTO store (store_name, address, status) "
-                + "VALUES (?, 'Hà Nội', ?) RETURNING id", Long.class, "Cửa hàng " + code, status);
-        jdbc.update("INSERT INTO warehouse (store_id, warehouse_name, is_central) VALUES (?, ?, ?)",
-                storeId, "Kho " + code, centralWarehouse);
-        return storeId;
-    }
-
-    private long warehouseOf(long storeId) {
-        return jdbc.queryForObject("SELECT id FROM warehouse WHERE store_id = ?", Long.class, storeId);
+        return jdbc.queryForObject("INSERT INTO store (store_name, address, status, is_central) "
+                + "VALUES (?, 'Hà Nội', ?, ?) RETURNING id", Long.class, "Cửa hàng " + code, status, centralWarehouse);
     }
 
     private long addProduct(String sku) {
@@ -228,8 +224,8 @@ class HomeApiTest extends IntegrationTest {
     }
 
     private long order(long storeId, String status) {
-        return jdbc.queryForObject("INSERT INTO sales_order (store_id, status, created_by) VALUES (?, ?, ?) RETURNING id",
-                Long.class, storeId, status, owner.getId());
+        return jdbc.queryForObject("INSERT INTO sales_order (store_id, status, price_type, created_by) "
+                + "VALUES (?, ?, 'RETAIL', ?) RETURNING id", Long.class, storeId, status, owner.getId());
     }
 
     private void payment(long orderId, String status) {
@@ -238,11 +234,11 @@ class HomeApiTest extends IntegrationTest {
                 LocalDateTime.now(clock));
     }
 
-    private long supplierDelivery(long warehouseId, String status) {
+    private long supplierDelivery(long storeId, String status) {
         Long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) "
                 + "VALUES ('NCC' || nextval('supplier_id_seq'), 'Minh Phát') RETURNING id", Long.class);
-        Long request = jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, warehouse_id, status, "
-                + "created_by) VALUES (?, ?, 'RECEIVING', ?) RETURNING id", Long.class, supplier, warehouseId, owner.getId());
+        Long request = jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, store_id, status, "
+                + "created_by) VALUES (?, ?, 'RECEIVING', ?) RETURNING id", Long.class, supplier, storeId, owner.getId());
         return receipt("SUPPLIER_DELIVERY", request, null, status);
     }
 
@@ -265,9 +261,9 @@ class HomeApiTest extends IntegrationTest {
                 + "excess_qty, excess_decision) VALUES (?, ?, 10, 12, 12, 2, ?)", receiptId, productId, excessDecision);
     }
 
-    private long transfer(long sourceWarehouseId, long destWarehouseId, String status) {
-        return jdbc.queryForObject("INSERT INTO transfer_order (source_warehouse_id, dest_warehouse_id, status, created_by) "
-                + "VALUES (?, ?, ?, ?) RETURNING id", Long.class, sourceWarehouseId, destWarehouseId, status, owner.getId());
+    private long transfer(long sourceStoreId, long destStoreId, String status) {
+        return jdbc.queryForObject("INSERT INTO transfer_order (source_store_id, dest_store_id, status, created_by) "
+                + "VALUES (?, ?, ?, ?) RETURNING id", Long.class, sourceStoreId, destStoreId, status, owner.getId());
     }
 
     private void task(String type, String documentColumn, long documentId, UserAccount staff, String status) {

@@ -4,9 +4,7 @@ import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.enums.PermissionCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
-import fu.hl.g64.motorflow.account.entity.UserPermission;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
-import fu.hl.g64.motorflow.account.repository.UserPermissionRepository;
 import fu.hl.g64.motorflow.support.IntegrationTest;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,8 +39,6 @@ class AuthApiIntegrationTest extends IntegrationTest {
     private MockMvc mvc;
     @Autowired
     private UserAccountRepository users;
-    @Autowired
-    private UserPermissionRepository permissions;
     @Autowired
     private PasswordEncoder passwordEncoder;
 
@@ -367,8 +363,8 @@ class AuthApiIntegrationTest extends IntegrationTest {
             String token = accessToken(login("bm01", PASSWORD).andReturn());
             me(token).andExpect(jsonPath("$.storeId").value(storeId)).andExpect(jsonPath("$.permissions").isEmpty());
 
-            permissions.save(UserPermission.grant(manager.getId(), PermissionCode.CATALOG_EDIT, manager.getId(),
-                    LocalDateTime.now(clock)));
+            manager.setPermission(PermissionCode.CATALOG_EDIT, true, LocalDateTime.now(clock));
+            users.save(manager);
 
             me(token).andExpect(jsonPath("$.permissions[0]").value("CATALOG_EDIT"));
         }

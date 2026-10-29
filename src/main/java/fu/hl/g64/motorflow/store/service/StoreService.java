@@ -16,10 +16,8 @@ import fu.hl.g64.motorflow.store.dto.CreateStoreRequest;
 import fu.hl.g64.motorflow.store.dto.StoreResponse;
 import fu.hl.g64.motorflow.store.dto.UpdateStoreRequest;
 import fu.hl.g64.motorflow.store.entity.Store;
-import fu.hl.g64.motorflow.store.entity.Warehouse;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
-import fu.hl.g64.motorflow.store.repository.WarehouseRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
@@ -33,7 +31,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -43,7 +40,6 @@ import java.util.stream.Stream;
 public class StoreService {
 
     private final StoreRepository stores;
-    private final WarehouseRepository warehouses;
     private final UserAccountRepository users;
     private final StockBalanceRepository stockBalances;
     private final StockBalanceService stockBalanceService;
@@ -56,21 +52,16 @@ public class StoreService {
      */
     @Transactional(readOnly = true)
     public List<StoreResponse> listStores(String q, StoreStatus status, Boolean central) {
-        Map<Long, Warehouse> warehouseByStore = warehouses.findAll().stream()
-                .collect(Collectors.toMap(Warehouse::getStoreId, Function.identity()));
         Map<Long, List<UserAccount>> managersByStore = users.findByRoleAndStatus(Role.BRANCH_MANAGER, AccountStatus.ACTIVE)
                 .stream().collect(Collectors.groupingBy(UserAccount::getStoreId));
-        Map<Long, Long> productsByWarehouse = productsInStockByWarehouse();
+        Map<Long, Long> productsByStore = productsInStockByStore();
         String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
 
         return stores.findAll(Sort.by("id")).stream()
-                .map(store -> {
-                    Warehouse warehouse = warehouseByStore.get(store.getId());
-                    return StoreResponse.from(store, warehouse, managersByStore.getOrDefault(store.getId(), List.of()),
-                            warehouse == null ? 0 : productsByWarehouse.getOrDefault(warehouse.getId(), 0L));
-                })
+                .map(store -> StoreResponse.from(store, managersByStore.getOrDefault(store.getId(), List.of()),
+                        productsByStore.getOrDefault(store.getId(), 0L)))
                 .filter(s -> status == null || s.status() == status)
-                .filter(s -> central == null || (s.warehouse() != null && s.warehouse().central() == central))
+                .filter(s -> central == null || s.central() == central)
                 .filter(s -> needle == null || Stream.concat(
                                 Stream.of(s.storeName(), String.valueOf(s.id()), s.address()),
                                 s.managers().stream().map(StoreResponse.ManagerInfo::fullName))
@@ -82,13 +73,11 @@ public class StoreService {
     public StoreResponse getStore(long storeId) {
         Store store = stores.findById(storeId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG52"));
-        Warehouse warehouse = warehouses.findByStoreId(storeId).orElse(null);
         List<UserAccount> managers = users.findByRoleAndStoreIdAndStatus(Role.BRANCH_MANAGER, storeId, AccountStatus.ACTIVE);
-        return StoreResponse.from(store, warehouse, managers,
-                warehouse == null ? 0 : productsInStockByWarehouse().getOrDefault(warehouse.getId(), 0L));
+        return StoreResponse.from(store, managers, productsInStockByStore().getOrDefault(storeId, 0L));
     }
 
-    /** A new store is planned, has exactly one warehouse and no stock (BR-04, BR-64). */
+    /** A new store is planned and has no stock (BR-04, BR-64). */
     @Transactional
     public StoreResponse createStore(AuthenticatedUser actor, CreateStoreRequest request) {
         String name = request.storeName().strip();
@@ -101,15 +90,13 @@ public class StoreService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
-        Store store = saveNew(Store.create(name, request.address().strip(), phone, now));
-        Warehouse warehouse = warehouses.save(Warehouse.create(store.getId(), request.warehouseName().strip(),
-                store.getAddress(), phone, request.central(), now));
+        Store store = saveNew(Store.create(name, request.address().strip(), phone, request.central(), now));
         auditLog.save(AuditLog.record("STORE", store.getId(), "STORE_CREATED", actor.id(), null, now));
-        return StoreResponse.from(store, warehouse, List.of(), 0);
+        return StoreResponse.from(store, List.of(), 0);
     }
 
     /**
-     * UC-05: a planned store whose warehouse stores parts where the template's does, with the same low-stock
+     * UC-05: a planned store that stores parts where the template does, with the same low-stock
      * thresholds. Stock, documents and debts are never copied (BR-64), and the copy is never the central warehouse.
      */
     @Transactional
@@ -124,23 +111,17 @@ public class StoreService {
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
         Store store = saveNew(Store.copyOf(template, name, request.address().strip(), phone, now));
-        Warehouse warehouse = warehouses.save(Warehouse.create(store.getId(), request.warehouseName().strip(),
-                store.getAddress(), phone, false, now));
-        int copied = warehouses.findByStoreId(templateId)
-                .map(from -> stockBalanceService.copySettings(from.getId(), warehouse.getId(), now))
-                .orElse(0);
+        int copied = stockBalanceService.copySettings(templateId, store.getId(), now);
         auditLog.save(AuditLog.record("STORE", store.getId(), "STORE_COPIED", actor.id(),
                 "Sao chép cấu hình từ cửa hàng #" + templateId, now));
-        return new CopiedStoreResponse(StoreResponse.from(store, warehouse, List.of(), 0), copied);
+        return new CopiedStoreResponse(StoreResponse.from(store, List.of(), 0), copied);
     }
 
-    /** The warehouse follows the store's address and phone. */
     @Transactional
     public StoreResponse updateStore(AuthenticatedUser actor, long storeId, UpdateStoreRequest request) {
         Store store = stores.findById(storeId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG52"));
-        Warehouse warehouse = warehouses.findByStoreId(storeId).orElse(null);
-        boolean isCentral = warehouse != null && warehouse.isCentral();
+        boolean isCentral = store.isCentral();
         if (isCentral && !request.central()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG51");
         }
@@ -155,41 +136,33 @@ public class StoreService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG68");
         }
         if (request.status() == StoreStatus.INACTIVE) {
-            requireClosable(store, warehouse, request.central());
+            requireClosable(store, request.central());
         }
 
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
         store.update(name, request.address().strip(), phone, request.status(), now);
-        if (warehouse == null) {
-            // Stores inserted before BR-04 was enforced get their warehouse now.
-            warehouse = warehouses.save(Warehouse.create(storeId, request.warehouseName().strip(), store.getAddress(),
-                    phone, request.central(), now));
-        } else {
-            warehouse.update(request.warehouseName().strip(), store.getAddress(), phone, now);
-            if (request.central() && !isCentral) {
-                warehouse.makeCentral(now);
-            }
+        if (request.central() && !isCentral) {
+            store.makeCentral(now);
         }
         auditLog.save(AuditLog.record("STORE", storeId, "STORE_UPDATED", actor.id(), null, now));
 
         List<UserAccount> managers = users.findByRoleAndStoreIdAndStatus(Role.BRANCH_MANAGER, storeId, AccountStatus.ACTIVE);
-        return StoreResponse.from(store, warehouse, managers,
-                productsInStockByWarehouse().getOrDefault(warehouse.getId(), 0L));
+        return StoreResponse.from(store, managers, productsInStockByStore().getOrDefault(storeId, 0L));
     }
 
     /**
      * A store closes only when nothing is left behind (soft delete; stores are never removed).
      * shortcut: documents still open at the store (orders, transfers, receipts) are not checked yet; add them with those modules.
      */
-    private void requireClosable(Store store, Warehouse warehouse, boolean central) {
+    private void requireClosable(Store store, boolean central) {
         if (central) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG65");
         }
         if (store.getStatus() == StoreStatus.INACTIVE) {
             return; // Already closed: only the name, address or phone change.
         }
-        long held = warehouse == null ? 0 : stockBalances.countProductsHeldBy(warehouse.getId());
+        long held = stockBalances.countProductsHeldBy(store.getId());
         if (held > 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG66", held);
         }
@@ -199,13 +172,12 @@ public class StoreService {
         }
     }
 
-    // Parallel requests that both pass this check are stopped by the unique index ux_warehouse_1 (V6).
+    // Parallel requests that both pass this check are stopped by the unique index ux_store_central (V11).
     private void requireNoOtherCentral(Long storeId) {
-        warehouses.findByIsCentralTrue()
-                .filter(central -> !central.getStoreId().equals(storeId))
+        stores.findByIsCentralTrue()
+                .filter(central -> !central.getId().equals(storeId))
                 .ifPresent(central -> {
-                    String code = stores.findById(central.getStoreId()).map(Store::getStoreName).orElse("?");
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG50", code);
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG50", central.getStoreName());
                 });
     }
 
@@ -218,8 +190,8 @@ public class StoreService {
         }
     }
 
-    private Map<Long, Long> productsInStockByWarehouse() {
-        return stockBalances.countProductsInStockByWarehouse().stream()
+    private Map<Long, Long> productsInStockByStore() {
+        return stockBalances.countProductsInStockByStore().stream()
                 .collect(Collectors.toMap(row -> (Long) row[0], row -> (Long) row[1]));
     }
 

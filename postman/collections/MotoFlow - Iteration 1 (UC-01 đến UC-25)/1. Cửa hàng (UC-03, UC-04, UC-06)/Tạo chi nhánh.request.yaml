@@ -26,7 +26,7 @@ scripts:
       pm.test('Tên bỏ khoảng trắng hai đầu, trạng thái PLANNED, có đúng một kho thường', () => {
           pm.expect(b.storeName).to.eql('Chi nhánh ' + pm.collectionVariables.get('run'));
           pm.expect(b.status).to.eql('PLANNED');
-          pm.expect(b.warehouse.central).to.eql(false);
+          pm.expect(b.central).to.eql(false);
           pm.expect(b.productsInStock).to.eql(0);
       });
     language: text/javascript
