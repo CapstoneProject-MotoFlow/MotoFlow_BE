@@ -12,6 +12,7 @@ import fu.hl.g64.motorflow.account.dto.UpdatePermissionsRequest;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.service.AccountService;
 import fu.hl.g64.motorflow.account.service.PermissionService;
+import fu.hl.g64.motorflow.auth.dto.SessionResponse;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -94,6 +95,21 @@ public class AccountController {
                                                    @PathVariable long id,
                                                    @Valid @RequestBody(required = false) ResetPasswordRequest request) {
         return accountService.resetPassword(admin, id, request == null ? null : request.reason());
+    }
+
+    @Operation(summary = "Devices the account is signed in on, newest first")
+    @GetMapping("/{id}/sessions")
+    public List<SessionResponse> sessions(@PathVariable long id) {
+        return accountService.activeSessions(id);
+    }
+
+    @Operation(summary = "Sign the account out of one device")
+    @PostMapping("/{id}/sessions/{sessionId}/sign-out")
+    public ResponseEntity<Void> signOutSession(@AuthenticationPrincipal AuthenticatedUser admin, @PathVariable long id,
+                                               @PathVariable long sessionId,
+                                               @Valid @RequestBody(required = false) LockAccountRequest request) {
+        accountService.signOutSession(admin, id, sessionId, request == null ? null : request.reason());
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Role, store and permission changes of one account, newest first (UC-12)")

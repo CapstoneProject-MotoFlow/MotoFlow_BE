@@ -33,6 +33,12 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, Long> 
 
     Optional<AuthSession> findFirstByUserIdOrderByIdDesc(Long userId);
 
+    @Query("""
+            select s from AuthSession s
+            where s.user.id = :userId and s.revokedAt is null and s.expiresAt > :now
+            order by s.id desc""")
+    List<AuthSession> findActiveByUserId(Long userId, LocalDateTime now);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update AuthSession s set s.revokedAt = :now, s.revokeReason = :reason

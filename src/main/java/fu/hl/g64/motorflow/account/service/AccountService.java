@@ -10,7 +10,9 @@ import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.auth.entity.AuthSession;
 import fu.hl.g64.motorflow.auth.repository.AuthSessionRepository;
+import fu.hl.g64.motorflow.auth.dto.SessionResponse;
 import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
+import fu.hl.g64.motorflow.auth.service.SessionService;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
@@ -42,6 +44,7 @@ public class AccountService {
     private final UserAccountRepository users;
     private final StoreRepository stores;
     private final AuthSessionRepository sessions;
+    private final SessionService sessionService;
     private final AuditLogRepository auditLog;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
@@ -133,6 +136,23 @@ public class AccountService {
         sessions.revokeAllSessions(account.getId(), now, AuthSession.RevokeReason.ACCOUNT_LOCKED);
         auditLog.save(AuditLog.record("USER_ACCOUNT", account.getId(), "ACCOUNT_LOCKED", admin.id(),
                 blankToNull(reason), now));
+    }
+
+    @Transactional(readOnly = true)
+    public List<SessionResponse> activeSessions(long accountId) {
+        if (!users.existsById(accountId)) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "MSG48");
+        }
+        return sessionService.activeSessions(accountId, null);
+    }
+
+    /** Signs the user out of one device, e.g. a lost phone, without locking the account. */
+    @Transactional
+    public void signOutSession(AuthenticatedUser admin, long accountId, long sessionId, String reason) {
+        UserAccount account = otherAccount(admin, accountId);
+        sessionService.signOut(account.getId(), sessionId, AuthSession.RevokeReason.SIGNED_OUT_BY_ADMIN);
+        auditLog.save(AuditLog.record("USER_ACCOUNT", account.getId(), "SESSION_SIGNED_OUT", admin.id(),
+                blankToNull(reason), LocalDateTime.now(clock)));
     }
 
     /** UC-10. Lifts an Admin lock and the temporary lock after wrong passwords alike. */

@@ -10,17 +10,24 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import fu.hl.g64.motorflow.auth.dto.SessionResponse;
+import fu.hl.g64.motorflow.auth.entity.AuthSession;
+import fu.hl.g64.motorflow.auth.service.SessionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @Tag(name = "Authentication", description = "UC-01 Log In, UC-02 Change Password")
 @RestController
@@ -29,6 +36,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final SessionService sessionService;
     private final RefreshTokenCookies refreshTokenCookies;
 
     @Operation(summary = "Sign in with username and password (UC-01)")
@@ -66,6 +74,20 @@ public class AuthController {
     public ResponseEntity<Void> changePassword(@AuthenticationPrincipal AuthenticatedUser user,
                                                @Valid @RequestBody ChangePasswordRequest request) {
         authService.changePassword(user, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Devices the signed-in user is signed in on; current marks this one")
+    @GetMapping("/sessions")
+    public List<SessionResponse> sessions(@AuthenticationPrincipal AuthenticatedUser user) {
+        return sessionService.activeSessions(user.id(), user.sessionId());
+    }
+
+    @Operation(summary = "Sign out of one of own devices")
+    @DeleteMapping("/sessions/{sessionId}")
+    public ResponseEntity<Void> signOutSession(@AuthenticationPrincipal AuthenticatedUser user,
+                                               @PathVariable long sessionId) {
+        sessionService.signOut(user.id(), sessionId, AuthSession.RevokeReason.LOGOUT);
         return ResponseEntity.noContent().build();
     }
 

@@ -25,7 +25,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AuthSession {
 
-    public enum RevokeReason { LOGOUT, PASSWORD_CHANGED, PASSWORD_RESET, ACCOUNT_LOCKED, REFRESH_TOKEN_REUSED }
+    public enum RevokeReason { LOGOUT, PASSWORD_CHANGED, PASSWORD_RESET, ACCOUNT_LOCKED, REFRESH_TOKEN_REUSED, SIGNED_OUT_BY_ADMIN }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
