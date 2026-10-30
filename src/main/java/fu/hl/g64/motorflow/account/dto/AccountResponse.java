@@ -14,13 +14,12 @@ public record AccountResponse(long id, String username, String fullName, String 
                               Set<PermissionCode> permissions, boolean mustChangePassword,
                               LocalDateTime lastLoginAt, LocalDateTime createdAt) {
 
-    public static AccountResponse from(UserAccount account, String storeName, Set<PermissionCode> permissions,
-                                       LocalDateTime now) {
+    public static AccountResponse from(UserAccount account, String storeName, LocalDateTime now) {
         AccountState state = account.isLockedByAdmin() ? AccountState.LOCKED
                 : account.isTemporarilyLocked(now) ? AccountState.TEMPORARILY_LOCKED
                 : AccountState.ACTIVE;
         return new AccountResponse(account.getId(), account.getUsername(), account.getFullName(), account.getPhone(),
                 account.getEmail(), account.getRole(), account.getStoreId(), storeName, account.getStatus(), state,
-                permissions, account.isMustChangePassword(), account.getLastLoginAt(), account.getCreatedAt());
+                account.permissions(), account.isMustChangePassword(), account.getLastLoginAt(), account.getCreatedAt());
     }
 }

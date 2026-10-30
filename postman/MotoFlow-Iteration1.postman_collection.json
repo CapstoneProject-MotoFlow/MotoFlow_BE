@@ -292,7 +292,7 @@
                   "pm.collectionVariables.set('centralStoreName', s.storeName);",
                   "pm.collectionVariables.set('centralAddress', s.address);",
                   "pm.collectionVariables.set('centralPhone', s.phone || '');",
-                  "pm.collectionVariables.set('centralWarehouseName', s.warehouse.name);",
+                  "pm.collectionVariables.set('centralWarehouseName', s.storeName);",
                   "pm.collectionVariables.set('centralStatus', s.status);"
                 ]
               }
@@ -342,7 +342,7 @@
                   "pm.test('Tên bỏ khoảng trắng hai đầu, trạng thái PLANNED, có đúng một kho thường', () => {",
                   "    pm.expect(b.storeName).to.eql('Chi nhánh ' + pm.collectionVariables.get('run'));",
                   "    pm.expect(b.status).to.eql('PLANNED');",
-                  "    pm.expect(b.warehouse.central).to.eql(false);",
+                  "    pm.expect(b.central).to.eql(false);",
                   "    pm.expect(b.productsInStock).to.eql(0);",
                   "});"
                 ]
@@ -479,7 +479,7 @@
                 "exec": [
                   "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
                   "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));",
-                  "pm.test('Liệt kê từng trường lỗi', () => pm.expect(pm.response.json().fieldErrors).to.have.keys('storeName', 'address', 'warehouseName'));"
+                  "pm.test('Liệt kê từng trường lỗi', () => pm.expect(pm.response.json().fieldErrors).to.have.keys('storeName', 'address'));"
                 ]
               }
             }

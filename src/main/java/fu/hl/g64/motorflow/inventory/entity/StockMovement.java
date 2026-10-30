@@ -28,8 +28,8 @@ public class StockMovement {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Column(name = "product_id", nullable = false)
     private Long productId;

@@ -29,8 +29,8 @@ public class LotBalance {
     @Column(name = "lot_id", nullable = false)
     private Long lotId;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "stock_status", nullable = false, length = 30)

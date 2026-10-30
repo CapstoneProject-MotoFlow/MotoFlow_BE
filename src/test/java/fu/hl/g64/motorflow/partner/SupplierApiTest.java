@@ -146,20 +146,20 @@ class SupplierApiTest extends IntegrationTest {
     void theDetailShowsPurchaseOrdersDeliveriesAndDiscrepancies() throws Exception {
         long supplier = createdId(send(post("/api/suppliers"), supplier("NCC01", "Minh Phát")));
         long other = createdId(send(post("/api/suppliers"), supplier("NCC02", "Hưng Thịnh")));
-        long warehouse = createStoreWithWarehouse("CH01");
+        long store = createStore("CH01");
         long brake = addProduct("BRK-01", "Má phanh trước");
         long chain = addProduct("CHN-01", "Xích tải");
 
-        long order = addPurchaseOrder(supplier, warehouse, "FULLY_RECEIVED");
+        long order = addPurchaseOrder(supplier, store, "FULLY_RECEIVED");
         jdbc.update("INSERT INTO goods_receipt_request_line (goods_receipt_request_id, product_id, ordered_qty, purchase_price) "
                 + "VALUES (?, ?, 10, 50000), (?, ?, 4, 120000)", order, brake, order, chain);
-        long newerOrder = addPurchaseOrder(supplier, warehouse, "AWAITING_DELIVERY");
-        addPurchaseOrder(other, warehouse, "AWAITING_DELIVERY");
+        long newerOrder = addPurchaseOrder(supplier, store, "AWAITING_DELIVERY");
+        addPurchaseOrder(other, store, "AWAITING_DELIVERY");
         Long delivery = jdbc.queryForObject("INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, "
                 + "delivery_document_no, arrived_at, status, recorded_by, submitted_at, confirmed_by, confirmed_at) "
                 + "VALUES ('SUPPLIER_DELIVERY', ?, 'PX-001', '2026-10-10 09:00', 'CONFIRMED', ?, '2026-10-10 10:00', ?, "
                 + "'2026-10-10 11:00') RETURNING id", Long.class, order, owner.getId(), createUser("bm01", Role.BRANCH_MANAGER,
-                jdbc.queryForObject("SELECT store_id FROM warehouse WHERE id = ?", Long.class, warehouse)).getId());
+                store).getId());
         jdbc.update("INSERT INTO discrepancy_case (source_type, goods_receipt_id, product_id, short_qty, opened_at) "
                 + "VALUES ('SUPPLIER', ?, ?, 2, '2026-10-10 11:00')", delivery, brake);
 
@@ -189,9 +189,8 @@ class SupplierApiTest extends IntegrationTest {
 
     @Test
     void onlyTheOwnerManagesSuppliers() throws Exception {
-        long store = createStoreWithWarehouse("CH01");
-        createUser("bm01", Role.BRANCH_MANAGER, jdbc.queryForObject("SELECT store_id FROM warehouse WHERE id = ?",
-                Long.class, store));
+        long store = createStore("CH01");
+        createUser("bm01", Role.BRANCH_MANAGER, store);
         createUser("admin01", Role.ADMIN, null);
         for (String username : new String[] {"bm01", "admin01"}) {
             String token = signIn(username);
@@ -217,12 +216,9 @@ class SupplierApiTest extends IntegrationTest {
         return body;
     }
 
-    /** @return the warehouse id */
-    private long createStoreWithWarehouse(String code) {
-        Long storeId = jdbc.queryForObject("INSERT INTO store (store_name, address, status) "
+    private long createStore(String code) {
+        return jdbc.queryForObject("INSERT INTO store (store_name, address, status) "
                 + "VALUES (?, 'Hà Nội', 'ACTIVE') RETURNING id", Long.class, "Cửa hàng " + code);
-        return jdbc.queryForObject("INSERT INTO warehouse (store_id, warehouse_name) VALUES (?, ?) RETURNING id",
-                Long.class, storeId, "Kho " + code);
     }
 
     private long addProduct(String sku, String name) {
@@ -232,9 +228,9 @@ class SupplierApiTest extends IntegrationTest {
                 + "VALUES (?, ?, ?, 'Cái', ?) RETURNING id", Long.class, sku, name, categoryId, owner.getId());
     }
 
-    private long addPurchaseOrder(long supplierId, long warehouseId, String status) {
-        return jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, warehouse_id, status, created_by) "
-                + "VALUES (?, ?, ?, ?) RETURNING id", Long.class, supplierId, warehouseId, status, owner.getId());
+    private long addPurchaseOrder(long supplierId, long storeId, String status) {
+        return jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, store_id, status, created_by) "
+                + "VALUES (?, ?, ?, ?) RETURNING id", Long.class, supplierId, storeId, status, owner.getId());
     }
 
     private UserAccount createUser(String username, Role role, Long store) {

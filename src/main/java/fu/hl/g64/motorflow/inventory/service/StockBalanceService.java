@@ -23,9 +23,9 @@ public class StockBalanceService {
      * @return how many parts got their settings
      */
     @Transactional
-    public int copySettings(long fromWarehouseId, long toWarehouseId, LocalDateTime now) {
-        List<StockBalance> copies = balances.findSettingsOfActiveProducts(fromWarehouseId).stream()
-                .map(template -> StockBalance.withSettingsOf(template, toWarehouseId, now))
+    public int copySettings(long fromStoreId, long toStoreId, LocalDateTime now) {
+        List<StockBalance> copies = balances.findSettingsOfActiveProducts(fromStoreId).stream()
+                .map(template -> StockBalance.withSettingsOf(template, toStoreId, now))
                 .toList();
         balances.saveAll(copies);
         return copies.size();

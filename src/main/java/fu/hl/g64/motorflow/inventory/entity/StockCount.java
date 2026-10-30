@@ -31,8 +31,8 @@ public class StockCount {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Column(name = "inventory_period_id")
     private Long inventoryPeriodId;

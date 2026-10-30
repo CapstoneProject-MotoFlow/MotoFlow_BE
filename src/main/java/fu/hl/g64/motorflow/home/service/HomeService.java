@@ -20,10 +20,8 @@ import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
-import fu.hl.g64.motorflow.store.entity.Warehouse;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
-import fu.hl.g64.motorflow.store.repository.WarehouseRepository;
 import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
@@ -33,7 +31,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.EnumMap;
-import java.util.List;
 import java.util.Map;
 
 /** SCR-03 Home, opened after sign-in (UC-01 step 7): unread notifications and what waits on the user, by role. */
@@ -44,7 +41,6 @@ public class HomeService {
     private final NotificationRepository notifications;
     private final UserAccountRepository users;
     private final StoreRepository stores;
-    private final WarehouseRepository warehouses;
     private final AdjustmentRequestRepository adjustments;
     private final GoodsReceiptRepository receipts;
     private final GoodsReceiptLineRepository receiptLines;
@@ -111,22 +107,13 @@ public class HomeService {
                 salesOrders.countByStoreIdAndStatus(storeId, SalesOrderStatus.CONFIRMED));
         counts.put(HomeShortcut.PAYMENTS_AWAITING_VERIFICATION, payments.countUnverifiedAtStore(storeId));
 
-        Warehouse warehouse = warehouses.findByStoreId(storeId).orElse(null);
-        if (warehouse == null) {
-            // A store created before BR-04 was enforced may still have no warehouse: nothing to receive or send.
-            List.of(HomeShortcut.RECEIPTS_TO_ASSIGN, HomeShortcut.RECEIPTS_AWAITING_CONFIRMATION,
-                            HomeShortcut.TRANSFERS_AWAITING_DISPATCH, HomeShortcut.OPEN_DISCREPANCIES)
-                    .forEach(key -> counts.put(key, 0L));
-            return;
-        }
-        long warehouseId = warehouse.getId();
-        counts.put(HomeShortcut.RECEIPTS_TO_ASSIGN, receipts.countAwaitingInspectionWithoutTask(warehouseId));
+        counts.put(HomeShortcut.RECEIPTS_TO_ASSIGN, receipts.countAwaitingInspectionWithoutTask(storeId));
         counts.put(HomeShortcut.RECEIPTS_AWAITING_CONFIRMATION,
-                receipts.countAtWarehouse(warehouseId, GoodsReceiptStatus.AWAITING_CONFIRMATION));
+                receipts.countAtStore(storeId, GoodsReceiptStatus.AWAITING_CONFIRMATION));
         counts.put(HomeShortcut.TRANSFERS_AWAITING_DISPATCH,
-                transfers.countBySourceWarehouseIdAndStatus(warehouseId, TransferOrderStatus.AWAITING_DISPATCH));
-        counts.put(HomeShortcut.OPEN_DISCREPANCIES, discrepancies.countOpenSupplierCasesAtWarehouse(warehouseId));
-        if (warehouse.isCentral()) {
+                transfers.countBySourceStoreIdAndStatus(storeId, TransferOrderStatus.AWAITING_DISPATCH));
+        counts.put(HomeShortcut.OPEN_DISCREPANCIES, discrepancies.countOpenSupplierCasesAtStore(storeId));
+        if (stores.findById(storeId).map(Store::isCentral).orElse(false)) {
             // The central-warehouse Branch Manager coordinates replenishment with Owner (BR-56).
             counts.put(HomeShortcut.REPLENISHMENTS_AWAITING_COORDINATION,
                     replenishments.countByStatus(ReplenishmentRequestStatus.AWAITING_COORDINATION));

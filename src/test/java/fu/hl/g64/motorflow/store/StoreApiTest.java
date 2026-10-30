@@ -63,13 +63,13 @@ class StoreApiTest extends IntegrationTest {
         mvc.perform(get(location).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.storeName").value("Cửa hàng ch01"))
-                .andExpect(jsonPath("$.warehouse.central").value(true));
+                .andExpect(jsonPath("$.central").value(true));
         mvc.perform(get("/api/stores/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG52"));
     }
 
     @Test
-    void createsAPlannedStoreWithItsOnlyWarehouse() throws Exception {
+    void createsAPlannedStore() throws Exception {
         Map<String, Object> body = new HashMap<>(store("ch01", true));
         body.put("storeName", " Cửa hàng ch01 ");
         createStore(body)
@@ -77,13 +77,10 @@ class StoreApiTest extends IntegrationTest {
                 .andExpect(header().exists(HttpHeaders.LOCATION))
                 .andExpect(jsonPath("$.storeName").value("Cửa hàng ch01"))
                 .andExpect(jsonPath("$.status").value("PLANNED"))
-                .andExpect(jsonPath("$.warehouse.name").value("Kho ch01"))
-                .andExpect(jsonPath("$.warehouse.central").value(true))
+                .andExpect(jsonPath("$.central").value(true))
                 .andExpect(jsonPath("$.managers", hasSize(0)))
                 .andExpect(jsonPath("$.productsInStock").value(0));
 
-        Map<String, Object> warehouse = jdbc.queryForMap("SELECT address, phone FROM warehouse");
-        assertThat(warehouse).containsEntry("address", "Hà Nội").containsEntry("phone", "0241234567");
         assertThat(jdbc.queryForObject("SELECT actor_id FROM audit_log WHERE entity_type = 'STORE' "
                 + "AND action = 'STORE_CREATED'", Long.class)).isEqualTo(owner.getId());
     }
@@ -118,14 +115,14 @@ class StoreApiTest extends IntegrationTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG50"));
         updateStore(central, update("ACTIVE", false))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG51"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM warehouse WHERE is_central", Long.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM store WHERE is_central", Long.class)).isEqualTo(1);
     }
 
     @Test
     void theDatabaseAlsoRejectsASecondCentralWarehouse() throws Exception {
         createStore(store("CH01", true)).andExpect(status().isCreated());
         long branch = createdId(createStore(store("CH02", false)));
-        assertThatThrownBy(() -> jdbc.update("UPDATE warehouse SET is_central = TRUE WHERE store_id = ?", branch))
+        assertThatThrownBy(() -> jdbc.update("UPDATE store SET is_central = TRUE WHERE id = ?", branch))
                 .isInstanceOf(DuplicateKeyException.class);
     }
 
@@ -140,8 +137,7 @@ class StoreApiTest extends IntegrationTest {
         updateStore(branch, update("PLANNED", false))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG68"));
 
-        Long warehouseId = jdbc.queryForObject("SELECT id FROM warehouse WHERE store_id = ?", Long.class, branch);
-        addStock(warehouseId, "SKU1", 0, 2);
+        addStock(branch, "SKU1", 0, 2);
         updateStore(branch, update("INACTIVE", false))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG66"))
@@ -171,20 +167,18 @@ class StoreApiTest extends IntegrationTest {
     }
 
     @Test
-    void updatesTheStoreAndItsWarehouse() throws Exception {
+    void updatesTheStore() throws Exception {
         long id = createdId(createStore(store("CH01", false)));
         Map<String, Object> body = update("ACTIVE", false);
         body.put("address", "Đà Nẵng");
-        body.put("warehouseName", "Kho Đà Nẵng");
 
         updateStore(id, body)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id))
                 .andExpect(jsonPath("$.storeName").value("Cửa hàng mới " + id))
-                .andExpect(jsonPath("$.status").value("ACTIVE"))
-                .andExpect(jsonPath("$.warehouse.name").value("Kho Đà Nẵng"));
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
 
-        assertThat(jdbc.queryForObject("SELECT address FROM warehouse WHERE store_id = ?", String.class, id))
+        assertThat(jdbc.queryForObject("SELECT address FROM store WHERE id = ?", String.class, id))
                 .isEqualTo("Đà Nẵng");
         updateStore(9999L, update("ACTIVE", false))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG52"));
@@ -198,9 +192,8 @@ class StoreApiTest extends IntegrationTest {
         createUser("bm01", Role.BRANCH_MANAGER, branch);
         UserAccount locked = createUser("bm02", Role.BRANCH_MANAGER, branch);
         jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", locked.getId());
-        Long warehouseId = jdbc.queryForObject("SELECT id FROM warehouse WHERE store_id = ?", Long.class, branch);
-        addStock(warehouseId, "SKU1", 5, 0);
-        addStock(warehouseId, "SKU2", 0, 3);
+        addStock(branch, "SKU1", 5, 0);
+        addStock(branch, "SKU2", 0, 3);
 
         listStores("")
                 .andExpect(status().isOk())
@@ -217,16 +210,15 @@ class StoreApiTest extends IntegrationTest {
     @Test
     void aCopyTakesWhereTheTemplateStoresPartsButNoStock() throws Exception {
         long template = createdId(createStore(store("CH01", true)));
-        Long templateWarehouse = jdbc.queryForObject("SELECT id FROM warehouse WHERE store_id = ?", Long.class, template);
         long placed = addProduct("SKU1", "ACTIVE");
         long discontinued = addProduct("SKU2", "DISCONTINUED");
         long stockOnly = addProduct("SKU3", "ACTIVE");
-        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, available_qty, damaged_qty, storage_area, "
-                + "bin_location, low_stock_threshold) VALUES (?, ?, 10, 2, 'Khu A', 'A-01', 5)", templateWarehouse, placed);
-        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, bin_location) VALUES (?, ?, 'B-01')",
-                templateWarehouse, discontinued);
-        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, available_qty) VALUES (?, ?, 3)",
-                templateWarehouse, stockOnly);
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, available_qty, damaged_qty, storage_area, "
+                + "bin_location, low_stock_threshold) VALUES (?, ?, 10, 2, 'Khu A', 'A-01', 5)", template, placed);
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, bin_location) VALUES (?, ?, 'B-01')",
+                template, discontinued);
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, available_qty) VALUES (?, ?, 3)",
+                template, stockOnly);
 
         String body = copyStore(template, store("CH02", false))
                 .andExpect(status().isCreated())
@@ -234,23 +226,21 @@ class StoreApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.store.storeName").value("Cửa hàng CH02"))
                 .andExpect(jsonPath("$.store.status").value("PLANNED"))
                 .andExpect(jsonPath("$.store.copiedFromStoreId").value(template))
-                .andExpect(jsonPath("$.store.warehouse.name").value("Kho CH02"))
-                .andExpect(jsonPath("$.store.warehouse.central").value(false))
+                .andExpect(jsonPath("$.store.central").value(false))
                 .andExpect(jsonPath("$.store.productsInStock").value(0))
                 .andExpect(jsonPath("$.copiedPartSettings").value(1))
                 .andReturn().getResponse().getContentAsString();
         long copy = ((Number) JsonPath.read(body, "$.store.id")).longValue();
 
-        Long copyWarehouse = jdbc.queryForObject("SELECT id FROM warehouse WHERE store_id = ?", Long.class, copy);
-        assertThat(jdbc.queryForList("SELECT * FROM stock_balance WHERE warehouse_id = ?", copyWarehouse))
+        assertThat(jdbc.queryForList("SELECT * FROM stock_balance WHERE store_id = ?", copy))
                 .singleElement()
                 .satisfies(row -> assertThat(row)
                         .containsEntry("product_id", placed)
                         .containsEntry("storage_area", "Khu A").containsEntry("bin_location", "A-01")
                         .containsEntry("low_stock_threshold", 5)
                         .containsEntry("available_qty", 0).containsEntry("damaged_qty", 0));
-        assertThat(jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE warehouse_id = ? AND product_id = ?",
-                Integer.class, templateWarehouse, placed)).isEqualTo(10);
+        assertThat(jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE store_id = ? AND product_id = ?",
+                Integer.class, template, placed)).isEqualTo(10);
         assertThat(jdbc.queryForMap("SELECT entity_id, actor_id FROM audit_log WHERE action = 'STORE_COPIED'"))
                 .containsEntry("entity_id", copy).containsEntry("actor_id", owner.getId());
         mvc.perform(get("/api/stores/{id}", copy).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
@@ -269,8 +259,7 @@ class StoreApiTest extends IntegrationTest {
         copyStore(template, Map.of("storeName", " "))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"))
-                .andExpect(jsonPath("$.fieldErrors.storeName").exists())
-                .andExpect(jsonPath("$.fieldErrors.warehouseName").exists());
+                .andExpect(jsonPath("$.fieldErrors.storeName").exists());
 
         createUser("admin01", Role.ADMIN, null);
         copyStore(signIn("admin01"), template, store("CH02", false))
@@ -285,8 +274,7 @@ class StoreApiTest extends IntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"))
                 .andExpect(jsonPath("$.fieldErrors.storeName").exists())
-                .andExpect(jsonPath("$.fieldErrors.address").exists())
-                .andExpect(jsonPath("$.fieldErrors.warehouseName").exists());
+                .andExpect(jsonPath("$.fieldErrors.address").exists());
     }
 
     @Test
@@ -302,21 +290,20 @@ class StoreApiTest extends IntegrationTest {
 
     private Map<String, Object> store(String code, boolean central) {
         return Map.of("storeName", "Cửa hàng " + code, "address", "Hà Nội", "phone", "0241234567",
-                "warehouseName", "Kho " + code.strip(), "central", central);
+                "central", central);
     }
 
     private Map<String, Object> update(String status, boolean central) {
-        return new HashMap<>(Map.of("address", "Hà Nội", "status", status,
-                "warehouseName", "Kho mới", "central", central));
+        return new HashMap<>(Map.of("address", "Hà Nội", "status", status, "central", central));
     }
 
-    private void addStock(long warehouseId, String sku, int available, int inTransit) {
+    private void addStock(long storeId, String sku, int available, int inTransit) {
         Long categoryId = jdbc.queryForObject("INSERT INTO part_category (category_name, vehicle_type) "
                 + "VALUES (?, 'MOTORCYCLE') RETURNING id", Long.class, "Nhóm " + sku);
         Long productId = jdbc.queryForObject("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
                 + "VALUES (?, 'Phụ tùng', ?, 'Cái', ?) RETURNING id", Long.class, sku, categoryId, owner.getId());
-        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, available_qty, in_transit_qty) VALUES (?, ?, ?, ?)",
-                warehouseId, productId, available, inTransit);
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, available_qty, in_transit_qty) VALUES (?, ?, ?, ?)",
+                storeId, productId, available, inTransit);
     }
 
     private long addProduct(String sku, String status) {

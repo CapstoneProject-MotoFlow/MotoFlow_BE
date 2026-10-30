@@ -30,8 +30,8 @@ public class StockCountRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "scope_type", nullable = false, length = 10)

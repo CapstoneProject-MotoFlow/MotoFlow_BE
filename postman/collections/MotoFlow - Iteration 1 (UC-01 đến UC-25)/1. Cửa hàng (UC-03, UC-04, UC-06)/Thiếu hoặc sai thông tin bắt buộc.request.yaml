@@ -19,6 +19,6 @@ scripts:
     code: |-
       pm.test('HTTP 400', () => pm.response.to.have.status(400));
       pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));
-      pm.test('Liệt kê từng trường lỗi', () => pm.expect(pm.response.json().fieldErrors).to.have.keys('storeName', 'address', 'warehouseName'));
+      pm.test('Liệt kê từng trường lỗi', () => pm.expect(pm.response.json().fieldErrors).to.have.keys('storeName', 'address'));
     language: text/javascript
 order: 6000

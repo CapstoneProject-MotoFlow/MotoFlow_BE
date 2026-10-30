@@ -30,8 +30,8 @@ public class GoodsReceiptRequest {
     @Column(name = "supplier_id", nullable = false)
     private Long supplierId;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Column(name = "replenishment_request_id")
     private Long replenishmentRequestId;

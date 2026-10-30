@@ -18,7 +18,7 @@ scripts:
       pm.collectionVariables.set('centralStoreName', s.storeName);
       pm.collectionVariables.set('centralAddress', s.address);
       pm.collectionVariables.set('centralPhone', s.phone || '');
-      pm.collectionVariables.set('centralWarehouseName', s.warehouse.name);
+      pm.collectionVariables.set('centralWarehouseName', s.storeName);
       pm.collectionVariables.set('centralStatus', s.status);
     language: text/javascript
 order: 2000

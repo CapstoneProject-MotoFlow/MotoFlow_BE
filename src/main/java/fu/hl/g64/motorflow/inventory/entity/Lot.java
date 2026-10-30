@@ -46,8 +46,8 @@ public class Lot {
     @Column(name = "supplier_id")
     private Long supplierId;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Column(name = "received_date", nullable = false)
     private LocalDate receivedDate;

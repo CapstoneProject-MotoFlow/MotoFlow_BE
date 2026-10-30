@@ -29,11 +29,11 @@ public class TransferOrder {
     @Column(name = "replenishment_request_id")
     private Long replenishmentRequestId;
 
-    @Column(name = "source_warehouse_id", nullable = false)
-    private Long sourceWarehouseId;
+    @Column(name = "source_store_id", nullable = false)
+    private Long sourceStoreId;
 
-    @Column(name = "dest_warehouse_id", nullable = false)
-    private Long destWarehouseId;
+    @Column(name = "dest_store_id", nullable = false)
+    private Long destStoreId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

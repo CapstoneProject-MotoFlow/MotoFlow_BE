@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** UC-04. The store and its only warehouse are created together (BR-04); the warehouse uses the store's address and phone. */
+/** UC-04. The store is its own single warehouse (BR-04); {@code central} makes it the chain's central warehouse. */
 public record CreateStoreRequest(
         @NotBlank(message = "Vui lòng nhập tên cửa hàng.")
         @Size(max = 150, message = "Tên cửa hàng tối đa 150 ký tự.")
@@ -16,10 +16,6 @@ public record CreateStoreRequest(
 
         @Pattern(regexp = "^$|^[0-9+ ]{8,20}$", message = "Số điện thoại gồm 8–20 chữ số.")
         String phone,
-
-        @NotBlank(message = "Vui lòng nhập tên kho.")
-        @Size(max = 150, message = "Tên kho tối đa 150 ký tự.")
-        String warehouseName,
 
         boolean central) {
 }

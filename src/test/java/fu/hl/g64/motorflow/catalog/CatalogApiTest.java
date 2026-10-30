@@ -329,8 +329,7 @@ class CatalogApiTest extends IntegrationTest {
     @Test
     void onlyOwnerAndBranchManagersWithTheCatalogPermissionChangeTheCatalog() throws Exception {
         UserAccount editor = createUser("bm01", Role.BRANCH_MANAGER, branch);
-        jdbc.update("INSERT INTO user_permission (user_id, permission_code, granted_by, granted_at) "
-                + "VALUES (?, 'CATALOG_EDIT', ?, now())", editor.getId(), owner.getId());
+        jdbc.update("UPDATE user_account SET can_edit_catalog = TRUE WHERE id = ?", editor.getId());
         createUser("bm02", Role.BRANCH_MANAGER, branch);
         createUser("staff01", Role.STAFF, branch);
         createUser("admin", Role.ADMIN, null);
@@ -371,16 +370,13 @@ class CatalogApiTest extends IntegrationTest {
     }
 
     private long createStore(String code, boolean centralWarehouse) {
-        Long storeId = jdbc.queryForObject("INSERT INTO store (store_name, address, status) "
-                + "VALUES (?, 'Hà Nội', 'ACTIVE') RETURNING id", Long.class, "Cửa hàng " + code);
-        jdbc.update("INSERT INTO warehouse (store_id, warehouse_name, is_central) VALUES (?, ?, ?)",
-                storeId, "Kho " + code, centralWarehouse);
-        return storeId;
+        return jdbc.queryForObject("INSERT INTO store (store_name, address, status, is_central) "
+                + "VALUES (?, 'Hà Nội', 'ACTIVE', ?) RETURNING id", Long.class, "Cửa hàng " + code, centralWarehouse);
     }
 
     private void addStock(long storeId, long productId, int available, String bin) {
-        jdbc.update("INSERT INTO stock_balance (warehouse_id, product_id, available_qty, bin_location) "
-                + "VALUES ((SELECT id FROM warehouse WHERE store_id = ?), ?, ?, ?)", storeId, productId, available, bin);
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, available_qty, bin_location) "
+                + "VALUES (?, ?, ?, ?)", storeId, productId, available, bin);
     }
 
     private void addRetailPrice(long productId, long price, LocalDateTime effectiveFrom, String status) {

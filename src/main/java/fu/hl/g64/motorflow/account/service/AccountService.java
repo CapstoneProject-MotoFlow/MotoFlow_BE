@@ -5,14 +5,9 @@ import fu.hl.g64.motorflow.account.dto.AccountState;
 import fu.hl.g64.motorflow.account.dto.CreateAccountRequest;
 import fu.hl.g64.motorflow.account.dto.CreatedAccountResponse;
 import fu.hl.g64.motorflow.account.dto.TemporaryPasswordResponse;
-import fu.hl.g64.motorflow.account.entity.PermissionHistory;
-import fu.hl.g64.motorflow.account.entity.UserPermission;
-import fu.hl.g64.motorflow.account.entity.enums.PermissionCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
-import fu.hl.g64.motorflow.account.repository.PermissionHistoryRepository;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
-import fu.hl.g64.motorflow.account.repository.UserPermissionRepository;
 import fu.hl.g64.motorflow.auth.entity.AuthSession;
 import fu.hl.g64.motorflow.auth.repository.AuthSessionRepository;
 import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
@@ -33,11 +28,9 @@ import org.springframework.util.StringUtils;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Comparator;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -48,8 +41,6 @@ public class AccountService {
 
     private final UserAccountRepository users;
     private final StoreRepository stores;
-    private final UserPermissionRepository userPermissions;
-    private final PermissionHistoryRepository permissionHistory;
     private final AuthSessionRepository sessions;
     private final AuditLogRepository auditLog;
     private final PasswordEncoder passwordEncoder;
@@ -65,14 +56,10 @@ public class AccountService {
         LocalDateTime now = LocalDateTime.now(clock);
         Map<Long, String> storeNames = stores.findAll().stream()
                 .collect(Collectors.toMap(Store::getId, Store::getStoreName));
-        Map<Long, Set<PermissionCode>> permissionsByUser = userPermissions.findAll().stream()
-                .collect(Collectors.groupingBy(UserPermission::getUserId, Collectors.mapping(UserPermission::getPermissionCode,
-                        Collectors.toCollection(() -> EnumSet.noneOf(PermissionCode.class)))));
         String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
 
         return users.findAll().stream()
-                .map(account -> AccountResponse.from(account, storeNames.get(account.getStoreId()),
-                        permissionsByUser.getOrDefault(account.getId(), Set.of()), now))
+                .map(account -> AccountResponse.from(account, storeNames.get(account.getStoreId()), now))
                 .filter(a -> role == null || a.role() == role)
                 .filter(a -> storeId == null || storeId.equals(a.storeId()))
                 .filter(a -> state == null || a.state() == state)
@@ -89,9 +76,7 @@ public class AccountService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
         String storeName = account.getStoreId() == null ? null
                 : stores.findById(account.getStoreId()).map(Store::getStoreName).orElse(null);
-        Set<PermissionCode> codes = userPermissions.findByUserId(accountId).stream().map(UserPermission::getPermissionCode)
-                .collect(Collectors.toCollection(() -> EnumSet.noneOf(PermissionCode.class)));
-        return AccountResponse.from(account, storeName, codes, LocalDateTime.now(clock));
+        return AccountResponse.from(account, storeName, LocalDateTime.now(clock));
     }
 
     @Transactional
@@ -123,9 +108,9 @@ public class AccountService {
             // Another Admin created the same username a moment earlier.
             throw new BusinessException(HttpStatus.CONFLICT, "MSG45", username);
         }
-        permissionHistory.save(PermissionHistory.accountCreated(account, admin.id(), null, now));
+        auditLog.save(PermissionService.accountCreated(account, admin.id(), null, now));
         return new CreatedAccountResponse(
-                AccountResponse.from(account, store == null ? null : store.getStoreName(), Set.of(), now),
+                AccountResponse.from(account, store == null ? null : store.getStoreName(), now),
                 temporaryPassword);
     }
 

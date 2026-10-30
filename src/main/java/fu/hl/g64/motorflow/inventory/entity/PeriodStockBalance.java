@@ -29,8 +29,8 @@ public class PeriodStockBalance {
     @Column(name = "inventory_period_id", nullable = false)
     private Long inventoryPeriodId;
 
-    @Column(name = "warehouse_id", nullable = false)
-    private Long warehouseId;
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
 
     @Column(name = "product_id", nullable = false)
     private Long productId;

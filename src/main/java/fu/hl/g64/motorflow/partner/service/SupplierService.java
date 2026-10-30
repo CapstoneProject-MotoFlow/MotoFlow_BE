@@ -22,9 +22,7 @@ import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptRequestLineRepositor
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptRequestRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
-import fu.hl.g64.motorflow.store.entity.Warehouse;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
-import fu.hl.g64.motorflow.store.repository.WarehouseRepository;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -60,7 +58,6 @@ public class SupplierService {
     private final GoodsReceiptRequestLineRepository purchaseOrderLines;
     private final GoodsReceiptRepository deliveries;
     private final DiscrepancyCaseRepository discrepancies;
-    private final WarehouseRepository warehouses;
     private final StoreRepository stores;
     private final ProductRepository products;
     private final AuditLogRepository auditLog;
@@ -146,16 +143,13 @@ public class SupplierService {
         }
         Map<Long, Object[]> totals = purchaseOrderLines.summarizeByRequest(orders.stream().map(GoodsReceiptRequest::getId).toList())
                 .stream().collect(Collectors.toMap(row -> (Long) row[0], Function.identity()));
-        Map<Long, Warehouse> warehouseById = warehouses.findAllById(orders.stream().map(GoodsReceiptRequest::getWarehouseId)
-                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Warehouse::getId, Function.identity()));
-        Map<Long, String> storeNames = stores.findAllById(warehouseById.values().stream().map(Warehouse::getStoreId).toList())
-                .stream().collect(Collectors.toMap(Store::getId, Store::getStoreName));
+        Map<Long, String> storeNames = stores.findAllById(orders.stream().map(GoodsReceiptRequest::getStoreId)
+                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Store::getId, Store::getStoreName));
 
         return orders.stream().map(order -> {
             Object[] total = totals.get(order.getId());
-            Warehouse warehouse = warehouseById.get(order.getWarehouseId());
-            return new SupplierDetailResponse.PurchaseOrder(order.getId(), warehouse.getStoreId(),
-                    storeNames.get(warehouse.getStoreId()), order.getStatus(), order.getExpectedArrival(),
+            return new SupplierDetailResponse.PurchaseOrder(order.getId(), order.getStoreId(),
+                    storeNames.get(order.getStoreId()), order.getStatus(), order.getExpectedArrival(),
                     total == null ? 0 : (Long) total[1], total == null ? 0 : ((Number) total[2]).longValue(),
                     order.getCreatedAt());
         }).toList();

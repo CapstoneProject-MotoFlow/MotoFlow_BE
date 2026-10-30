@@ -3,15 +3,13 @@ package fu.hl.g64.motorflow.account.service;
 import fu.hl.g64.motorflow.account.dto.AccountResponse;
 import fu.hl.g64.motorflow.account.dto.PermissionHistoryResponse;
 import fu.hl.g64.motorflow.account.dto.UpdatePermissionsRequest;
-import fu.hl.g64.motorflow.account.entity.PermissionHistory;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
-import fu.hl.g64.motorflow.account.entity.UserPermission;
 import fu.hl.g64.motorflow.account.entity.enums.AccountStatus;
 import fu.hl.g64.motorflow.account.entity.enums.PermissionCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
-import fu.hl.g64.motorflow.account.repository.PermissionHistoryRepository;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
-import fu.hl.g64.motorflow.account.repository.UserPermissionRepository;
+import fu.hl.g64.motorflow.common.audit.AuditLog;
+import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.operation.entity.Notification;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
@@ -29,25 +27,31 @@ import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
-import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/** UC-09 Update Permissions and UC-12 View Permission History. Admin only (BR-01). */
+/**
+ * UC-09 Update Permissions and UC-12 View Permission History. Admin only (BR-01).
+ * The history is kept in audit_log (entity USER_ACCOUNT) with {"permission_code", "value"} in old_data / new_data.
+ */
 @Service
 @RequiredArgsConstructor
 public class PermissionService {
 
     private final UserAccountRepository users;
     private final StoreRepository stores;
-    private final UserPermissionRepository userPermissions;
-    private final PermissionHistoryRepository permissionHistory;
+    private final AuditLogRepository auditLog;
     private final WarehouseTaskRepository tasks;
     private final NotificationRepository notifications;
     private final Clock clock;
+
+    /** audit_log actions that make up the permission history (BR-01). */
+    static final Set<String> HISTORY_ACTIONS = Set.of("ACCOUNT_CREATED", "ROLE_CHANGED", "STORE_CHANGED",
+            "PERMISSION_GRANTED", "PERMISSION_REVOKED");
 
     /**
      * Sets role, store and the catalog permission in one step; each change is kept in the history.
@@ -84,31 +88,21 @@ public class PermissionService {
         if (role != oldRole || storeChanged) {
             releaseAssignedTasks(account, request.releaseAssignedTasks(), now);
             if (role != oldRole) {
-                permissionHistory.save(PermissionHistory.roleChanged(accountId, oldRole, role, reason, admin.id(), now));
+                auditLog.save(history(accountId, "ROLE_CHANGED", null, oldRole.name(), role.name(), reason, admin.id(), now));
             }
             if (storeChanged) {
-                permissionHistory.save(PermissionHistory.storeChanged(accountId, oldStoreId, storeId, reason, admin.id(), now));
+                // Values are store ids (the store has no code since V7); null means no store.
+                auditLog.save(history(accountId, "STORE_CHANGED", null, Objects.toString(oldStoreId, null),
+                        Objects.toString(storeId, null), reason, admin.id(), now));
             }
             account.changeRoleAndStore(role, storeId, now);
         }
 
-        // BR-05, BR-08: operation permissions belong to Branch Managers only.
-        Set<PermissionCode> kept = EnumSet.noneOf(PermissionCode.class);
-        for (UserPermission permission : userPermissions.findByUserId(accountId)) {
-            PermissionCode code = permission.getPermissionCode();
-            if (role == Role.BRANCH_MANAGER && (code != PermissionCode.CATALOG_EDIT || request.catalogEdit())) {
-                kept.add(code);
-            } else {
-                userPermissions.delete(permission);
-                permissionHistory.save(PermissionHistory.permissionRevoked(accountId, code, reason, admin.id(), now));
-            }
-        }
-        if (request.catalogEdit() && kept.add(PermissionCode.CATALOG_EDIT)) {
-            userPermissions.save(UserPermission.grant(accountId, PermissionCode.CATALOG_EDIT, admin.id(), now));
-            permissionHistory.save(PermissionHistory.permissionGranted(accountId, PermissionCode.CATALOG_EDIT, reason,
-                    admin.id(), now));
-        }
-        return AccountResponse.from(account, store == null ? null : store.getStoreName(), kept, now);
+        // BR-05, BR-08: operation permissions belong to Branch Managers only; the retail price one is the Owner's to give.
+        boolean manager = role == Role.BRANCH_MANAGER;
+        setPermission(account, PermissionCode.CATALOG_EDIT, manager && request.catalogEdit(), reason, admin, now);
+        setPermission(account, PermissionCode.RETAIL_PRICE_EDIT, manager && account.isCanEditRetailPrice(), reason, admin, now);
+        return AccountResponse.from(account, store == null ? null : store.getStoreName(), now);
     }
 
     /** Newest first, with the name of the Admin (or Owner, BR-08) who made each change. */
@@ -117,10 +111,41 @@ public class PermissionService {
         if (!users.existsById(accountId)) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "MSG48");
         }
-        List<PermissionHistory> entries = permissionHistory.findByUserIdOrderByChangedAtDescIdDesc(accountId);
-        Map<Long, String> names = users.findAllById(entries.stream().map(PermissionHistory::getChangedBy).collect(Collectors.toSet()))
+        List<AuditLog> entries = auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(
+                "USER_ACCOUNT", accountId, HISTORY_ACTIONS);
+        Map<Long, String> names = users.findAllById(entries.stream().map(AuditLog::getActorId).collect(Collectors.toSet()))
                 .stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
-        return entries.stream().map(entry -> PermissionHistoryResponse.from(entry, names.get(entry.getChangedBy()))).toList();
+        return entries.stream().map(entry -> PermissionHistoryResponse.from(entry, names.get(entry.getActorId()))).toList();
+    }
+
+    static AuditLog accountCreated(UserAccount account, Long changedBy, String reason, LocalDateTime now) {
+        return history(account.getId(), "ACCOUNT_CREATED", null, null, account.getRole().name(), reason, changedBy, now);
+    }
+
+    private void setPermission(UserAccount account, PermissionCode code, boolean granted, String reason,
+                               AuthenticatedUser admin, LocalDateTime now) {
+        if (account.setPermission(code, granted, now)) {
+            auditLog.save(history(account.getId(), granted ? "PERMISSION_GRANTED" : "PERMISSION_REVOKED", code, null,
+                    null, reason, admin.id(), now));
+        }
+    }
+
+    /** Same shape as the rows V11 moved over from permission_history; null values are left out. */
+    private static AuditLog history(Long userId, String action, PermissionCode code, String oldValue, String newValue,
+                                    String reason, Long changedBy, LocalDateTime now) {
+        return AuditLog.record("USER_ACCOUNT", userId, action, changedBy, reason,
+                data(code, oldValue), data(code, newValue), now);
+    }
+
+    private static Map<String, Object> data(PermissionCode code, String value) {
+        Map<String, Object> data = new HashMap<>();
+        if (code != null) {
+            data.put("permission_code", code.name());
+        }
+        if (value != null) {
+            data.put("value", value);
+        }
+        return data;
     }
 
     /**

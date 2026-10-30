@@ -13,6 +13,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /** An amount a customer owes a store: from an order completed on credit or an opening balance. */
@@ -50,6 +51,9 @@ public class Receivable {
 
     @Column(name = "recognized_at", nullable = false)
     private LocalDateTime recognizedAt;
+
+    @Column(name = "due_date")
+    private LocalDate dueDate;
 
     @Column(name = "settled_at")
     private LocalDateTime settledAt;

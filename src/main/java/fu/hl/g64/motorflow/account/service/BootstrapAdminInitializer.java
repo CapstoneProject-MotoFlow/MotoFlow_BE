@@ -1,11 +1,10 @@
 package fu.hl.g64.motorflow.account.service;
 
-import fu.hl.g64.motorflow.account.entity.PermissionHistory;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
-import fu.hl.g64.motorflow.account.repository.PermissionHistoryRepository;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
+import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,7 +29,7 @@ import java.time.LocalDateTime;
 public class BootstrapAdminInitializer implements ApplicationRunner {
 
     private final UserAccountRepository users;
-    private final PermissionHistoryRepository permissionHistory;
+    private final AuditLogRepository auditLog;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
 
@@ -57,7 +56,7 @@ public class BootstrapAdminInitializer implements ApplicationRunner {
         LocalDateTime now = LocalDateTime.now(clock);
         UserAccount admin = users.save(UserAccount.create(
                 normalized, passwordEncoder.encode(password), fullName, Role.ADMIN, null, null, now));
-        permissionHistory.save(PermissionHistory.accountCreated(admin, admin.getId(), "Bootstrap admin", now));
+        auditLog.save(PermissionService.accountCreated(admin, admin.getId(), "Bootstrap admin", now));
         log.info("Created bootstrap Admin account '{}'; its temporary password must be changed at first sign-in",
                 admin.getUsername());
     }
