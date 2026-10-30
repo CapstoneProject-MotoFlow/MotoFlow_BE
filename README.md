@@ -42,6 +42,12 @@ Không có profile mặc định: thiếu profile thì ứng dụng không chạ
 - Khi database chưa có Admin, ứng dụng tự tạo Admin theo `motoflow.bootstrap.admin.*` trong `application-dev.properties`.
 - Đây là mật khẩu tạm: lần đăng nhập đầu tiên sẽ bị buộc đổi mật khẩu.
 
+### Dữ liệu demo
+- `psql -h localhost -U root -d motoflow -v ON_ERROR_STOP=1 -f scripts/seed/seed_demo_data.sql` nạp dữ liệu Nga Minh
+  (3 cửa hàng, tài khoản mọi vai trò, 30 sản phẩm, tồn kho, nhập hàng, điều chuyển, bán hàng, công nợ) vào database đã ở V11.
+  Chạy lại không làm gì; tài khoản Admin có sẵn không bị đụng tới. Mọi tài khoản demo dùng mật khẩu `Demo@2026`.
+- `scripts/seed/check_stock_consistency.sql` kiểm tra `stock_balance` = `lot_balance` = `stock_movement`; không có dòng nào là khớp.
+
 ### Tài liệu API
 Swagger UI: `http://localhost:8080/swagger-ui.html` (tắt ở profile `prod`).
 1. Đăng nhập bằng `POST /api/auth/login`.
