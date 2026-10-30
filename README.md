@@ -50,7 +50,7 @@ Không có profile mặc định: thiếu profile thì ứng dụng không chạ
 
 ### Tài liệu API
 Swagger UI: `http://localhost:8080/swagger-ui.html` (tắt ở profile `prod`).
-1. Đăng nhập bằng `POST /api/auth/login`.
+1. Đăng nhập bằng `POST /api/v1/auth/login`.
 2. Copy `accessToken` vào nút **Authorize**.
 
 ### Chạy test
@@ -201,7 +201,7 @@ public class TransferOrder {
 - Mọi lỗi trả về cùng một dạng: `{status, code, message, path, fieldErrors?}` (`GlobalExceptionHandler`). Không để lộ lỗi SQL hay stack trace ra API.
 
 ### Controller
-- URL dạng `/api/<tài-nguyên>`, ví dụ `/api/accounts`, `/api/transfer-orders/{id}/dispatch`.
+- URL dạng `/api/v1/<tài-nguyên>`, ví dụ `/api/v1/accounts`, `/api/v1/transfer-orders/{id}/dispatch`.
 - Phân quyền theo role bằng `@PreAuthorize("hasRole('OWNER')")`. Phạm vi cửa hàng và quyền được cấp thì kiểm trong service.
 - Ghi `@Tag` / `@Operation` kèm mã UC để Swagger dễ đọc.
 - Request/response dùng `record` trong `dto/`, không trả entity ra ngoài.
@@ -221,7 +221,7 @@ Ví dụ thêm UC-xx "Dispatch Transfer Order":
 2. **Entity:** thêm method nghiệp vụ vào `TransferOrder` (`dispatch(...)`), kiểm trạng thái và BR ngay trong đó.
 3. **Repository:** thêm query nếu cần (`findBy...`, hoặc `@Query`).
 4. **Service:** tạo `transfer/service/TransferOrderService` với method `dispatch(user, id, request)` có `@Transactional`. Method này kiểm quyền và cửa hàng, gọi entity, ghi `stock_movement` và audit.
-5. **DTO + controller:** `POST /api/transfer-orders/{id}/dispatch`, có `@PreAuthorize`.
+5. **DTO + controller:** `POST /api/v1/transfer-orders/{id}/dispatch`, có `@PreAuthorize`.
 6. **Message:** thêm mã MSG mới vào `messages.properties` nếu cần.
 7. **Test:** `transfer/TransferOrderApiTest extends IntegrationTest`.
 8. Chạy `./mvnw test` cho xanh rồi mới đẩy code.

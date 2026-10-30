@@ -13,7 +13,7 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * The refresh token travels only in an HttpOnly cookie scoped to /api/auth, so page scripts
+ * The refresh token travels only in an HttpOnly cookie scoped to /api/v1/auth, so page scripts
  * cannot read it (XSS) and other API calls do not carry it.
  */
 @Component

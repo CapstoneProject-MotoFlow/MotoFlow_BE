@@ -34,7 +34,7 @@ import java.util.List;
 
 @Tag(name = "Accounts", description = "UC-07 to UC-12: accounts, permissions and their history (Admin)")
 @RestController
-@RequestMapping("/api/accounts")
+@RequestMapping("/api/v1/accounts")
 @PreAuthorize("hasRole('ADMIN')")
 @RequiredArgsConstructor
 public class AccountController {
@@ -62,7 +62,7 @@ public class AccountController {
     public ResponseEntity<CreatedAccountResponse> create(@AuthenticationPrincipal AuthenticatedUser admin,
                                                          @Valid @RequestBody CreateAccountRequest request) {
         CreatedAccountResponse created = accountService.createAccount(admin, request);
-        return ResponseEntity.created(URI.create("/api/accounts/" + created.account().id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/accounts/" + created.account().id())).body(created);
     }
 
     @Operation(summary = "Change role, store and catalog permission (UC-09); 409 MSG18 asks to release assigned tasks")

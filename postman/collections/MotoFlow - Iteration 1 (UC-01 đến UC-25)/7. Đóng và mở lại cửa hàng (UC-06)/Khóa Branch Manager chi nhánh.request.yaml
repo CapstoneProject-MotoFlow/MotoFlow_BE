@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/accounts/{{bmId}}/lock"
+url: "{{baseUrl}}/api/v1/accounts/{{bmId}}/lock"
 method: POST
 headers:
   Content-Type: application/json

@@ -46,7 +46,7 @@ public class SecurityConfig {
                                                    SecurityErrorHandlers errorHandlers) throws Exception {
         http
                 // No cookie-based sign-in on business endpoints, so CSRF does not apply; the refresh
-                // cookie is SameSite and only accepted by /api/auth/refresh.
+                // cookie is SameSite and only accepted by /api/v1/auth/refresh.
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -54,13 +54,13 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html", "/error").permitAll()
                         // Health check for deploys and monitoring; answers only UP or DOWN.
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
                         // The only screens open to a user who still has a temporary password (SEC-03).
-                        .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/change-password").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/change-password").authenticated()
                         .anyRequest().access(SecurityConfig::signedInWithOwnPassword))
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint(errorHandlers)
@@ -76,7 +76,7 @@ public class SecurityConfig {
         cors.setAllowedOrigins(allowedOrigins);
         cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         cors.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-        cors.setAllowCredentials(true); // the browser must send the refresh cookie to /api/auth/refresh
+        cors.setAllowCredentials(true); // the browser must send the refresh cookie to /api/v1/auth/refresh
         cors.setMaxAge(Duration.ofHours(1));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", cors);

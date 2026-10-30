@@ -81,7 +81,7 @@ class HealthEndpointTest extends IntegrationTest {
         UserAccount admin = UserAccount.create("admin", hash, "Test admin", Role.ADMIN, null, null, now);
         admin.changePassword(hash, now);
         users.save(admin);
-        MvcResult result = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+        MvcResult result = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"username\":\"admin\",\"password\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isOk())
                 .andReturn();

@@ -64,7 +64,7 @@ class CatalogApiTest extends IntegrationTest {
 
         @Test
         void theLocationOfANewCategoryShowsItWithItsChildren() throws Exception {
-            String location = send(post("/api/part-categories"), ownerToken,
+            String location = send(post("/api/v1/part-categories"), ownerToken,
                     Map.of("categoryName", "Hệ thống phanh", "vehicleType", "MOTORCYCLE"))
                     .andExpect(status().isCreated()).andReturn().getResponse().getHeader(HttpHeaders.LOCATION);
             long brakes = Long.parseLong(location.substring(location.lastIndexOf('/') + 1));
@@ -74,7 +74,7 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.categoryName").value("Hệ thống phanh"))
                     .andExpect(jsonPath("$.children[*].categoryName", contains("Bố thắng đĩa")));
-            send(get("/api/part-categories/999999"), ownerToken)
+            send(get("/api/v1/part-categories/999999"), ownerToken)
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG61"));
         }
 
@@ -83,21 +83,21 @@ class CatalogApiTest extends IntegrationTest {
             long brakes = categoryId(Map.of("categoryName", "Hệ thống phanh", "vehicleType", "MOTORCYCLE"));
             long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE", "parentId", brakes));
 
-            send(get("/api/part-categories"), ownerToken)
+            send(get("/api/v1/part-categories"), ownerToken)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].categoryName").value("Hệ thống phanh"))
                     .andExpect(jsonPath("$[0].children[*].categoryName", contains("Bố thắng đĩa")));
-            send(post("/api/products"), ownerToken, product("SKU-1", brakes))
+            send(post("/api/v1/products"), ownerToken, product("SKU-1", brakes))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG55"));
-            send(post("/api/products"), ownerToken, product("SKU-1", pads)).andExpect(status().isCreated());
+            send(post("/api/v1/products"), ownerToken, product("SKU-1", pads)).andExpect(status().isCreated());
 
-            send(post("/api/part-categories"), ownerToken,
+            send(post("/api/v1/part-categories"), ownerToken,
                     Map.of("categoryName", "Má phanh", "vehicleType", "MOTORCYCLE", "parentId", pads))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG60"));
-            send(post("/api/part-categories"), ownerToken,
+            send(post("/api/v1/part-categories"), ownerToken,
                     Map.of("categoryName", "bố thắng ĐĨA", "vehicleType", "MOTORCYCLE", "parentId", brakes))
                     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG58"));
-            send(post("/api/part-categories"), ownerToken,
+            send(post("/api/v1/part-categories"), ownerToken,
                     Map.of("categoryName", "Xích", "vehicleType", "BICYCLE", "parentId", brakes))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG59"));
         }
@@ -107,17 +107,17 @@ class CatalogApiTest extends IntegrationTest {
             long brakes = categoryId(Map.of("categoryName", "Hệ thống phanh", "vehicleType", "MOTORCYCLE"));
             long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE", "parentId", brakes));
 
-            send(put("/api/part-categories/{id}", brakes), ownerToken,
+            send(put("/api/v1/part-categories/{id}", brakes), ownerToken,
                     Map.of("categoryName", "Hệ thống phanh", "vehicleType", "MOTORCYCLE", "parentId", pads))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG59"));
-            send(put("/api/part-categories/{id}", brakes), ownerToken,
+            send(put("/api/v1/part-categories/{id}", brakes), ownerToken,
                     Map.of("categoryName", "Phanh", "vehicleType", "E_MOTORCYCLE"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.children[0].vehicleType").value("E_MOTORCYCLE"));
 
-            send(get("/api/part-categories?vehicleType=E_MOTORCYCLE"), ownerToken)
+            send(get("/api/v1/part-categories?vehicleType=E_MOTORCYCLE"), ownerToken)
                     .andExpect(jsonPath("$[*].categoryName", contains("Phanh")));
-            send(get("/api/part-categories?vehicleType=MOTORCYCLE"), ownerToken).andExpect(jsonPath("$", hasSize(0)));
+            send(get("/api/v1/part-categories?vehicleType=MOTORCYCLE"), ownerToken).andExpect(jsonPath("$", hasSize(0)));
         }
 
         @Test
@@ -125,14 +125,14 @@ class CatalogApiTest extends IntegrationTest {
             long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE"));
             long part = productId(product("SKU-1", pads));
 
-            send(post("/api/part-categories/{id}/deactivate", pads), ownerToken).andExpect(status().isNoContent());
+            send(post("/api/v1/part-categories/{id}/deactivate", pads), ownerToken).andExpect(status().isNoContent());
 
-            send(post("/api/products"), ownerToken, product("SKU-2", pads))
+            send(post("/api/v1/products"), ownerToken, product("SKU-2", pads))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG55"));
-            send(put("/api/products/{id}", part), ownerToken, product("SKU-1", pads)).andExpect(status().isOk());
-            send(get("/api/part-categories"), ownerToken).andExpect(jsonPath("$[0].status").value("INACTIVE"));
-            send(post("/api/part-categories/{id}/activate", pads), ownerToken).andExpect(status().isNoContent());
-            send(post("/api/products"), ownerToken, product("SKU-2", pads)).andExpect(status().isCreated());
+            send(put("/api/v1/products/{id}", part), ownerToken, product("SKU-1", pads)).andExpect(status().isOk());
+            send(get("/api/v1/part-categories"), ownerToken).andExpect(jsonPath("$[0].status").value("INACTIVE"));
+            send(post("/api/v1/part-categories/{id}/activate", pads), ownerToken).andExpect(status().isNoContent());
+            send(post("/api/v1/products"), ownerToken, product("SKU-2", pads)).andExpect(status().isCreated());
         }
     }
 
@@ -141,13 +141,13 @@ class CatalogApiTest extends IntegrationTest {
 
         @Test
         void theLocationOfANewModelShowsIt() throws Exception {
-            String location = send(post("/api/vehicle-models"), ownerToken,
+            String location = send(post("/api/v1/vehicle-models"), ownerToken,
                     Map.of("manufacturer", "Honda", "modelName", "Wave Alpha", "vehicleType", "MOTORCYCLE"))
                     .andExpect(status().isCreated()).andReturn().getResponse().getHeader(HttpHeaders.LOCATION);
 
             send(get(location), ownerToken)
                     .andExpect(status().isOk()).andExpect(jsonPath("$.modelName").value("Wave Alpha"));
-            send(get("/api/vehicle-models/999999"), ownerToken)
+            send(get("/api/v1/vehicle-models/999999"), ownerToken)
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG63"));
         }
 
@@ -155,29 +155,29 @@ class CatalogApiTest extends IntegrationTest {
         void areUniqueAndKeepTheirLinksWhenDeactivated() throws Exception {
             long airBlade = vehicleModelId(Map.of("manufacturer", "Honda", "modelName", "Air Blade 125",
                     "vehicleType", "MOTORCYCLE", "yearFrom", 2020, "yearTo", 2024));
-            send(post("/api/vehicle-models"), ownerToken, Map.of("manufacturer", "HONDA", "modelName", "air blade 125",
+            send(post("/api/v1/vehicle-models"), ownerToken, Map.of("manufacturer", "HONDA", "modelName", "air blade 125",
                     "vehicleType", "MOTORCYCLE", "yearFrom", 2020, "yearTo", 2024))
                     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG62"));
-            send(post("/api/vehicle-models"), ownerToken, Map.of("manufacturer", "Honda", "modelName", "Vision",
+            send(post("/api/v1/vehicle-models"), ownerToken, Map.of("manufacturer", "Honda", "modelName", "Vision",
                     "vehicleType", "MOTORCYCLE", "yearFrom", 2024, "yearTo", 2020))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG64"));
             vehicleModelId(Map.of("manufacturer", "Honda", "modelName", "Wave", "vehicleType", "MOTORCYCLE"));
-            send(post("/api/vehicle-models"), ownerToken,
+            send(post("/api/v1/vehicle-models"), ownerToken,
                     Map.of("manufacturer", "Honda", "modelName", "Wave", "vehicleType", "MOTORCYCLE"))
                     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG62"));
-            send(get("/api/vehicle-models?q=air"), ownerToken)
+            send(get("/api/v1/vehicle-models?q=air"), ownerToken)
                     .andExpect(jsonPath("$[*].id", contains((int) airBlade)));
 
             long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE"));
             Map<String, Object> fitsAirBlade = product("SKU-1", pads);
             fitsAirBlade.put("vehicleModelIds", List.of(airBlade));
             long part = productId(fitsAirBlade);
-            send(post("/api/vehicle-models/{id}/deactivate", airBlade), ownerToken).andExpect(status().isNoContent());
+            send(post("/api/v1/vehicle-models/{id}/deactivate", airBlade), ownerToken).andExpect(status().isNoContent());
 
             fitsAirBlade.put("sku", "SKU-2");
-            send(post("/api/products"), ownerToken, fitsAirBlade)
+            send(post("/api/v1/products"), ownerToken, fitsAirBlade)
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG56"));
-            send(put("/api/products/{id}", part), ownerToken, fitsAirBlade)
+            send(put("/api/v1/products/{id}", part), ownerToken, fitsAirBlade)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.vehicleModels[0].status").value("INACTIVE"));
         }
@@ -197,7 +197,7 @@ class CatalogApiTest extends IntegrationTest {
             body.put("vehicleModelIds", List.of(airBlade));
             body.put("imageUrls", List.of("https://img.example/a.jpg", "https://img.example/b.jpg"));
 
-            long id = JsonPath.parse(send(post("/api/products"), ownerToken, body)
+            long id = JsonPath.parse(send(post("/api/v1/products"), ownerToken, body)
                     .andExpect(status().isCreated())
                     .andExpect(header().exists(HttpHeaders.LOCATION))
                     .andExpect(jsonPath("$.sku").value("SKU-001"))
@@ -211,19 +211,19 @@ class CatalogApiTest extends IntegrationTest {
             assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_balance", Long.class)).isZero();
 
             body.put("sku", "Sku-001");
-            send(post("/api/products"), ownerToken, body)
+            send(post("/api/v1/products"), ownerToken, body)
                     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG53"));
             body.put("sku", "SKU-002");
-            send(post("/api/products"), ownerToken, body)
+            send(post("/api/v1/products"), ownerToken, body)
                     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG54"));
             body.put("barcodes", List.of());
-            send(post("/api/products"), ownerToken, body).andExpect(status().isCreated());
+            send(post("/api/v1/products"), ownerToken, body).andExpect(status().isCreated());
 
             body.put("sku", "IGNORED");
             body.put("partName", "Bố thắng đĩa trước");
             body.put("oemCodes", List.of("06435-K01-903"));
             body.put("imageUrls", List.of("https://img.example/c.jpg"));
-            send(put("/api/products/{id}", id), ownerToken, body)
+            send(put("/api/v1/products/{id}", id), ownerToken, body)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.sku").value("SKU-001"))
                     .andExpect(jsonPath("$.partName").value("Bố thắng đĩa trước"))
@@ -231,17 +231,17 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.barcodes", hasSize(0)))
                     .andExpect(jsonPath("$.imageUrls", contains("https://img.example/c.jpg")));
 
-            send(post("/api/products/{id}/discontinue", id), ownerToken).andExpect(status().isNoContent());
-            send(get("/api/products/{id}", id), ownerToken)
+            send(post("/api/v1/products/{id}/discontinue", id), ownerToken).andExpect(status().isNoContent());
+            send(get("/api/v1/products/{id}", id), ownerToken)
                     .andExpect(jsonPath("$.status").value("DISCONTINUED"))
                     .andExpect(jsonPath("$.discontinuedAt").exists());
-            send(get("/api/products?status=ACTIVE"), ownerToken)
+            send(get("/api/v1/products?status=ACTIVE"), ownerToken)
                     .andExpect(jsonPath("$.items[*].sku", contains("SKU-002")));
-            send(post("/api/products/{id}/reactivate", id), ownerToken).andExpect(status().isNoContent());
-            send(get("/api/products/{id}", id), ownerToken)
+            send(post("/api/v1/products/{id}/reactivate", id), ownerToken).andExpect(status().isNoContent());
+            send(get("/api/v1/products/{id}", id), ownerToken)
                     .andExpect(jsonPath("$.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.discontinuedAt").doesNotExist());
-            send(get("/api/products/{id}", 9999L), ownerToken)
+            send(get("/api/v1/products/{id}", 9999L), ownerToken)
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG57"));
         }
 
@@ -250,12 +250,12 @@ class CatalogApiTest extends IntegrationTest {
             long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE"));
             Map<String, Object> body = product("SKU-1", pads);
             body.remove("sku");
-            send(post("/api/products"), ownerToken, body)
+            send(post("/api/v1/products"), ownerToken, body)
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"));
             body.put("sku", "có dấu");
             body.put("brand", "");
             body.put("imageUrls", List.of("https://a/1", "https://a/2", "https://a/3", "https://a/4"));
-            send(post("/api/products"), ownerToken, body)
+            send(post("/api/v1/products"), ownerToken, body)
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("MSG02"))
                     .andExpect(jsonPath("$.fieldErrors.sku").exists())
@@ -277,7 +277,7 @@ class CatalogApiTest extends IntegrationTest {
             chainBody.put("oemCodes", List.of("40530-KWB-921"));
             long chainPart = productId(chainBody);
             long old = productId(product("SKU-003", chains));
-            send(post("/api/products/{id}/discontinue", old), ownerToken).andExpect(status().isNoContent());
+            send(post("/api/v1/products/{id}/discontinue", old), ownerToken).andExpect(status().isNoContent());
 
             addStock(branch, padsPart, 5, "A-01");
             addStock(central, chainPart, 3, "B-02");
@@ -288,7 +288,7 @@ class CatalogApiTest extends IntegrationTest {
 
             createUser("staff01", Role.STAFF, branch);
             String staffToken = signIn("staff01");
-            send(get("/api/products"), staffToken)
+            send(get("/api/v1/products"), staffToken)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalItems").value(3))
                     .andExpect(jsonPath("$.items[*].sku", contains("SKU-001", "SKU-002", "SKU-003")))
@@ -298,18 +298,18 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.items[0].categoryName").value("Bố thắng đĩa"))
                     .andExpect(jsonPath("$.items[1].availableQty").value(0))
                     .andExpect(jsonPath("$.items[1].oemCodes", contains("40530-KWB-921")));
-            send(get("/api/products?q=40530-kwb"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-002")));
-            send(get("/api/products?categoryId=" + brakes), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
-            send(get("/api/products?vehicleModelId=" + airBlade), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
-            send(get("/api/products?inStockOnly=true"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
-            send(get("/api/products?status=DISCONTINUED"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-003")));
-            send(get("/api/products?size=1&page=1"), staffToken)
+            send(get("/api/v1/products?q=40530-kwb"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-002")));
+            send(get("/api/v1/products?categoryId=" + brakes), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
+            send(get("/api/v1/products?vehicleModelId=" + airBlade), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
+            send(get("/api/v1/products?inStockOnly=true"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
+            send(get("/api/v1/products?status=DISCONTINUED"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-003")));
+            send(get("/api/v1/products?size=1&page=1"), staffToken)
                     .andExpect(jsonPath("$.totalItems").value(3))
                     .andExpect(jsonPath("$.items[*].sku", contains("SKU-002")));
-            send(get("/api/products?status=OPEN"), staffToken)
+            send(get("/api/v1/products?status=OPEN"), staffToken)
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"));
 
-            send(get("/api/products/{id}", padsPart), staffToken)
+            send(get("/api/v1/products/{id}", padsPart), staffToken)
                     .andExpect(jsonPath("$.retailPrice").value(100_000))
                     .andExpect(jsonPath("$.wholesalePrice").doesNotExist())
                     .andExpect(jsonPath("$.stock.storeId").value(branch))
@@ -317,12 +317,12 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.vehicleModels[0].modelName").value("Air Blade"));
 
             // Staff see only their store; Owner and the central warehouse's Branch Manager see every store (BR-03).
-            send(get("/api/products?storeId=" + central), staffToken)
+            send(get("/api/v1/products?storeId=" + central), staffToken)
                     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
-            send(get("/api/products?storeId=" + central), ownerToken).andExpect(jsonPath("$.items[1].availableQty").value(3));
-            send(get("/api/products"), ownerToken).andExpect(jsonPath("$.items[0].availableQty").doesNotExist());
+            send(get("/api/v1/products?storeId=" + central), ownerToken).andExpect(jsonPath("$.items[1].availableQty").value(3));
+            send(get("/api/v1/products"), ownerToken).andExpect(jsonPath("$.items[0].availableQty").doesNotExist());
             createUser("bm01", Role.BRANCH_MANAGER, central);
-            send(get("/api/products?storeId=" + branch), signIn("bm01")).andExpect(jsonPath("$.items[0].availableQty").value(5));
+            send(get("/api/v1/products?storeId=" + branch), signIn("bm01")).andExpect(jsonPath("$.items[0].availableQty").value(5));
         }
     }
 
@@ -335,15 +335,15 @@ class CatalogApiTest extends IntegrationTest {
         createUser("admin", Role.ADMIN, null);
         Map<String, Object> category = Map.of("categoryName", "Phanh", "vehicleType", "MOTORCYCLE");
 
-        send(post("/api/part-categories"), signIn("bm01"), category).andExpect(status().isCreated());
-        send(post("/api/part-categories"), signIn("bm02"), category)
+        send(post("/api/v1/part-categories"), signIn("bm01"), category).andExpect(status().isCreated());
+        send(post("/api/v1/part-categories"), signIn("bm02"), category)
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         String staffToken = signIn("staff01");
-        send(post("/api/vehicle-models"), staffToken,
+        send(post("/api/v1/vehicle-models"), staffToken,
                 Map.of("manufacturer", "Honda", "modelName", "Wave", "vehicleType", "MOTORCYCLE"))
                 .andExpect(status().isForbidden());
-        send(get("/api/part-categories"), staffToken).andExpect(status().isOk());
-        send(get("/api/products"), signIn("admin"))
+        send(get("/api/v1/part-categories"), staffToken).andExpect(status().isOk());
+        send(get("/api/v1/products"), signIn("admin"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
     }
 
@@ -353,15 +353,15 @@ class CatalogApiTest extends IntegrationTest {
     }
 
     private long categoryId(Map<String, Object> body) throws Exception {
-        return createdId(send(post("/api/part-categories"), ownerToken, body));
+        return createdId(send(post("/api/v1/part-categories"), ownerToken, body));
     }
 
     private long vehicleModelId(Map<String, Object> body) throws Exception {
-        return createdId(send(post("/api/vehicle-models"), ownerToken, body));
+        return createdId(send(post("/api/v1/vehicle-models"), ownerToken, body));
     }
 
     private long productId(Map<String, Object> body) throws Exception {
-        return createdId(send(post("/api/products"), ownerToken, body));
+        return createdId(send(post("/api/v1/products"), ownerToken, body));
     }
 
     private long createdId(ResultActions created) throws Exception {
@@ -394,7 +394,7 @@ class CatalogApiTest extends IntegrationTest {
     }
 
     private String signIn(String username) throws Exception {
-        String body = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+        String body = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(jsonMapper.writeValueAsString(Map.of("username", username, "password", PASSWORD))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.accessToken");

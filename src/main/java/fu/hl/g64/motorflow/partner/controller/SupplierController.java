@@ -27,7 +27,7 @@ import java.net.URI;
 
 @Tag(name = "Suppliers", description = "UC-30 to UC-33 (Owner only)")
 @RestController
-@RequestMapping("/api/suppliers")
+@RequestMapping("/api/v1/suppliers")
 @PreAuthorize("hasRole('OWNER')")
 @RequiredArgsConstructor
 public class SupplierController {
@@ -54,7 +54,7 @@ public class SupplierController {
     public ResponseEntity<SupplierResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,
                                                    @Valid @RequestBody SupplierRequest request) {
         SupplierResponse created = supplierService.create(actor, request);
-        return ResponseEntity.created(URI.create("/api/suppliers/" + created.id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/suppliers/" + created.id())).body(created);
     }
 
     @Operation(summary = "Update a supplier's business or contact details (UC-33)")

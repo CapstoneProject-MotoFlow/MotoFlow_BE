@@ -86,7 +86,7 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.username").value("staff01"))
                     .andExpect(jsonPath("$.storeName").value("Cửa hàng CH01"))
                     .andExpect(jsonPath("$.permissions", hasSize(0)));
-            mvc.perform(get("/api/accounts/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+            mvc.perform(get("/api/v1/accounts/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG48"));
         }
 
@@ -120,15 +120,15 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.user.mustChangePassword").value(true))
                     .andReturn().getResponse().getContentAsString(), "$.accessToken");
-            mvc.perform(get("/api/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+            mvc.perform(get("/api/v1/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG13"));
 
-            mvc.perform(post("/api/auth/change-password").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+            mvc.perform(post("/api/v1/auth/change-password").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(Map.of("currentPassword", temporary, "newPassword", OWN_PASSWORD))))
                     .andExpect(status().isNoContent());
             // Past the password gate; Staff still may not manage stores.
-            mvc.perform(get("/api/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+            mvc.perform(get("/api/v1/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         }
 
@@ -191,7 +191,7 @@ class AccountAdminApiTest extends IntegrationTest {
         void onlyAdminMayCreateAccounts() throws Exception {
             createUser("owner", Role.OWNER, null);
             String ownerToken = signIn("owner", PASSWORD);
-            mvc.perform(post("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+            mvc.perform(post("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(Map.of("username", "x123", "fullName", "X",
                                     "role", "OWNER"))))
@@ -218,7 +218,7 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andReturn().getResponse().getContentAsString(), "$.temporaryPassword");
             assertThat(PasswordPolicy.isAcceptable(temporary, "staff01")).isTrue();
 
-            mvc.perform(get("/api/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + staffToken))
+            mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + staffToken))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
             login("staff01", PASSWORD).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG09"));
             login("staff01", temporary).andExpect(status().isOk())
@@ -237,7 +237,7 @@ class AccountAdminApiTest extends IntegrationTest {
             jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", staff.getId());
 
             // No body: the reason is optional.
-            String temporary = JsonPath.read(adminPost("/api/accounts/{id}/reset-password", staff.getId(), null)
+            String temporary = JsonPath.read(adminPost("/api/v1/accounts/{id}/reset-password", staff.getId(), null)
                     .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.temporaryPassword");
 
             login("staff01", temporary).andExpect(status().isLocked()).andExpect(jsonPath("$.code").value("MSG10"));
@@ -289,7 +289,7 @@ class AccountAdminApiTest extends IntegrationTest {
         @Test
         void onlyAdminMayListAccounts() throws Exception {
             createUser("owner", Role.OWNER, null);
-            mvc.perform(get("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + signIn("owner", PASSWORD)))
+            mvc.perform(get("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + signIn("owner", PASSWORD)))
                     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         }
     }
@@ -300,20 +300,20 @@ class AccountAdminApiTest extends IntegrationTest {
 
         @Test
         void unknownUrlAndWrongMethodGiveMsg70AndMsg71() throws Exception {
-            mvc.perform(get("/api/no-such-thing").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+            mvc.perform(get("/api/v1/no-such-thing").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG70"))
                     .andExpect(jsonPath("$.message").value("Không tìm thấy chức năng được yêu cầu."));
-            mvc.perform(delete("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+            mvc.perform(delete("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                     .andExpect(status().isMethodNotAllowed()).andExpect(jsonPath("$.code").value("MSG71"))
                     .andExpect(jsonPath("$.message").value("Chức năng này không hỗ trợ phương thức DELETE."));
         }
 
         @Test
         void unsupportedBodyTypeAndBrokenJsonGiveMsg02() throws Exception {
-            mvc.perform(post("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+            mvc.perform(post("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                             .contentType(MediaType.TEXT_PLAIN).content("staff01"))
                     .andExpect(status().isUnsupportedMediaType()).andExpect(jsonPath("$.code").value("MSG02"));
-            mvc.perform(post("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+            mvc.perform(post("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                             .contentType(MediaType.APPLICATION_JSON).content("{\"username\":"))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"))
                     .andExpect(jsonPath("$.fieldErrors").doesNotExist());
@@ -338,10 +338,10 @@ class AccountAdminApiTest extends IntegrationTest {
             UserAccount staff = createUser("staff01", Role.STAFF, storeId);
             String staffToken = signIn("staff01", PASSWORD);
 
-            adminPost("/api/accounts/{id}/lock", staff.getId(), Map.of("reason", "Nghỉ việc"))
+            adminPost("/api/v1/accounts/{id}/lock", staff.getId(), Map.of("reason", "Nghỉ việc"))
                     .andExpect(status().isNoContent());
 
-            mvc.perform(get("/api/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + staffToken))
+            mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + staffToken))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
             login("staff01", PASSWORD).andExpect(status().isLocked()).andExpect(jsonPath("$.code").value("MSG10"));
             listAccounts("?state=LOCKED").andExpect(jsonPath("$[*].username", contains("staff01")));
@@ -351,7 +351,7 @@ class AccountAdminApiTest extends IntegrationTest {
                     .containsEntry("actor_id", admin.getId())
                     .containsEntry("reason", "Nghỉ việc");
 
-            adminPost("/api/accounts/{id}/unlock", staff.getId(), null).andExpect(status().isNoContent());
+            adminPost("/api/v1/accounts/{id}/unlock", staff.getId(), null).andExpect(status().isNoContent());
 
             login("staff01", PASSWORD).andExpect(status().isOk());
         }
@@ -364,16 +364,16 @@ class AccountAdminApiTest extends IntegrationTest {
             }
             login("staff01", PASSWORD).andExpect(jsonPath("$.code").value("MSG11"));
 
-            adminPost("/api/accounts/{id}/unlock", staff.getId(), null).andExpect(status().isNoContent());
+            adminPost("/api/v1/accounts/{id}/unlock", staff.getId(), null).andExpect(status().isNoContent());
 
             login("staff01", PASSWORD).andExpect(status().isOk());
         }
 
         @Test
         void rejectsOwnAccountAndUnknownAccount() throws Exception {
-            adminPost("/api/accounts/{id}/lock", admin.getId(), null)
+            adminPost("/api/v1/accounts/{id}/lock", admin.getId(), null)
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG15"));
-            adminPost("/api/accounts/{id}/lock", 9999L, null)
+            adminPost("/api/v1/accounts/{id}/lock", 9999L, null)
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG48"));
         }
     }
@@ -506,7 +506,7 @@ class AccountAdminApiTest extends IntegrationTest {
             updatePermissions(staffId, Map.of("role", "BRANCH_MANAGER", "storeId", storeId, "reason", "Thăng chức"))
                     .andExpect(status().isOk());
 
-            mvc.perform(get("/api/accounts/{id}/permission-history", staffId)
+            mvc.perform(get("/api/v1/accounts/{id}/permission-history", staffId)
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[*].changeType", contains("ROLE_CHANGED", "ACCOUNT_CREATED")))
@@ -514,7 +514,7 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$[0].newValue").value("BRANCH_MANAGER"))
                     .andExpect(jsonPath("$[0].reason").value("Thăng chức"))
                     .andExpect(jsonPath("$[0].changedByName").value("Test admin"));
-            mvc.perform(get("/api/accounts/{id}/permission-history", 9999L)
+            mvc.perform(get("/api/v1/accounts/{id}/permission-history", 9999L)
                             .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG48"));
         }
@@ -539,27 +539,27 @@ class AccountAdminApiTest extends IntegrationTest {
     }
 
     private ResultActions login(String username, String password) throws Exception {
-        return mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+        return mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content(json(Map.of("username", username, "password", password))));
     }
 
     private ResultActions createAccount(Map<String, Object> body) throws Exception {
-        return mvc.perform(post("/api/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
+        return mvc.perform(post("/api/v1/accounts").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                 .contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
 
     private ResultActions resetPassword(long accountId, Map<String, Object> body) throws Exception {
-        return mvc.perform(post("/api/accounts/{id}/reset-password", accountId)
+        return mvc.perform(post("/api/v1/accounts/{id}/reset-password", accountId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                 .contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
 
     private ResultActions listAccounts(String query) throws Exception {
-        return mvc.perform(get("/api/accounts" + query).header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken));
+        return mvc.perform(get("/api/v1/accounts" + query).header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken));
     }
 
     private ResultActions updatePermissions(long accountId, Map<String, Object> body) throws Exception {
-        return mvc.perform(put("/api/accounts/{id}/permissions", accountId)
+        return mvc.perform(put("/api/v1/accounts/{id}/permissions", accountId)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken)
                 .contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }

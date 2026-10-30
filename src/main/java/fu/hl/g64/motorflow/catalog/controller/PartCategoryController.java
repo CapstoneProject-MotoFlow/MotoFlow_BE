@@ -27,7 +27,7 @@ import java.util.List;
 
 @Tag(name = "Part categories", description = "UC-18 to UC-21 (Owner, Branch Manager with catalog permission)")
 @RestController
-@RequestMapping("/api/part-categories")
+@RequestMapping("/api/v1/part-categories")
 @PreAuthorize(CatalogAccess.READ)
 @RequiredArgsConstructor
 public class PartCategoryController {
@@ -52,7 +52,7 @@ public class PartCategoryController {
     public ResponseEntity<PartCategoryResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,
                                                        @Valid @RequestBody PartCategoryRequest request) {
         PartCategoryResponse created = categoryService.create(actor, request);
-        return ResponseEntity.created(URI.create("/api/part-categories/" + created.id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/part-categories/" + created.id())).body(created);
     }
 
     @Operation(summary = "Rename or move a category (UC-20)")

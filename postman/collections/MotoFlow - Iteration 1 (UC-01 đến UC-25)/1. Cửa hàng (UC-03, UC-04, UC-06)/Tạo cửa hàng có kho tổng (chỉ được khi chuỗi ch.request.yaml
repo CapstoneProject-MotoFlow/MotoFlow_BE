@@ -1,6 +1,6 @@
 $kind: http-request
 name: Tạo cửa hàng có kho tổng (chỉ được khi chuỗi chưa có kho tổng)
-url: "{{baseUrl}}/api/stores"
+url: "{{baseUrl}}/api/v1/stores"
 method: POST
 headers:
   Content-Type: application/json

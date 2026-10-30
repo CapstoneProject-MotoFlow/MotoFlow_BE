@@ -203,7 +203,7 @@ class HomeApiTest extends IntegrationTest {
     }
 
     private ResultActions home(String token) throws Exception {
-        return mvc.perform(get("/api/home").header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
+        return mvc.perform(get("/api/v1/home").header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
     }
 
     private long createStore(String code, boolean centralWarehouse, String status) {
@@ -302,7 +302,7 @@ class HomeApiTest extends IntegrationTest {
     }
 
     private String signIn(String username) throws Exception {
-        String body = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+        String body = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(jsonMapper.writeValueAsString(Map.of("username", username, "password", PASSWORD))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.accessToken");

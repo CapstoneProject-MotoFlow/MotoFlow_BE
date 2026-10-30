@@ -16,11 +16,11 @@ BODY=$(mktemp)
 
 for i in $(seq 1 24); do # up to 2 minutes (the first HTTPS certificate can take a moment)
   CODE=$(curl -sS -o "$BODY" -w '%{http_code}' --max-time 10 \
-    -X POST "$BASE/api/auth/login" \
+    -X POST "$BASE/api/v1/auth/login" \
     -H 'Content-Type: application/json' \
     -d '{"username":"smoke-test-no-such-user","password":"Smoke-test-0"}' 2>/dev/null) || CODE=000
   if [ "$CODE" = 401 ] && grep -q '"MSG09"' "$BODY"; then
-    echo "Smoke test OK: $BASE/api/auth/login answered 401 MSG09"
+    echo "Smoke test OK: $BASE/api/v1/auth/login answered 401 MSG09"
     exit 0
   fi
   echo "Attempt $i: HTTP $CODE"

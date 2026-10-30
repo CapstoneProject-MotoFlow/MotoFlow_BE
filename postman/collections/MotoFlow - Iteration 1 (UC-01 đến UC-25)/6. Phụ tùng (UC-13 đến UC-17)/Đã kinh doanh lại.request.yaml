@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/products/{{productId}}"
+url: "{{baseUrl}}/api/v1/products/{{productId}}"
 method: GET
 auth:
   type: bearer

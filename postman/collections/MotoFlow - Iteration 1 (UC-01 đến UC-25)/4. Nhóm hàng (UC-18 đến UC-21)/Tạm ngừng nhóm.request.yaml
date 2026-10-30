@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/part-categories/{{catChainId}}/deactivate"
+url: "{{baseUrl}}/api/v1/part-categories/{{catChainId}}/deactivate"
 method: POST
 auth:
   type: bearer

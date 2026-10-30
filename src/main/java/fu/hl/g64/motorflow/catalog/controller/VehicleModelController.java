@@ -27,7 +27,7 @@ import java.util.List;
 
 @Tag(name = "Vehicle models", description = "UC-22 to UC-25 (Owner, Branch Manager with catalog permission)")
 @RestController
-@RequestMapping("/api/vehicle-models")
+@RequestMapping("/api/v1/vehicle-models")
 @PreAuthorize(CatalogAccess.READ)
 @RequiredArgsConstructor
 public class VehicleModelController {
@@ -54,7 +54,7 @@ public class VehicleModelController {
     public ResponseEntity<VehicleModelResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,
                                                        @Valid @RequestBody VehicleModelRequest request) {
         VehicleModelResponse created = vehicleModelService.create(actor, request);
-        return ResponseEntity.created(URI.create("/api/vehicle-models/" + created.id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/vehicle-models/" + created.id())).body(created);
     }
 
     @Operation(summary = "Update a vehicle model (UC-24)")

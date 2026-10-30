@@ -27,7 +27,7 @@ import java.net.URI;
 
 @Tag(name = "Customers", description = "UC-26 to UC-29 (Owner, Branch Manager)")
 @RestController
-@RequestMapping("/api/customers")
+@RequestMapping("/api/v1/customers")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
 @RequiredArgsConstructor
 public class CustomerController {
@@ -56,7 +56,7 @@ public class CustomerController {
     public ResponseEntity<CustomerResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,
                                                    @Valid @RequestBody CustomerRequest request) {
         CustomerResponse created = customerService.create(actor, request);
-        return ResponseEntity.created(URI.create("/api/customers/" + created.id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/customers/" + created.id())).body(created);
     }
 
     @Operation(summary = "Update a customer's contact details; orders keep the details they recorded (UC-29)")

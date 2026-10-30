@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Authentication", description = "UC-01 Log In, UC-02 Change Password")
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
 public class AuthController {
 

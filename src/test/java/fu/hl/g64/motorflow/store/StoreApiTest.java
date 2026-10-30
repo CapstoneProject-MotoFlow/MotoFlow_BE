@@ -64,7 +64,7 @@ class StoreApiTest extends IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.storeName").value("Cửa hàng ch01"))
                 .andExpect(jsonPath("$.central").value(true));
-        mvc.perform(get("/api/stores/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+        mvc.perform(get("/api/v1/stores/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG52"));
     }
 
@@ -222,7 +222,7 @@ class StoreApiTest extends IntegrationTest {
 
         String body = copyStore(template, store("CH02", false))
                 .andExpect(status().isCreated())
-                .andExpect(header().string(HttpHeaders.LOCATION, startsWith("/api/stores/")))
+                .andExpect(header().string(HttpHeaders.LOCATION, startsWith("/api/v1/stores/")))
                 .andExpect(jsonPath("$.store.storeName").value("Cửa hàng CH02"))
                 .andExpect(jsonPath("$.store.status").value("PLANNED"))
                 .andExpect(jsonPath("$.store.copiedFromStoreId").value(template))
@@ -243,9 +243,9 @@ class StoreApiTest extends IntegrationTest {
                 Integer.class, template, placed)).isEqualTo(10);
         assertThat(jdbc.queryForMap("SELECT entity_id, actor_id FROM audit_log WHERE action = 'STORE_COPIED'"))
                 .containsEntry("entity_id", copy).containsEntry("actor_id", owner.getId());
-        mvc.perform(get("/api/stores/{id}", copy).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+        mvc.perform(get("/api/v1/stores/{id}", copy).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.copiedFromStoreId").value(template));
-        mvc.perform(get("/api/stores/{id}", template).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+        mvc.perform(get("/api/v1/stores/{id}", template).header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(jsonPath("$.copiedFromStoreId").doesNotExist());
     }
 
@@ -282,7 +282,7 @@ class StoreApiTest extends IntegrationTest {
         long id = createdId(createStore(store("CH01", false)));
         createUser("bm01", Role.BRANCH_MANAGER, id);
         String bm = signIn("bm01");
-        mvc.perform(get("/api/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + bm))
+        mvc.perform(get("/api/v1/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + bm))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         copyStore(bm, id, store("CH02", false))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
@@ -322,18 +322,18 @@ class StoreApiTest extends IntegrationTest {
     }
 
     private String signIn(String username) throws Exception {
-        String body = mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+        String body = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                         .content(jsonMapper.writeValueAsString(Map.of("username", username, "password", PASSWORD))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.accessToken");
     }
 
     private ResultActions listStores(String query) throws Exception {
-        return mvc.perform(get("/api/stores" + query).header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
+        return mvc.perform(get("/api/v1/stores" + query).header(HttpHeaders.AUTHORIZATION, "Bearer " + token));
     }
 
     private ResultActions createStore(Map<String, Object> body) throws Exception {
-        return mvc.perform(post("/api/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+        return mvc.perform(post("/api/v1/stores").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(body)));
     }
 
@@ -345,7 +345,7 @@ class StoreApiTest extends IntegrationTest {
     private ResultActions copyStore(String bearer, long templateId, Map<String, Object> body) throws Exception {
         Map<String, Object> request = new HashMap<>(body);
         request.remove("central");
-        return mvc.perform(post("/api/stores/{id}/copy", templateId).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer)
+        return mvc.perform(post("/api/v1/stores/{id}/copy", templateId).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer)
                 .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(request)));
     }
 
@@ -353,7 +353,7 @@ class StoreApiTest extends IntegrationTest {
     private ResultActions updateStore(long id, Map<String, Object> body) throws Exception {
         Map<String, Object> withName = new HashMap<>(body);
         withName.putIfAbsent("storeName", "Cửa hàng mới " + id);
-        return mvc.perform(put("/api/stores/{id}", id).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+        return mvc.perform(put("/api/v1/stores/{id}", id).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(withName)));
     }
 

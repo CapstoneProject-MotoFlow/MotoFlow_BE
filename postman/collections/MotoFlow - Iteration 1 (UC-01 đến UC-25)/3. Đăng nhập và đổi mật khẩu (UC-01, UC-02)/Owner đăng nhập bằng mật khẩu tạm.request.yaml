@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/auth/login"
+url: "{{baseUrl}}/api/v1/auth/login"
 method: POST
 headers:
   Content-Type: application/json

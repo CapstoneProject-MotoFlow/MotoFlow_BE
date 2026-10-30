@@ -127,7 +127,7 @@ cat > Caddyfile <<'EOF'
 {$SITE_ADDRESS} {
 	encode zstd gzip
 
-	# Backend REST API (the code uses /api/..., not /api/v1).
+	# Backend REST API (the code uses /api/v1/...).
 	handle /api/* {
 		reverse_proxy backend:8080
 	}
