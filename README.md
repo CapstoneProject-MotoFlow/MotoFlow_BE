@@ -72,6 +72,7 @@ Trên server không dùng profile `dev`, nên phải đặt:
 | `MOTOFLOW_JWT_SECRET` | bắt buộc; khóa ký JWT, base64, tối thiểu 256 bit, **không dùng khóa dev** |
 | `MOTOFLOW_CORS_ORIGINS` | các domain frontend, cách nhau bằng dấu phẩy |
 | `MOTOFLOW_ADMIN_USERNAME`, `MOTOFLOW_ADMIN_PASSWORD` | Admin đầu tiên, chỉ dùng khi DB chưa có Admin; mật khẩu phải đúng chính sách (chữ, số, ký tự đặc biệt, 8–50 ký tự) |
+| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | tài khoản Cloudinary cho ảnh phụ tùng và chứng từ; để trống thì chức năng tải tệp tắt (MSG76) |
 
 ---
 

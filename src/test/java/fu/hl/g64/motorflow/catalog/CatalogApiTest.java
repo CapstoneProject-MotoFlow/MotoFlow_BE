@@ -195,7 +195,7 @@ class CatalogApiTest extends IntegrationTest {
             body.put("oemCodes", List.of("06435-K01-902"));
             body.put("barcodes", List.of("8930000000011"));
             body.put("vehicleModelIds", List.of(airBlade));
-            body.put("imageUrls", List.of("https://img.example/a.jpg", "https://img.example/b.jpg"));
+            body.put("imageUrls", List.of("https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/a.jpg", "https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/b.jpg"));
 
             long id = JsonPath.parse(send(post("/api/v1/products"), ownerToken, body)
                     .andExpect(status().isCreated())
@@ -204,7 +204,7 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.oemCodes", contains("06435-K01-902")))
                     .andExpect(jsonPath("$.barcodes", contains("8930000000011")))
-                    .andExpect(jsonPath("$.imageUrls", contains("https://img.example/a.jpg", "https://img.example/b.jpg")))
+                    .andExpect(jsonPath("$.imageUrls", contains("https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/a.jpg", "https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/b.jpg")))
                     .andExpect(jsonPath("$.vehicleModels[0].modelName").value("Air Blade"))
                     .andExpect(jsonPath("$.stock").doesNotExist())
                     .andReturn().getResponse().getContentAsString()).read("$.id", Long.class);
@@ -222,14 +222,14 @@ class CatalogApiTest extends IntegrationTest {
             body.put("sku", "IGNORED");
             body.put("partName", "Bố thắng đĩa trước");
             body.put("oemCodes", List.of("06435-K01-903"));
-            body.put("imageUrls", List.of("https://img.example/c.jpg"));
+            body.put("imageUrls", List.of("https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/c.jpg"));
             send(put("/api/v1/products/{id}", id), ownerToken, body)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.sku").value("SKU-001"))
                     .andExpect(jsonPath("$.partName").value("Bố thắng đĩa trước"))
                     .andExpect(jsonPath("$.oemCodes", contains("06435-K01-903")))
                     .andExpect(jsonPath("$.barcodes", hasSize(0)))
-                    .andExpect(jsonPath("$.imageUrls", contains("https://img.example/c.jpg")));
+                    .andExpect(jsonPath("$.imageUrls", contains("https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/c.jpg")));
 
             send(post("/api/v1/products/{id}/discontinue", id), ownerToken).andExpect(status().isNoContent());
             send(get("/api/v1/products/{id}", id), ownerToken)
@@ -261,6 +261,15 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.fieldErrors.sku").exists())
                     .andExpect(jsonPath("$.fieldErrors.brand").exists())
                     .andExpect(jsonPath("$.fieldErrors.imageUrls").exists());
+        }
+
+        @Test
+        void imagesMustComeFromOurCloudinaryAccount() throws Exception {
+            long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE"));
+            Map<String, Object> body = product("SKU-1", pads);
+            body.put("imageUrls", List.of("https://res.cloudinary.com/someone-else/image/upload/v1/x.jpg"));
+            send(post("/api/v1/products"), ownerToken, body)
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG77"));
         }
 
         @Test
