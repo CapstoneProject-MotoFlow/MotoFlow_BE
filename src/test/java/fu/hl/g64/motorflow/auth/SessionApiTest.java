@@ -114,7 +114,7 @@ class SessionApiTest extends IntegrationTest {
         mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(phoneToken)))
                 .andExpect(status().isUnauthorized());
         assertThat(jdbc.queryForObject("SELECT revoke_reason FROM auth_session WHERE id = ?", String.class, phoneSession))
-                .isEqualTo("SIGNED_OUT_BY_ADMIN");
+                .isEqualTo("LOGOUT");
         assertThat(jdbc.queryForObject("SELECT reason FROM audit_log WHERE entity_id = ? AND action = 'SESSION_SIGNED_OUT'",
                 String.class, owner.getId())).isEqualTo("Mất điện thoại");
 

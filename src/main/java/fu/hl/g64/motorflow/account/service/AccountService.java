@@ -146,11 +146,14 @@ public class AccountService {
         return sessionService.activeSessions(accountId, null);
     }
 
-    /** Signs the user out of one device, e.g. a lost phone, without locking the account. */
+    /**
+     * Signs the user out of one device, e.g. a lost phone, without locking the account.
+     * The session ends as LOGOUT; the audit log records that Admin did it.
+     */
     @Transactional
     public void signOutSession(AuthenticatedUser admin, long accountId, long sessionId, String reason) {
         UserAccount account = otherAccount(admin, accountId);
-        sessionService.signOut(account.getId(), sessionId, AuthSession.RevokeReason.SIGNED_OUT_BY_ADMIN);
+        sessionService.signOut(account.getId(), sessionId, AuthSession.RevokeReason.LOGOUT);
         auditLog.save(AuditLog.record("USER_ACCOUNT", account.getId(), "SESSION_SIGNED_OUT", admin.id(),
                 blankToNull(reason), LocalDateTime.now(clock)));
     }
