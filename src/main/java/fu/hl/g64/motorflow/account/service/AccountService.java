@@ -57,9 +57,12 @@ public class AccountService {
         Map<Long, String> storeNames = stores.findAll().stream()
                 .collect(Collectors.toMap(Store::getId, Store::getStoreName));
         String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
+        Map<Long, AuthSession> lastSessions = sessions.findLatestPerUser().stream()
+                .collect(Collectors.toMap(s -> s.getUser().getId(), s -> s));
 
         return users.findAll().stream()
-                .map(account -> AccountResponse.from(account, storeNames.get(account.getStoreId()), now))
+                .map(account -> AccountResponse.from(account, storeNames.get(account.getStoreId()),
+                        lastSessions.get(account.getId()), now))
                 .filter(a -> role == null || a.role() == role)
                 .filter(a -> storeId == null || storeId.equals(a.storeId()))
                 .filter(a -> state == null || a.state() == state)
@@ -76,7 +79,8 @@ public class AccountService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
         String storeName = account.getStoreId() == null ? null
                 : stores.findById(account.getStoreId()).map(Store::getStoreName).orElse(null);
-        return AccountResponse.from(account, storeName, LocalDateTime.now(clock));
+        AuthSession lastSession = sessions.findFirstByUserIdOrderByIdDesc(accountId).orElse(null);
+        return AccountResponse.from(account, storeName, lastSession, LocalDateTime.now(clock));
     }
 
     @Transactional

@@ -34,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -85,7 +86,12 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.username").value("staff01"))
                     .andExpect(jsonPath("$.storeName").value("Cửa hàng CH01"))
-                    .andExpect(jsonPath("$.permissions", hasSize(0)));
+                    .andExpect(jsonPath("$.permissions", hasSize(0)))
+                    .andExpect(jsonPath("$.lastSession").value(nullValue()));
+            mvc.perform(get("/api/v1/accounts/" + admin.getId()).header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.lastSession.ipAddress").value("127.0.0.1"))
+                    .andExpect(jsonPath("$.lastSession.status").value("ACTIVE"));
             mvc.perform(get("/api/v1/accounts/999999").header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
                     .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG48"));
         }
