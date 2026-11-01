@@ -4,6 +4,8 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.dto.CopiedStoreResponse;
 import fu.hl.g64.motorflow.store.dto.CopyStoreRequest;
 import fu.hl.g64.motorflow.store.dto.CreateStoreRequest;
+import fu.hl.g64.motorflow.store.dto.OwnerManagerRequest;
+import fu.hl.g64.motorflow.store.dto.StoreEmployeeResponse;
 import fu.hl.g64.motorflow.store.dto.StoreResponse;
 import fu.hl.g64.motorflow.store.dto.UpdateStoreRequest;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
@@ -51,6 +53,19 @@ public class StoreController {
         return storeService.getStore(id);
     }
 
+    @Operation(summary = "Everyone working at store {id}, any status: the Owner managing it, Branch Managers, then Staff (UC-03)")
+    @GetMapping("/{id}/employees")
+    public List<StoreEmployeeResponse> employees(@PathVariable long id) {
+        return storeService.listEmployees(id);
+    }
+
+    @Operation(summary = "Let an active Owner also manage store {id}, or stop it with ownerId null (UC-06)")
+    @PutMapping("/{id}/owner-manager")
+    public StoreResponse ownerManager(@AuthenticationPrincipal AuthenticatedUser actor, @PathVariable long id,
+                                      @RequestBody OwnerManagerRequest request) {
+        return storeService.setOwnerManager(actor, id, request);
+    }
+
     @Operation(summary = "Create a planned store and its warehouse (UC-04)")
     @PostMapping
     public ResponseEntity<StoreResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,
@@ -68,7 +83,8 @@ public class StoreController {
         return ResponseEntity.created(URI.create("/api/stores/" + copied.store().id())).body(copied);
     }
 
-    @Operation(summary = "Update a store and its warehouse (UC-06)")
+    @Operation(summary = "Update a store and its warehouse (UC-06); a planned store opens only with a manager, "
+            + "parts set up to sell and their retail prices (MSG79-MSG81)")
     @PutMapping("/{id}")
     public StoreResponse update(@AuthenticationPrincipal AuthenticatedUser actor, @PathVariable long id,
                                 @Valid @RequestBody UpdateStoreRequest request) {

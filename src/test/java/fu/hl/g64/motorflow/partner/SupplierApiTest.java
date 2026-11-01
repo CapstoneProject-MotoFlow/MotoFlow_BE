@@ -54,10 +54,12 @@ class SupplierApiTest extends IntegrationTest {
     }
 
     @Test
-    void createsAnActiveSupplierWhoseCodeIsUniqueIgnoringCase() throws Exception {
-        String location = send(post("/api/suppliers"), supplier(" ncc01 ", "Công ty Phụ tùng Minh Phát"))
+    void createsAnActiveSupplierWithAGeneratedCodeAndAUniqueName() throws Exception {
+        Map<String, Object> body = supplier("Công ty Phụ tùng Minh Phát");
+        body.put("supplierCode", "TU-NHAP"); // Ignored: the code is generated.
+        String location = send(post("/api/suppliers"), body)
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.supplierCode").value("NCC01"))
+                .andExpect(jsonPath("$.supplierCode").value("NCC001"))
                 .andExpect(jsonPath("$.supplierName").value("Công ty Phụ tùng Minh Phát"))
                 .andExpect(jsonPath("$.contactName").value("Anh Minh"))
                 .andExpect(jsonPath("$.taxCode").value("0101234567"))
@@ -67,51 +69,72 @@ class SupplierApiTest extends IntegrationTest {
         assertThat(jdbc.queryForObject("SELECT actor_id FROM audit_log WHERE action = 'SUPPLIER_CREATED'", Long.class))
                 .isEqualTo(owner.getId());
 
-        send(post("/api/suppliers"), supplier("Ncc01", "Nhà cung cấp khác"))
+        send(post("/api/suppliers"), supplier(" CÔNG TY PHỤ TÙNG MINH PHÁT "))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("MSG72"))
-                .andExpect(jsonPath("$.message").value("Mã nhà cung cấp NCC01 đã được sử dụng."));
-        send(post("/api/suppliers"), supplier(null, "Không có mã"))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"));
+                .andExpect(jsonPath("$.code").value("MSG78"))
+                .andExpect(jsonPath("$.message").value("Tên nhà cung cấp CÔNG TY PHỤ TÙNG MINH PHÁT đã tồn tại."));
+        send(post("/api/suppliers"), supplier("Nhớt Đông Á"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.supplierCode").value("NCC002"));
+    }
+
+    @Test
+    void codesContinueAfterTheCodesAlreadyInUse() throws Exception {
+        jdbc.update("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC041', 'Có sẵn')");
+        jdbc.execute("SELECT setval('supplier_code_seq', 42, false)"); // What V12 does with existing codes.
+        send(post("/api/suppliers"), supplier("Minh Phát"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.supplierCode").value("NCC042"));
     }
 
     @Test
     void invalidFieldsAreListed() throws Exception {
-        Map<String, Object> body = supplier("NCC 01", " ");
+        Map<String, Object> body = supplier(" ");
         body.put("email", "not-an-email");
         body.put("phone", "12ab");
         body.put("taxCode", "12345");
+        body.put("contactName", " ");
         send(post("/api/suppliers"), body)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"))
-                .andExpect(jsonPath("$.fieldErrors.supplierCode").exists())
                 .andExpect(jsonPath("$.fieldErrors.supplierName").value("Vui lòng nhập tên nhà cung cấp."))
+                .andExpect(jsonPath("$.fieldErrors.contactName").value("Vui lòng nhập tên người liên hệ."))
                 .andExpect(jsonPath("$.fieldErrors.email").exists())
                 .andExpect(jsonPath("$.fieldErrors.phone").exists())
                 .andExpect(jsonPath("$.fieldErrors.taxCode").exists());
+
+        Map<String, Object> noPhone = supplier("Minh Phát");
+        noPhone.remove("phone");
+        send(post("/api/suppliers"), noPhone)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.phone").exists());
     }
 
     @Test
     void anUpdateKeepsTheCodeAndTheSupplierCanBeDeactivated() throws Exception {
-        long id = createdId(send(post("/api/suppliers"), supplier("NCC01", "Minh Phát")));
-        Map<String, Object> body = supplier("NCC99", "Minh Phát mới");
-        body.put("contactName", " ");
+        long id = createdId(send(post("/api/suppliers"), supplier("Minh Phát")));
+        createdId(send(post("/api/suppliers"), supplier("Hưng Thịnh")));
+        Map<String, Object> body = supplier("Minh Phát mới");
+        body.put("supplierCode", "NCC99");
+        body.put("contactName", "Chị Lan");
         body.put("taxCode", "0101234567-001");
 
         send(put("/api/suppliers/{id}", id), body)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.supplierCode").value("NCC01"))
+                .andExpect(jsonPath("$.supplierCode").value("NCC001"))
                 .andExpect(jsonPath("$.supplierName").value("Minh Phát mới"))
-                .andExpect(jsonPath("$.contactName").doesNotExist())
+                .andExpect(jsonPath("$.contactName").value("Chị Lan"))
                 .andExpect(jsonPath("$.taxCode").value("0101234567-001"));
+        send(put("/api/suppliers/{id}", id), supplier("minh phát mới")).andExpect(status().isOk());
+        send(put("/api/suppliers/{id}", id), supplier("HƯNG THỊNH"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG78"));
 
         send(post("/api/suppliers/{id}/deactivate", id)).andExpect(status().isNoContent());
         send(get("/api/suppliers/{id}", id)).andExpect(jsonPath("$.supplier.status").value("INACTIVE"));
         send(post("/api/suppliers/{id}/deactivate", id)).andExpect(status().isNoContent());
         send(post("/api/suppliers/{id}/activate", id)).andExpect(status().isNoContent());
         send(get("/api/suppliers/{id}", id)).andExpect(jsonPath("$.supplier.status").value("ACTIVE"));
-        assertThat(jdbc.queryForList("SELECT action FROM audit_log WHERE entity_type = 'SUPPLIER' ORDER BY id", String.class))
-                .containsExactly("SUPPLIER_CREATED", "SUPPLIER_UPDATED", "SUPPLIER_DEACTIVATED", "SUPPLIER_ACTIVATED");
+        assertThat(jdbc.queryForList("SELECT action FROM audit_log WHERE entity_id = ? AND entity_type = 'SUPPLIER' "
+                        + "ORDER BY id", String.class, id))
+                .containsExactly("SUPPLIER_CREATED", "SUPPLIER_UPDATED", "SUPPLIER_UPDATED",
+                        "SUPPLIER_DEACTIVATED", "SUPPLIER_ACTIVATED");
 
         send(put("/api/suppliers/{id}", 999999), body)
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG73"));
@@ -121,31 +144,31 @@ class SupplierApiTest extends IntegrationTest {
 
     @Test
     void theListFindsByCodeNameOrPhoneAndPages() throws Exception {
-        Map<String, Object> first = supplier("NCC02", "Phụ tùng Hưng Thịnh");
-        first.put("phone", "0912 345 678");
-        long hungThinh = createdId(send(post("/api/suppliers"), first));
-        createdId(send(post("/api/suppliers"), supplier("NCC01", "Nhớt Đông Á")));
-        long closed = createdId(send(post("/api/suppliers"), supplier("NCC03", "Vỏ xe Sao Vàng")));
+        createdId(send(post("/api/suppliers"), supplier("Nhớt Đông Á")));
+        Map<String, Object> second = supplier("Phụ tùng Hưng Thịnh");
+        second.put("phone", "0912 345 678");
+        long hungThinh = createdId(send(post("/api/suppliers"), second));
+        long closed = createdId(send(post("/api/suppliers"), supplier("Vỏ xe Sao Vàng")));
         send(post("/api/suppliers/{id}/deactivate", closed)).andExpect(status().isNoContent());
 
         send(get("/api/suppliers"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC01", "NCC02", "NCC03")))
+                .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC001", "NCC002", "NCC003")))
                 .andExpect(jsonPath("$.totalItems").value(3));
         send(get("/api/suppliers?q=PHỤ TÙNG")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
         send(get("/api/suppliers?q=0912345678")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
         send(get("/api/suppliers?q=ncc0")).andExpect(jsonPath("$.items", hasSize(3)));
         send(get("/api/suppliers?status=INACTIVE")).andExpect(jsonPath("$.items[*].id", contains((int) closed)));
         send(get("/api/suppliers?size=2&page=1"))
-                .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC03")))
+                .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC003")))
                 .andExpect(jsonPath("$.totalItems").value(3))
                 .andExpect(jsonPath("$.page").value(1));
     }
 
     @Test
     void theDetailShowsPurchaseOrdersDeliveriesAndDiscrepancies() throws Exception {
-        long supplier = createdId(send(post("/api/suppliers"), supplier("NCC01", "Minh Phát")));
-        long other = createdId(send(post("/api/suppliers"), supplier("NCC02", "Hưng Thịnh")));
+        long supplier = createdId(send(post("/api/suppliers"), supplier("Minh Phát")));
+        long other = createdId(send(post("/api/suppliers"), supplier("Hưng Thịnh")));
         long store = createStore("CH01");
         long brake = addProduct("BRK-01", "Má phanh trước");
         long chain = addProduct("CHN-01", "Xích tải");
@@ -165,7 +188,7 @@ class SupplierApiTest extends IntegrationTest {
 
         send(get("/api/suppliers/{id}", supplier))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.supplier.supplierCode").value("NCC01"))
+                .andExpect(jsonPath("$.supplier.supplierCode").value("NCC001"))
                 .andExpect(jsonPath("$.purchaseOrderCount").value(2))
                 .andExpect(jsonPath("$.purchaseOrders[*].id", contains((int) newerOrder, (int) order)))
                 .andExpect(jsonPath("$.purchaseOrders[1].storeName").value("Cửa hàng CH01"))
@@ -198,15 +221,14 @@ class SupplierApiTest extends IntegrationTest {
                     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
             mvc.perform(post("/api/suppliers").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(jsonMapper.writeValueAsString(supplier("NCC01", "Minh Phát"))))
+                            .content(jsonMapper.writeValueAsString(supplier("Minh Phát"))))
                     .andExpect(status().isForbidden());
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM supplier", Long.class)).isZero();
     }
 
-    private Map<String, Object> supplier(String code, String name) {
+    private Map<String, Object> supplier(String name) {
         Map<String, Object> body = new HashMap<>();
-        body.put("supplierCode", code);
         body.put("supplierName", name);
         body.put("contactName", "Anh Minh");
         body.put("phone", "0241234567");

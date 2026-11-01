@@ -46,6 +46,10 @@ public class Store {
     @Column(name = "copied_from_store_id")
     private Long copiedFromStoreId;
 
+    /** The Owner when the Owner also manages this store (review 31/10); null otherwise. */
+    @Column(name = "owner_manager_id")
+    private Long ownerManagerId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -84,6 +88,12 @@ public class Store {
     /** Only while the chain has no central warehouse yet (BR-04). */
     public void makeCentral(LocalDateTime now) {
         isCentral = true;
+        updatedAt = now;
+    }
+
+    /** {@code ownerId} null removes the Owner from managing the store. */
+    public void assignOwnerManager(Long ownerId, LocalDateTime now) {
+        ownerManagerId = ownerId;
         updatedAt = now;
     }
 

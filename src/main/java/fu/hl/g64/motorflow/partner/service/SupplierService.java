@@ -88,37 +88,42 @@ public class SupplierService {
                 discrepancies.countBySupplierAndStatus(id, DiscrepancyCaseStatus.OPEN));
     }
 
-    /** UC-31. A new supplier is active. */
+    /** UC-31. A new supplier is active and gets the next generated code. */
     @Transactional
     public SupplierResponse create(AuthenticatedUser actor, SupplierRequest request) {
-        if (!StringUtils.hasText(request.supplierCode())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        String name = request.supplierName().strip();
+        if (suppliers.existsBySupplierNameIgnoreCase(name)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG78", name);
         }
-        String code = request.supplierCode().strip().toUpperCase(Locale.ROOT);
-        if (suppliers.existsBySupplierCode(code)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG72", code);
-        }
+        String code = "NCC%03d".formatted(suppliers.nextCodeNumber());
 
         LocalDateTime now = LocalDateTime.now(clock);
-        Supplier supplier = Supplier.create(code, request.supplierName().strip(), blankToNull(request.contactName()),
-                blankToNull(request.phone()), blankToNull(request.email()), blankToNull(request.address()),
+        Supplier supplier = Supplier.create(code, name, request.contactName().strip(),
+                request.phone().strip(), blankToNull(request.email()), blankToNull(request.address()),
                 blankToNull(request.taxCode()), now);
         try {
             supplier = suppliers.saveAndFlush(supplier);
         } catch (DataIntegrityViolationException e) {
-            // Another Owner session created the same code a moment earlier.
+            // Only a code typed in by hand before codes were generated can collide with the sequence.
             throw new BusinessException(HttpStatus.CONFLICT, "MSG72", code);
         }
         auditLog.save(AuditLog.record("SUPPLIER", supplier.getId(), "SUPPLIER_CREATED", actor.id(), null, now));
         return SupplierResponse.from(supplier);
     }
 
-    /** UC-33. The supplier code never changes after creation (Data Business Rules: unique supplier code). */
+    /**
+     * UC-33. The supplier code never changes after creation (Data Business Rules: unique supplier code).
+     * shortcut: the name is unique by this check only; two Owners renaming at the same moment could still collide.
+     */
     @Transactional
     public SupplierResponse update(AuthenticatedUser actor, long id, SupplierRequest request) {
         Supplier supplier = find(id);
+        String name = request.supplierName().strip();
+        if (suppliers.existsBySupplierNameIgnoreCaseAndIdNot(name, id)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG78", name);
+        }
         LocalDateTime now = LocalDateTime.now(clock);
-        supplier.update(request.supplierName().strip(), blankToNull(request.contactName()), blankToNull(request.phone()),
+        supplier.update(name, request.contactName().strip(), request.phone().strip(),
                 blankToNull(request.email()), blankToNull(request.address()), blankToNull(request.taxCode()), now);
         auditLog.save(AuditLog.record("SUPPLIER", id, "SUPPLIER_UPDATED", actor.id(), null, now));
         return SupplierResponse.from(supplier);

@@ -36,6 +36,8 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, Long> 
 
     long countByStoreIdAndStatus(Long storeId, AccountStatus status);
 
+    List<UserAccount> findByStoreId(Long storeId);
+
     long countByStatus(AccountStatus status);
 
     long countByStatusAndMustChangePasswordTrue(AccountStatus status);

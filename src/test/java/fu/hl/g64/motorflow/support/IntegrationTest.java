@@ -47,6 +47,7 @@ public abstract class IntegrationTest {
                 + "goods_receipt, goods_receipt_request, supplier, stock_balance, pricing_policy, product_identifier, "
                 + "product_image, product_vehicle_model, vehicle_model, product, part_category, user_account, store "
                 + "RESTART IDENTITY CASCADE");
+        jdbc.execute("ALTER SEQUENCE supplier_code_seq RESTART WITH 1");
         clock.set(START);
     }
 
