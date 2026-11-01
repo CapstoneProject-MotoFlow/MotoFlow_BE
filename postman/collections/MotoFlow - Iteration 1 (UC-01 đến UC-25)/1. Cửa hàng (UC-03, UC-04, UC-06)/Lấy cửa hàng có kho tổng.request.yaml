@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/stores?central=true"
+url: "{{baseUrl}}/api/v1/stores?central=true"
 method: GET
 queryParams:
   central: "true"

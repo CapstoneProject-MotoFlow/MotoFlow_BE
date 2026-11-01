@@ -18,7 +18,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -48,7 +48,7 @@
                   "const adminPassword = pm.collectionVariables.get('adminPassword');",
                   "const tempPassword = pm.collectionVariables.get('adminTempPassword');",
                   "const login = password => ({",
-                  "    url: base + '/api/auth/login', method: 'POST',",
+                  "    url: base + '/api/v1/auth/login', method: 'POST',",
                   "    header: { 'Content-Type': 'application/json' },",
                   "    body: { mode: 'raw', raw: JSON.stringify({ username, password }) }",
                   "});",
@@ -57,7 +57,7 @@
                   "    pm.sendRequest(login(tempPassword), (err2, res2) => {",
                   "        if (err2 || res2.code !== 200) return; // The login request below fails and shows why.",
                   "        pm.sendRequest({",
-                  "            url: base + '/api/auth/change-password', method: 'POST',",
+                  "            url: base + '/api/v1/auth/change-password', method: 'POST',",
                   "            header: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + res2.json().accessToken },",
                   "            body: { mode: 'raw', raw: JSON.stringify({ currentPassword: tempPassword, newPassword: adminPassword }) }",
                   "        }, () => {});",
@@ -94,7 +94,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -131,7 +131,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -163,7 +163,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/auth/me",
+            "url": "{{baseUrl}}/api/v1/auth/me",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -193,7 +193,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/stores",
+            "url": "{{baseUrl}}/api/v1/stores",
             "auth": {
               "type": "noauth"
             }
@@ -225,7 +225,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores",
+            "url": "{{baseUrl}}/api/v1/stores",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -266,7 +266,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/stores?central=true",
+            "url": "{{baseUrl}}/api/v1/stores?central=true",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -309,7 +309,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores",
+            "url": "{{baseUrl}}/api/v1/stores",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -360,7 +360,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores",
+            "url": "{{baseUrl}}/api/v1/stores",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -405,7 +405,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores",
+            "url": "{{baseUrl}}/api/v1/stores",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -450,7 +450,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores",
+            "url": "{{baseUrl}}/api/v1/stores",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -495,7 +495,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "url": "{{baseUrl}}/api/v1/stores/{{branchStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -539,7 +539,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "url": "{{baseUrl}}/api/v1/stores/{{branchStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -583,7 +583,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/{{centralStoreId}}",
+            "url": "{{baseUrl}}/api/v1/stores/{{centralStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -627,7 +627,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/{{centralStoreId}}",
+            "url": "{{baseUrl}}/api/v1/stores/{{centralStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -666,7 +666,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/stores?q={{run}}&status=ACTIVE",
+            "url": "{{baseUrl}}/api/v1/stores?q={{run}}&status=ACTIVE",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -700,7 +700,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/stores?status=OPEN",
+            "url": "{{baseUrl}}/api/v1/stores?status=OPEN",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -735,7 +735,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/999999999",
+            "url": "{{baseUrl}}/api/v1/stores/999999999",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -784,7 +784,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -836,7 +836,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -880,7 +880,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -930,7 +930,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -980,7 +980,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1031,7 +1031,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1075,7 +1075,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1114,7 +1114,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/accounts?q={{run}}",
+            "url": "{{baseUrl}}/api/v1/accounts?q={{run}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1144,7 +1144,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/accounts?storeId={{branchStoreId}}&role=STAFF",
+            "url": "{{baseUrl}}/api/v1/accounts?storeId={{branchStoreId}}&role=STAFF",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1179,7 +1179,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{bmId}}/permissions",
+            "url": "{{baseUrl}}/api/v1/accounts/{{bmId}}/permissions",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1223,7 +1223,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{staffId}}/permissions",
+            "url": "{{baseUrl}}/api/v1/accounts/{{staffId}}/permissions",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1267,7 +1267,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{adminId}}/permissions",
+            "url": "{{baseUrl}}/api/v1/accounts/{{adminId}}/permissions",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1306,7 +1306,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/accounts/{{bmId}}/permission-history",
+            "url": "{{baseUrl}}/api/v1/accounts/{{bmId}}/permission-history",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1341,7 +1341,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{staffId}}/lock",
+            "url": "{{baseUrl}}/api/v1/accounts/{{staffId}}/lock",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1384,7 +1384,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -1421,7 +1421,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{staffId}}/unlock",
+            "url": "{{baseUrl}}/api/v1/accounts/{{staffId}}/unlock",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1464,7 +1464,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{staffId}}/reset-password",
+            "url": "{{baseUrl}}/api/v1/accounts/{{staffId}}/reset-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1514,7 +1514,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -1546,7 +1546,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/api/accounts/{{adminId}}/reset-password",
+            "url": "{{baseUrl}}/api/v1/accounts/{{adminId}}/reset-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1576,7 +1576,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/api/accounts/999999999/lock",
+            "url": "{{baseUrl}}/api/v1/accounts/999999999/lock",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1616,7 +1616,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -1650,7 +1650,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1685,7 +1685,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/change-password",
+            "url": "{{baseUrl}}/api/v1/auth/change-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1729,7 +1729,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/change-password",
+            "url": "{{baseUrl}}/api/v1/auth/change-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1773,7 +1773,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/change-password",
+            "url": "{{baseUrl}}/api/v1/auth/change-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1811,7 +1811,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/auth/me",
+            "url": "{{baseUrl}}/api/v1/auth/me",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1846,7 +1846,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -1886,7 +1886,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/change-password",
+            "url": "{{baseUrl}}/api/v1/auth/change-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -1929,7 +1929,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -1968,7 +1968,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/change-password",
+            "url": "{{baseUrl}}/api/v1/auth/change-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2011,7 +2011,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/login",
+            "url": "{{baseUrl}}/api/v1/auth/login",
             "auth": {
               "type": "noauth"
             },
@@ -2050,7 +2050,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/change-password",
+            "url": "{{baseUrl}}/api/v1/auth/change-password",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2088,7 +2088,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/stores",
+            "url": "{{baseUrl}}/api/v1/stores",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2118,7 +2118,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2158,7 +2158,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories",
+            "url": "{{baseUrl}}/api/v1/part-categories",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2202,7 +2202,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories",
+            "url": "{{baseUrl}}/api/v1/part-categories",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2247,7 +2247,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories",
+            "url": "{{baseUrl}}/api/v1/part-categories",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2291,7 +2291,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories",
+            "url": "{{baseUrl}}/api/v1/part-categories",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2335,7 +2335,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories",
+            "url": "{{baseUrl}}/api/v1/part-categories",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2379,7 +2379,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories",
+            "url": "{{baseUrl}}/api/v1/part-categories",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2423,7 +2423,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories",
+            "url": "{{baseUrl}}/api/v1/part-categories",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2462,7 +2462,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/part-categories?vehicleType=MOTORCYCLE",
+            "url": "{{baseUrl}}/api/v1/part-categories?vehicleType=MOTORCYCLE",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2498,7 +2498,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories/{{catChainId}}",
+            "url": "{{baseUrl}}/api/v1/part-categories/{{catChainId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2542,7 +2542,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories/{{catParentId}}",
+            "url": "{{baseUrl}}/api/v1/part-categories/{{catParentId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2581,7 +2581,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/api/part-categories/{{catChainId}}/deactivate",
+            "url": "{{baseUrl}}/api/v1/part-categories/{{catChainId}}/deactivate",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2615,7 +2615,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/part-categories/999999999",
+            "url": "{{baseUrl}}/api/v1/part-categories/999999999",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2664,7 +2664,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/vehicle-models",
+            "url": "{{baseUrl}}/api/v1/vehicle-models",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2708,7 +2708,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/vehicle-models",
+            "url": "{{baseUrl}}/api/v1/vehicle-models",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2752,7 +2752,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/vehicle-models",
+            "url": "{{baseUrl}}/api/v1/vehicle-models",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2796,7 +2796,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/vehicle-models",
+            "url": "{{baseUrl}}/api/v1/vehicle-models",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2835,7 +2835,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/vehicle-models?q={{run}}&vehicleType=MOTORCYCLE",
+            "url": "{{baseUrl}}/api/v1/vehicle-models?q={{run}}&vehicleType=MOTORCYCLE",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2870,7 +2870,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/vehicle-models/{{vmId}}",
+            "url": "{{baseUrl}}/api/v1/vehicle-models/{{vmId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2909,7 +2909,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/api/vehicle-models/{{vm2Id}}/deactivate",
+            "url": "{{baseUrl}}/api/v1/vehicle-models/{{vm2Id}}/deactivate",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2938,7 +2938,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/vehicle-models?q={{run}}&status=INACTIVE",
+            "url": "{{baseUrl}}/api/v1/vehicle-models?q={{run}}&status=INACTIVE",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2973,7 +2973,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/vehicle-models/999999999",
+            "url": "{{baseUrl}}/api/v1/vehicle-models/999999999",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3022,7 +3022,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3076,7 +3076,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3120,7 +3120,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3164,7 +3164,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3208,7 +3208,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3252,7 +3252,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3296,7 +3296,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3341,7 +3341,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3380,7 +3380,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/api/part-categories/{{catChainId}}/activate",
+            "url": "{{baseUrl}}/api/v1/part-categories/{{catChainId}}/activate",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3414,7 +3414,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3458,7 +3458,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3497,7 +3497,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?q=06455-{{run}}",
+            "url": "{{baseUrl}}/api/v1/products?q=06455-{{run}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3533,7 +3533,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?categoryId={{catParentId}}",
+            "url": "{{baseUrl}}/api/v1/products?categoryId={{catParentId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3563,7 +3563,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?vehicleModelId={{vmId}}",
+            "url": "{{baseUrl}}/api/v1/products?vehicleModelId={{vmId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3593,7 +3593,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?q={{run}}&size=1&page=1",
+            "url": "{{baseUrl}}/api/v1/products?q={{run}}&size=1&page=1",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3625,7 +3625,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?q={{run}}&inStockOnly=true",
+            "url": "{{baseUrl}}/api/v1/products?q={{run}}&inStockOnly=true",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3655,7 +3655,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3690,7 +3690,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products/{{productId}}?storeId={{centralStoreId}}",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}?storeId={{centralStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3720,7 +3720,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?q={{run}}&storeId={{branchStoreId}}",
+            "url": "{{baseUrl}}/api/v1/products?q={{run}}&storeId={{branchStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3750,7 +3750,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products/{{productId}}?storeId={{branchStoreId}}",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}?storeId={{branchStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3780,7 +3780,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products",
+            "url": "{{baseUrl}}/api/v1/products",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3815,7 +3815,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3865,7 +3865,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3904,7 +3904,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/api/products/{{productId}}/discontinue",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}/discontinue",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3933,7 +3933,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?q={{run}}&status=DISCONTINUED",
+            "url": "{{baseUrl}}/api/v1/products?q={{run}}&status=DISCONTINUED",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3963,7 +3963,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": "{{baseUrl}}/api/products/{{productId}}/reactivate",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}/reactivate",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3992,7 +3992,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products/{{productId}}",
+            "url": "{{baseUrl}}/api/v1/products/{{productId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4025,7 +4025,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products/999999999",
+            "url": "{{baseUrl}}/api/v1/products/999999999",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4055,7 +4055,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/products?status=OPEN",
+            "url": "{{baseUrl}}/api/v1/products?status=OPEN",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4095,7 +4095,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "url": "{{baseUrl}}/api/v1/stores/{{branchStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4140,7 +4140,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{bmId}}/lock",
+            "url": "{{baseUrl}}/api/v1/accounts/{{bmId}}/lock",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4183,7 +4183,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts/{{staffId}}/lock",
+            "url": "{{baseUrl}}/api/v1/accounts/{{staffId}}/lock",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4226,7 +4226,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "url": "{{baseUrl}}/api/v1/stores/{{branchStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4270,7 +4270,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/accounts",
+            "url": "{{baseUrl}}/api/v1/accounts",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -4314,7 +4314,7 @@
                 "value": "application/json"
               }
             ],
-            "url": "{{baseUrl}}/api/stores/{{branchStoreId}}",
+            "url": "{{baseUrl}}/api/v1/stores/{{branchStoreId}}",
             "auth": {
               "type": "bearer",
               "bearer": [

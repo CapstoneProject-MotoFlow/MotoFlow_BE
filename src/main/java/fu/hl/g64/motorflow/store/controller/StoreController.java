@@ -30,7 +30,7 @@ import java.util.List;
 @Tag(name = "Stores", description = "UC-03 View Store List, UC-04 Create Store, UC-05 Copy Store Configuration, "
         + "UC-06 Update Store (Admin, Owner)")
 @RestController
-@RequestMapping("/api/stores")
+@RequestMapping("/api/v1/stores")
 @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
 @RequiredArgsConstructor
 public class StoreController {
@@ -56,7 +56,7 @@ public class StoreController {
     public ResponseEntity<StoreResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,
                                                 @Valid @RequestBody CreateStoreRequest request) {
         StoreResponse created = storeService.createStore(actor, request);
-        return ResponseEntity.created(URI.create("/api/stores/" + created.id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/stores/" + created.id())).body(created);
     }
 
     @Operation(summary = "Create a planned store from the configuration of store {id}: storage locations and "
@@ -65,7 +65,7 @@ public class StoreController {
     public ResponseEntity<CopiedStoreResponse> copy(@AuthenticationPrincipal AuthenticatedUser actor, @PathVariable long id,
                                                     @Valid @RequestBody CopyStoreRequest request) {
         CopiedStoreResponse copied = storeService.copyStore(actor, id, request);
-        return ResponseEntity.created(URI.create("/api/stores/" + copied.store().id())).body(copied);
+        return ResponseEntity.created(URI.create("/api/v1/stores/" + copied.store().id())).body(copied);
     }
 
     @Operation(summary = "Update a store and its warehouse (UC-06)")

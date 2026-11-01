@@ -25,7 +25,7 @@ Internet ──► proxy (Caddy, cổng 80/443, tự lấy chứng chỉ HTTPS k
                └── còn lại  ──► frontend  (image từ MotoFlow_FE: Caddy + dist/)
 ```
 
-Frontend và backend chạy **cùng một domain**, nên trình duyệt không gặp CORS, và cookie refresh (`path=/api/auth`) hoạt động bình thường.
+Frontend và backend chạy **cùng một domain**, nên trình duyệt không gặp CORS, và cookie refresh (`path=/api/v1/auth`) hoạt động bình thường.
 
 ### Nguyên tắc
 
@@ -53,7 +53,7 @@ Frontend và backend chạy **cùng một domain**, nên trình duyệt không g
 | `.github/workflows/ci-cd.yml` | PR: build-test. Merge `main`: build-test → build-push-image → deploy-dev |
 | `.github/workflows/release.yml` | Tag `v*`: deploy production. Chạy tay trên tag cũ để rollback |
 | `.github/scripts/ssm-deploy.sh` | Tìm EC2 theo tag, gửi lệnh SSM, chờ và in kết quả. **Giống hệt** bản trong MotoFlow_FE |
-| `.github/scripts/smoke-test.sh` | BE: `POST /api/auth/login` với user không tồn tại phải trả `401 MSG09` |
+| `.github/scripts/smoke-test.sh` | BE: `POST /api/v1/auth/login` với user không tồn tại phải trả `401 MSG09` |
 | `.github/dependabot.yml` | PR cập nhật action, Maven, base image mỗi tuần |
 | `Dockerfile`, `.dockerignore` | Image runtime: `eclipse-temurin:21-jre` + JAR, chạy user không phải root |
 | `deploy/server/setup.sh` | Dựng server một lần: Docker, `compose.yaml`, Caddyfile, `bin/deploy-service`, `.env` với secret ngẫu nhiên |
@@ -248,4 +248,4 @@ sudo /opt/motoflow/bin/motoflow exec -T db pg_dump -U motoflow motoflow > /tmp/m
 
 1. **Sao lưu DB hằng ngày** (`pg_dump` → S3) nếu production/UAT dùng PostgreSQL container.
 2. **Bỏ giá trị mặc định không an toàn** trong `application.properties` (JWT secret mẫu, `admin/admin`). Server không bị ảnh hưởng vì `.env` luôn đặt các giá trị này, nhưng nên bỏ để tránh vô tình chạy production bằng giá trị mẫu.
-3. **SDS (Report 4)**: API thực tế dùng `/api/...` chứ không phải `/api/v1`.
+3. **SDS (Report 4)**: API thực tế dùng `/api/v1/...`, đúng với SDS.

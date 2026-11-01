@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/accounts/999999999/lock"
+url: "{{baseUrl}}/api/v1/accounts/999999999/lock"
 method: POST
 auth:
   type: bearer

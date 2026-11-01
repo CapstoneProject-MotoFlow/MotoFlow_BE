@@ -33,7 +33,7 @@ class AuthApiIntegrationTest extends IntegrationTest {
     private static final String NEW_PASSWORD = "Fresh@2026pass";
     private static final String COOKIE = "mf_refresh";
     /** A URL Staff may not open: before the password change it answers MSG13, after it MSG05 (wrong role). */
-    private static final String PROTECTED_URL = "/api/stores";
+    private static final String PROTECTED_URL = "/api/v1/stores";
 
     @Autowired
     private MockMvc mvc;
@@ -66,7 +66,7 @@ class AuthApiIntegrationTest extends IntegrationTest {
             Cookie cookie = result.getResponse().getCookie(COOKIE);
             assertThat(cookie).isNotNull();
             assertThat(cookie.isHttpOnly()).isTrue();
-            assertThat(cookie.getPath()).isEqualTo("/api/auth");
+            assertThat(cookie.getPath()).isEqualTo("/api/v1/auth");
             assertThat(cookie.getMaxAge()).isEqualTo((int) Duration.ofDays(7).toSeconds());
 
             UserAccount reloaded = users.findById(owner.getId()).orElseThrow();
@@ -191,7 +191,7 @@ class AuthApiIntegrationTest extends IntegrationTest {
                     .andExpect(jsonPath("$.user.mustChangePassword").value(true))
                     .andReturn());
 
-            mvc.perform(get("/api/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+            mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(token)))
                     .andExpect(status().isOk());
             mvc.perform(get(PROTECTED_URL).header(HttpHeaders.AUTHORIZATION, bearer(token)))
                     .andExpect(status().isForbidden())
@@ -254,7 +254,7 @@ class AuthApiIntegrationTest extends IntegrationTest {
 
         @Test
         void requestWithoutOrWithABadTokenGivesMsg06() throws Exception {
-            mvc.perform(get("/api/auth/me")).andExpect(status().isUnauthorized())
+            mvc.perform(get("/api/v1/auth/me")).andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.code").value("MSG06"));
             me("not-a-jwt").andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
         }
@@ -268,7 +268,7 @@ class AuthApiIntegrationTest extends IntegrationTest {
             clock.advance(Duration.ofMinutes(16));
             me(accessToken(signIn)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
 
-            MvcResult refreshed = mvc.perform(post("/api/auth/refresh").cookie(refresh))
+            MvcResult refreshed = mvc.perform(post("/api/v1/auth/refresh").cookie(refresh))
                     .andExpect(status().isOk()).andReturn();
             me(accessToken(refreshed)).andExpect(status().isOk());
         }
@@ -278,13 +278,13 @@ class AuthApiIntegrationTest extends IntegrationTest {
             createUser("owner", Role.OWNER, null, false);
             Cookie first = login("owner", PASSWORD).andReturn().getResponse().getCookie(COOKIE);
 
-            Cookie second = mvc.perform(post("/api/auth/refresh").cookie(first))
+            Cookie second = mvc.perform(post("/api/v1/auth/refresh").cookie(first))
                     .andExpect(status().isOk()).andReturn().getResponse().getCookie(COOKIE);
 
             assertThat(second.getValue()).isNotEqualTo(first.getValue());
-            mvc.perform(post("/api/auth/refresh").cookie(first))
+            mvc.perform(post("/api/v1/auth/refresh").cookie(first))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
-            mvc.perform(post("/api/auth/refresh").cookie(second)).andExpect(status().isOk());
+            mvc.perform(post("/api/v1/auth/refresh").cookie(second)).andExpect(status().isOk());
         }
 
         @Test
@@ -292,15 +292,15 @@ class AuthApiIntegrationTest extends IntegrationTest {
             UserAccount owner = createUser("owner", Role.OWNER, null, false);
             MvcResult signIn = login("owner", PASSWORD).andReturn();
             Cookie first = signIn.getResponse().getCookie(COOKIE);
-            Cookie second = mvc.perform(post("/api/auth/refresh").cookie(first))
+            Cookie second = mvc.perform(post("/api/v1/auth/refresh").cookie(first))
                     .andExpect(status().isOk()).andReturn().getResponse().getCookie(COOKIE);
 
             clock.advance(Duration.ofSeconds(11));
-            mvc.perform(post("/api/auth/refresh").cookie(first))
+            mvc.perform(post("/api/v1/auth/refresh").cookie(first))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
 
             // Neither the copy nor the rightful owner can go on with this session.
-            mvc.perform(post("/api/auth/refresh").cookie(second)).andExpect(status().isUnauthorized());
+            mvc.perform(post("/api/v1/auth/refresh").cookie(second)).andExpect(status().isUnauthorized());
             me(accessToken(signIn)).andExpect(status().isUnauthorized());
             assertThat(jdbc.queryForObject("SELECT revoke_reason FROM auth_session WHERE user_id = ?", String.class,
                     owner.getId())).isEqualTo("REFRESH_TOKEN_REUSED");
@@ -313,18 +313,18 @@ class AuthApiIntegrationTest extends IntegrationTest {
             Cookie cookie = login("owner", PASSWORD).andReturn().getResponse().getCookie(COOKIE);
             for (int day = 6; day <= 24; day += 6) {
                 clock.advance(Duration.ofDays(6));
-                cookie = mvc.perform(post("/api/auth/refresh").cookie(cookie))
+                cookie = mvc.perform(post("/api/v1/auth/refresh").cookie(cookie))
                         .andExpect(status().isOk()).andReturn().getResponse().getCookie(COOKIE);
             }
 
             clock.advance(Duration.ofDays(6)); // day 30
-            mvc.perform(post("/api/auth/refresh").cookie(cookie))
+            mvc.perform(post("/api/v1/auth/refresh").cookie(cookie))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
         }
 
         @Test
         void refreshWithoutCookieGivesMsg06() throws Exception {
-            mvc.perform(post("/api/auth/refresh"))
+            mvc.perform(post("/api/v1/auth/refresh"))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
         }
 
@@ -335,13 +335,13 @@ class AuthApiIntegrationTest extends IntegrationTest {
             String token = accessToken(signIn);
             Cookie refresh = signIn.getResponse().getCookie(COOKIE);
 
-            MvcResult logout = mvc.perform(post("/api/auth/logout")
+            MvcResult logout = mvc.perform(post("/api/v1/auth/logout")
                             .header(HttpHeaders.AUTHORIZATION, bearer(token)).cookie(refresh))
                     .andExpect(status().isNoContent()).andReturn();
 
             assertThat(logout.getResponse().getCookie(COOKIE).getMaxAge()).isZero();
             me(token).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG06"));
-            mvc.perform(post("/api/auth/refresh").cookie(refresh)).andExpect(status().isUnauthorized());
+            mvc.perform(post("/api/v1/auth/refresh").cookie(refresh)).andExpect(status().isUnauthorized());
         }
 
         @Test
@@ -352,7 +352,7 @@ class AuthApiIntegrationTest extends IntegrationTest {
             lockByAdmin(owner);
 
             me(accessToken(signIn)).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG10"));
-            mvc.perform(post("/api/auth/refresh").cookie(signIn.getResponse().getCookie(COOKIE)))
+            mvc.perform(post("/api/v1/auth/refresh").cookie(signIn.getResponse().getCookie(COOKIE)))
                     .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("MSG10"));
         }
 
@@ -394,20 +394,20 @@ class AuthApiIntegrationTest extends IntegrationTest {
     }
 
     private ResultActions login(String username, String password) throws Exception {
-        return mvc.perform(post("/api/auth/login")
+        return mvc.perform(post("/api/v1/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"%s\",\"password\":\"%s\"}".formatted(username, password)));
     }
 
     private ResultActions changePassword(String token, String current, String next) throws Exception {
-        return mvc.perform(post("/api/auth/change-password")
+        return mvc.perform(post("/api/v1/auth/change-password")
                 .header(HttpHeaders.AUTHORIZATION, bearer(token))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"currentPassword\":\"%s\",\"newPassword\":\"%s\"}".formatted(current, next)));
     }
 
     private ResultActions me(String token) throws Exception {
-        return mvc.perform(get("/api/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(token)));
+        return mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(token)));
     }
 
     private static String accessToken(MvcResult result) throws Exception {
