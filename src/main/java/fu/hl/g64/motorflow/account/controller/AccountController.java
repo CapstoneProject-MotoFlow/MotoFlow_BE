@@ -12,6 +12,7 @@ import fu.hl.g64.motorflow.account.dto.UpdatePermissionsRequest;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.service.AccountService;
 import fu.hl.g64.motorflow.account.service.PermissionService;
+import fu.hl.g64.motorflow.auth.dto.SessionResponse;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,7 +35,7 @@ import java.util.List;
 
 @Tag(name = "Accounts", description = "UC-07 to UC-12: accounts, permissions and their history (Admin)")
 @RestController
-@RequestMapping("/api/accounts")
+@RequestMapping("/api/v1/accounts")
 @PreAuthorize("hasRole('ADMIN')")
 @RequiredArgsConstructor
 public class AccountController {
@@ -62,7 +63,7 @@ public class AccountController {
     public ResponseEntity<CreatedAccountResponse> create(@AuthenticationPrincipal AuthenticatedUser admin,
                                                          @Valid @RequestBody CreateAccountRequest request) {
         CreatedAccountResponse created = accountService.createAccount(admin, request);
-        return ResponseEntity.created(URI.create("/api/accounts/" + created.account().id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/accounts/" + created.account().id())).body(created);
     }
 
     @Operation(summary = "Change role, store and catalog permission (UC-09); 409 MSG18 asks to release assigned tasks")
@@ -94,6 +95,21 @@ public class AccountController {
                                                    @PathVariable long id,
                                                    @Valid @RequestBody(required = false) ResetPasswordRequest request) {
         return accountService.resetPassword(admin, id, request == null ? null : request.reason());
+    }
+
+    @Operation(summary = "Devices the account is signed in on, newest first")
+    @GetMapping("/{id}/sessions")
+    public List<SessionResponse> sessions(@PathVariable long id) {
+        return accountService.activeSessions(id);
+    }
+
+    @Operation(summary = "Sign the account out of one device")
+    @PostMapping("/{id}/sessions/{sessionId}/sign-out")
+    public ResponseEntity<Void> signOutSession(@AuthenticationPrincipal AuthenticatedUser admin, @PathVariable long id,
+                                               @PathVariable long sessionId,
+                                               @Valid @RequestBody(required = false) LockAccountRequest request) {
+        accountService.signOutSession(admin, id, sessionId, request == null ? null : request.reason());
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Role, store and permission changes of one account, newest first (UC-12)")

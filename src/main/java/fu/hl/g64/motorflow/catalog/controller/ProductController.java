@@ -28,7 +28,7 @@ import java.net.URI;
 
 @Tag(name = "Spare parts", description = "UC-13 to UC-17: search for Owner, Branch Manager and Staff; changes need catalog rights")
 @RestController
-@RequestMapping("/api/products")
+@RequestMapping("/api/v1/products")
 @PreAuthorize(CatalogAccess.READ)
 @RequiredArgsConstructor
 public class ProductController {
@@ -57,7 +57,7 @@ public class ProductController {
     public ResponseEntity<ProductResponse> create(@AuthenticationPrincipal AuthenticatedUser actor,
                                                   @Valid @RequestBody ProductRequest request) {
         ProductResponse created = productService.create(actor, request);
-        return ResponseEntity.created(URI.create("/api/products/" + created.id())).body(created);
+        return ResponseEntity.created(URI.create("/api/v1/products/" + created.id())).body(created);
     }
 
     @Operation(summary = "Update a part; the SKU never changes (UC-16)")

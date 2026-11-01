@@ -10,7 +10,9 @@ import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.auth.entity.AuthSession;
 import fu.hl.g64.motorflow.auth.repository.AuthSessionRepository;
+import fu.hl.g64.motorflow.auth.dto.SessionResponse;
 import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
+import fu.hl.g64.motorflow.auth.service.SessionService;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
@@ -42,6 +44,7 @@ public class AccountService {
     private final UserAccountRepository users;
     private final StoreRepository stores;
     private final AuthSessionRepository sessions;
+    private final SessionService sessionService;
     private final AuditLogRepository auditLog;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
@@ -57,9 +60,12 @@ public class AccountService {
         Map<Long, String> storeNames = stores.findAll().stream()
                 .collect(Collectors.toMap(Store::getId, Store::getStoreName));
         String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
+        Map<Long, AuthSession> lastSessions = sessions.findLatestPerUser().stream()
+                .collect(Collectors.toMap(s -> s.getUser().getId(), s -> s));
 
         return users.findAll().stream()
-                .map(account -> AccountResponse.from(account, storeNames.get(account.getStoreId()), now))
+                .map(account -> AccountResponse.from(account, storeNames.get(account.getStoreId()),
+                        lastSessions.get(account.getId()), now))
                 .filter(a -> role == null || a.role() == role)
                 .filter(a -> storeId == null || storeId.equals(a.storeId()))
                 .filter(a -> state == null || a.state() == state)
@@ -76,7 +82,8 @@ public class AccountService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
         String storeName = account.getStoreId() == null ? null
                 : stores.findById(account.getStoreId()).map(Store::getStoreName).orElse(null);
-        return AccountResponse.from(account, storeName, LocalDateTime.now(clock));
+        AuthSession lastSession = sessions.findFirstByUserIdOrderByIdDesc(accountId).orElse(null);
+        return AccountResponse.from(account, storeName, lastSession, LocalDateTime.now(clock));
     }
 
     @Transactional
@@ -129,6 +136,26 @@ public class AccountService {
         sessions.revokeAllSessions(account.getId(), now, AuthSession.RevokeReason.ACCOUNT_LOCKED);
         auditLog.save(AuditLog.record("USER_ACCOUNT", account.getId(), "ACCOUNT_LOCKED", admin.id(),
                 blankToNull(reason), now));
+    }
+
+    @Transactional(readOnly = true)
+    public List<SessionResponse> activeSessions(long accountId) {
+        if (!users.existsById(accountId)) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "MSG48");
+        }
+        return sessionService.activeSessions(accountId, null);
+    }
+
+    /**
+     * Signs the user out of one device, e.g. a lost phone, without locking the account.
+     * The session ends as LOGOUT; the audit log records that Admin did it.
+     */
+    @Transactional
+    public void signOutSession(AuthenticatedUser admin, long accountId, long sessionId, String reason) {
+        UserAccount account = otherAccount(admin, accountId);
+        sessionService.signOut(account.getId(), sessionId, AuthSession.RevokeReason.LOGOUT);
+        auditLog.save(AuditLog.record("USER_ACCOUNT", account.getId(), "SESSION_SIGNED_OUT", admin.id(),
+                blankToNull(reason), LocalDateTime.now(clock)));
     }
 
     /** UC-10. Lifts an Admin lock and the temporary lock after wrong passwords alike. */

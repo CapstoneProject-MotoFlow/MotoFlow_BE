@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/part-categories?vehicleType=MOTORCYCLE"
+url: "{{baseUrl}}/api/v1/part-categories?vehicleType=MOTORCYCLE"
 method: GET
 queryParams:
   vehicleType: MOTORCYCLE

@@ -24,6 +24,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.upload.service.CloudinaryService;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
@@ -72,6 +73,7 @@ public class ProductService {
     private final ProductVehicleModelRepository compatibility;
     private final PricingPolicyRepository pricingPolicies;
     private final StockBalanceRepository stockBalances;
+    private final CloudinaryService cloudinary;
     private final StoreScope storeScope;
     private final AuditLogRepository auditLog;
     private final Clock clock;
@@ -272,6 +274,11 @@ public class ProductService {
         compatibility.saveAll(request.vehicleModelIds().stream().distinct()
                 .map(modelId -> ProductVehicleModel.of(productId, modelId)).toList());
         List<String> urls = request.imageUrls().stream().map(String::strip).distinct().toList();
+        // Only images uploaded through our own Cloudinary account, so a part cannot point at any site.
+        String prefix = cloudinary.publicImagePrefix();
+        if (prefix != null && urls.stream().anyMatch(url -> !url.startsWith(prefix))) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG77");
+        }
         images.saveAll(IntStream.range(0, urls.size())
                 .mapToObj(i -> ProductImage.of(productId, urls.get(i), i, actor.id(), now)).toList());
     }

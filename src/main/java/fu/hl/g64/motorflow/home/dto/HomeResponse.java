@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * SCR-03 Home after sign-in (UC-01 step 7). The menu is built from the role and permissions of
- * {@code GET /api/auth/me}. {@code notifications} is null for Admin, who receives none (Permission Matrix);
+ * {@code GET /api/v1/auth/me}. {@code notifications} is null for Admin, who receives none (Permission Matrix);
  * {@code shortcuts} lists every shortcut of the role in a fixed order, zero counts included.
  */
 public record HomeResponse(Role role, Long storeId, String storeName, Notifications notifications,

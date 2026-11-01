@@ -19,7 +19,7 @@ class SecurityWiringTest extends IntegrationTest {
 
     @Test
     void frontendOriginMayCallTheApiWithCredentials() throws Exception {
-        mvc.perform(options("/api/auth/login")
+        mvc.perform(options("/api/v1/auth/login")
                         .header(HttpHeaders.ORIGIN, "http://localhost:5173")
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST"))
                 .andExpect(status().isOk())
@@ -29,7 +29,7 @@ class SecurityWiringTest extends IntegrationTest {
 
     @Test
     void otherOriginsAreRefused() throws Exception {
-        mvc.perform(options("/api/auth/login")
+        mvc.perform(options("/api/v1/auth/login")
                         .header(HttpHeaders.ORIGIN, "https://evil.example")
                         .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST"))
                 .andExpect(status().isForbidden());
@@ -39,6 +39,6 @@ class SecurityWiringTest extends IntegrationTest {
     void apiDocsArePublicAndListTheLoginEndpoint() throws Exception {
         mvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.paths['/api/auth/login']").exists());
+                .andExpect(jsonPath("$.paths['/api/v1/auth/login']").exists());
     }
 }

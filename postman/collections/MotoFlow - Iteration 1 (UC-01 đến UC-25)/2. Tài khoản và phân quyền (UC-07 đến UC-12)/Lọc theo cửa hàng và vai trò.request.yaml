@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/accounts?storeId={{branchStoreId}}&role=STAFF"
+url: "{{baseUrl}}/api/v1/accounts?storeId={{branchStoreId}}&role=STAFF"
 method: GET
 queryParams:
   storeId: "{{branchStoreId}}"

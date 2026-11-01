@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/stores/{{branchStoreId}}"
+url: "{{baseUrl}}/api/v1/stores/{{branchStoreId}}"
 method: PUT
 headers:
   Content-Type: application/json

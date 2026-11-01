@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/accounts/{{staffId}}/permissions"
+url: "{{baseUrl}}/api/v1/accounts/{{staffId}}/permissions"
 method: PUT
 headers:
   Content-Type: application/json

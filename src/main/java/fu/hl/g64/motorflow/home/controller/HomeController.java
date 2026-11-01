@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Home", description = "SCR-03 Home after sign-in (UC-01 step 7), every role")
 @RestController
-@RequestMapping("/api/home")
+@RequestMapping("/api/v1/home")
 @PreAuthorize("hasAnyRole('ADMIN', 'OWNER', 'BRANCH_MANAGER', 'STAFF')")
 @RequiredArgsConstructor
 public class HomeController {

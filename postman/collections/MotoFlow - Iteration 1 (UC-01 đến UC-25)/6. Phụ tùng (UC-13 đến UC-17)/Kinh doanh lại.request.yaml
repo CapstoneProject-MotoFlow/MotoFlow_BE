@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/products/{{productId}}/reactivate"
+url: "{{baseUrl}}/api/v1/products/{{productId}}/reactivate"
 method: POST
 auth:
   type: bearer

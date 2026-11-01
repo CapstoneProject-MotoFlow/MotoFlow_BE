@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/accounts/{{adminId}}/reset-password"
+url: "{{baseUrl}}/api/v1/accounts/{{adminId}}/reset-password"
 method: POST
 auth:
   type: bearer

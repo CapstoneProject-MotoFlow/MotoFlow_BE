@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/products?q={{run}}&inStockOnly=true"
+url: "{{baseUrl}}/api/v1/products?q={{run}}&inStockOnly=true"
 method: GET
 queryParams:
   q: "{{run}}"
