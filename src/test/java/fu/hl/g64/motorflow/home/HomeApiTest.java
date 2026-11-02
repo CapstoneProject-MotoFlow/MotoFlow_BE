@@ -236,7 +236,8 @@ class HomeApiTest extends IntegrationTest {
 
     private long supplierDelivery(long storeId, String status) {
         Long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) "
-                + "VALUES ('NCC' || nextval('supplier_id_seq'), 'Minh Phát') RETURNING id", Long.class);
+                + "SELECT 'NCC' || n, 'Minh Phát ' || n FROM (SELECT count(*) + 1 AS n FROM supplier) c RETURNING id",
+                Long.class);
         Long request = jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, store_id, status, "
                 + "created_by) VALUES (?, ?, 'RECEIVING', ?) RETURNING id", Long.class, supplier, storeId, owner.getId());
         return receipt("SUPPLIER_DELIVERY", request, null, status);

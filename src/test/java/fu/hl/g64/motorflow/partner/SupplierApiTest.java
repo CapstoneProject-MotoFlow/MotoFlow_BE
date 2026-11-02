@@ -8,6 +8,7 @@ import fu.hl.g64.motorflow.support.IntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,6 +22,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -73,8 +75,19 @@ class SupplierApiTest extends IntegrationTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG78"))
                 .andExpect(jsonPath("$.message").value("Tên nhà cung cấp CÔNG TY PHỤ TÙNG MINH PHÁT đã tồn tại."));
-        send(post("/api/v1/suppliers"), supplier("Nhớt Đông Á"))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.supplierCode").value("NCC002"));
+        send(post("/api/v1/suppliers"), supplier("Công  ty Phụ tùng   Minh Phát"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG78"));
+        send(post("/api/v1/suppliers"), supplier("  Nhớt   Đông Á "))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.supplierCode").value("NCC002"))
+                .andExpect(jsonPath("$.supplierName").value("Nhớt Đông Á"));
+    }
+
+    @Test
+    void theDatabaseAlsoRejectsADuplicateSupplierName() {
+        jdbc.update("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Minh Phát')");
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO supplier (supplier_code, supplier_name) "
+                + "VALUES ('NCC002', 'MINH PHÁT')")).isInstanceOf(DuplicateKeyException.class);
     }
 
     @Test

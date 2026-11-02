@@ -153,13 +153,15 @@ class StoreApiTest extends IntegrationTest {
 
         updateStore(branch, update("INACTIVE", false))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("INACTIVE"));
-        // Closed stores still take edits, and reopen without the closing checks.
+        // Closed stores still take edits; they reopen only by going back to planned (PM 02/11).
         jdbc.update("UPDATE user_account SET status = 'ACTIVE' WHERE id = ?", staff.getId());
         updateStore(branch, update("INACTIVE", false)).andExpect(status().isOk());
-        updateStore(branch, update("PLANNED", false))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG68"));
         updateStore(branch, update("ACTIVE", false))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG83"))
+                .andExpect(jsonPath("$.message")
+                        .value("Cửa hàng đã ngừng hoạt động phải chuyển về trạng thái chuẩn bị trước khi mở lại."));
+        updateStore(branch, update("PLANNED", false))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PLANNED"));
 
         long planned = createdId(createStore(store("CH03", false)));
         updateStore(planned, update("PLANNED", false)).andExpect(status().isOk());
@@ -339,7 +341,35 @@ class StoreApiTest extends IntegrationTest {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG46"));
         setOwnerManager(id, null).andExpect(status().isOk());
         assertThat(jdbc.queryForList("SELECT action FROM audit_log WHERE action LIKE 'STORE_OWNER%' ORDER BY id",
-                String.class)).containsExactly("STORE_OWNER_MANAGER_SET", "STORE_OWNER_MANAGER_REMOVED");
+                String.class)).containsExactly("STORE_OWNER_MANAGER_SET", "STORE_OWNER_MANAGER_REMOVED",
+                "STORE_OWNER_MANAGER_REMOVED");
+        assertThat(jdbc.queryForObject("SELECT reason FROM audit_log WHERE action = 'STORE_OWNER_MANAGER_REMOVED' "
+                + "ORDER BY id LIMIT 1", String.class)).isEqualTo("Đóng cửa hàng");
+    }
+
+    @Test
+    void aClosedStoreReopensThroughPlannedAndTheOpeningChecks() throws Exception {
+        long id = createdId(createStore(store("CH01", false)));
+        UserAccount bm = createUser("bm01", Role.BRANCH_MANAGER, id);
+        long brake = addProduct("SKU1", "ACTIVE");
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id) VALUES (?, ?)", id, brake);
+        addRetailPrice(brake, LocalDateTime.now(clock).minusDays(1));
+        updateStore(id, update("ACTIVE", false)).andExpect(status().isOk());
+
+        jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", bm.getId());
+        updateStore(id, update("INACTIVE", false)).andExpect(status().isOk());
+        updateStore(id, update("ACTIVE", false)).andExpect(jsonPath("$.code").value("MSG83"));
+        updateStore(id, update("PLANNED", false)).andExpect(status().isOk());
+
+        // Back to planned, the store takes a manager again and must pass MSG79-MSG81 to open.
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG79"));
+        setOwnerManager(id, owner.getId()).andExpect(status().isOk());
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+        updateStore(id, update("PLANNED", false))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG68"))
+                .andExpect(jsonPath("$.message").value("Cửa hàng đã mở thì không thể quay lại trạng thái chuẩn bị."));
     }
 
     @Test

@@ -186,8 +186,13 @@ public class StoreService {
         if (stores.existsByStoreNameIgnoreCaseAndIdNot(name, storeId)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG49", name);
         }
-        if (request.status() == StoreStatus.PLANNED && store.getStatus() != StoreStatus.PLANNED) {
+        // Store states: PLANNED -> ACTIVE or INACTIVE; ACTIVE -> INACTIVE; INACTIVE -> PLANNED (PM 02/11).
+        // A closed store reopens by going back to planned, so it passes the opening checks again.
+        if (request.status() == StoreStatus.PLANNED && store.getStatus() == StoreStatus.ACTIVE) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG68");
+        }
+        if (request.status() == StoreStatus.ACTIVE && store.getStatus() == StoreStatus.INACTIVE) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG83");
         }
         if (request.status() == StoreStatus.INACTIVE) {
             requireClosable(store, request.central());
@@ -206,6 +211,8 @@ public class StoreService {
 
         if (request.status() == StoreStatus.INACTIVE && store.getOwnerManagerId() != null) {
             store.assignOwnerManager(null, now); // A closed store has no manager.
+            auditLog.save(AuditLog.record("STORE", storeId, "STORE_OWNER_MANAGER_REMOVED", actor.id(),
+                    "Đóng cửa hàng", now));
         }
         return StoreResponse.from(store, managersOf(store), productsInStockByStore().getOrDefault(storeId, 0L));
     }

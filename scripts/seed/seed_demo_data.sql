@@ -1,5 +1,5 @@
 -- MotoFlow demo data (Nga Minh motorbike parts), for trying the system end to end on a local database.
--- Not a Flyway migration: run it by hand on a database already migrated to V11.
+-- Not a Flyway migration: run it by hand on a database already migrated to V13.
 --
 --   psql -h localhost -U root -d motoflow -v ON_ERROR_STOP=1 -f scripts/seed/seed_demo_data.sql
 --

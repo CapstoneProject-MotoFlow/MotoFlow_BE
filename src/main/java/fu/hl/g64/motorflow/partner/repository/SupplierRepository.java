@@ -7,8 +7,6 @@ import org.springframework.data.jpa.repository.Query;
 
 public interface SupplierRepository extends JpaRepository<Supplier, Long>, JpaSpecificationExecutor<Supplier> {
 
-    boolean existsBySupplierCode(String supplierCode);
-
     boolean existsBySupplierNameIgnoreCase(String supplierName);
 
     boolean existsBySupplierNameIgnoreCaseAndIdNot(String supplierName, Long id);
