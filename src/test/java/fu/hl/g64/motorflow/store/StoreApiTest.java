@@ -465,12 +465,12 @@ class StoreApiTest extends IntegrationTest {
     private ResultActions setOwnerManager(long storeId, Long ownerId) throws Exception {
         Map<String, Object> body = new HashMap<>();
         body.put("ownerId", ownerId);
-        return mvc.perform(put("/api/stores/{id}/owner-manager", storeId).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+        return mvc.perform(put("/api/v1/stores/{id}/owner-manager", storeId).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(body)));
     }
 
     private ResultActions employees(String bearer, long storeId) throws Exception {
-        return mvc.perform(get("/api/stores/{id}/employees", storeId).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer));
+        return mvc.perform(get("/api/v1/stores/{id}/employees", storeId).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer));
     }
 
     private long createdId(ResultActions created) throws Exception {
