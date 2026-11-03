@@ -16,8 +16,8 @@ public interface PermissionService {
      * Sets role, store and the catalog permission in one step; each change is kept in the history.
      * Applies from the user's next action (BR-03), so open sessions stay.
      */
-    public AccountResponse updatePermissions(AuthenticatedUser admin, long accountId, UpdatePermissionsRequest request);
+    AccountResponse updatePermissions(AuthenticatedUser admin, long accountId, UpdatePermissionsRequest request);
 
     /** Newest first, with the name of the Admin (or Owner, BR-08) who made each change. */
-    public List<PermissionHistoryResponse> permissionHistory(long accountId);
+    List<PermissionHistoryResponse> permissionHistory(long accountId);
 }

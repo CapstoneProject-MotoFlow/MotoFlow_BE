@@ -20,6 +20,9 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.account.service.PermissionService;
+import static fu.hl.g64.motorflow.account.helper.AccountRules.history;
+import static fu.hl.g64.motorflow.account.helper.AccountRules.requireAnotherActiveAdmin;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -28,7 +31,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -77,7 +79,7 @@ public class PermissionServiceImpl implements PermissionService {
         Long oldStoreId = account.getStoreId();
         boolean storeChanged = !Objects.equals(oldStoreId, storeId);
         if (oldRole == Role.ADMIN && role != Role.ADMIN && account.getStatus() == AccountStatus.ACTIVE) {
-            AccountServiceImpl.requireAnotherActiveAdmin(users, account);
+            requireAnotherActiveAdmin(users, account);
         }
         if (role != oldRole || storeChanged) {
             releaseAssignedTasks(account, request.releaseAssignedTasks(), now);
@@ -112,34 +114,12 @@ public class PermissionServiceImpl implements PermissionService {
         return entries.stream().map(entry -> PermissionHistoryResponse.from(entry, names.get(entry.getActorId()))).toList();
     }
 
-    public static AuditLog accountCreated(UserAccount account, Long changedBy, String reason, LocalDateTime now) {
-        return history(account.getId(), "ACCOUNT_CREATED", null, null, account.getRole().name(), reason, changedBy, now);
-    }
-
     private void setPermission(UserAccount account, PermissionCode code, boolean granted, String reason,
                                AuthenticatedUser admin, LocalDateTime now) {
         if (account.setPermission(code, granted, now)) {
             auditLog.save(history(account.getId(), granted ? "PERMISSION_GRANTED" : "PERMISSION_REVOKED", code, null,
                     null, reason, admin.id(), now));
         }
-    }
-
-    /** Same shape as the rows V11 moved over from permission_history; null values are left out. */
-    private static AuditLog history(Long userId, String action, PermissionCode code, String oldValue, String newValue,
-                                    String reason, Long changedBy, LocalDateTime now) {
-        return AuditLog.record("USER_ACCOUNT", userId, action, changedBy, reason,
-                data(code, oldValue), data(code, newValue), now);
-    }
-
-    private static Map<String, Object> data(PermissionCode code, String value) {
-        Map<String, Object> data = new HashMap<>();
-        if (code != null) {
-            data.put("permission_code", code.name());
-        }
-        if (value != null) {
-            data.put("value", value);
-        }
-        return data;
     }
 
     /**

@@ -8,14 +8,14 @@ import fu.hl.g64.motorflow.upload.dto.UploadSignatureResponse;
  * never leaves the server and files never pass through it.
  */
 public interface CloudinaryService {
-    public UploadSignatureResponse uploadSignature(UploadPurpose purpose);
+    UploadSignatureResponse uploadSignature(UploadPurpose purpose);
 
     /**
      * A link to the original of a private file that stops working after motoflow.cloudinary.download-url-ttl.
      * Call it only after checking that the user may see the record the file belongs to.
      */
-    public String privateDownloadUrl(String publicId, String format);
+    String privateDownloadUrl(String publicId, String format);
 
     /** The start of every image this account delivers publicly, or null when uploads are off. */
-    public String publicImagePrefix();
+    String publicImagePrefix();
 }

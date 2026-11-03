@@ -1,4 +1,4 @@
-package fu.hl.g64.motorflow.auth.service;
+package fu.hl.g64.motorflow.auth.helper;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;

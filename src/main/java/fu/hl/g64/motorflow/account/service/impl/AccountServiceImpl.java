@@ -11,7 +11,7 @@ import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.auth.entity.AuthSession;
 import fu.hl.g64.motorflow.auth.repository.AuthSessionRepository;
 import fu.hl.g64.motorflow.auth.dto.SessionResponse;
-import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
+import fu.hl.g64.motorflow.auth.helper.PasswordPolicy;
 import fu.hl.g64.motorflow.auth.service.SessionService;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
@@ -20,6 +20,9 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.account.service.AccountService;
+import static fu.hl.g64.motorflow.account.helper.AccountRules.accountCreated;
+import static fu.hl.g64.motorflow.account.helper.AccountRules.requireAnotherActiveAdmin;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -113,7 +116,7 @@ public class AccountServiceImpl implements AccountService {
             // Another Admin created the same username a moment earlier.
             throw new BusinessException(HttpStatus.CONFLICT, "MSG45", username);
         }
-        auditLog.save(PermissionServiceImpl.accountCreated(account, admin.id(), null, now));
+        auditLog.save(accountCreated(account, admin.id(), null, now));
         return new CreatedAccountResponse(
                 AccountResponse.from(account, store == null ? null : store.getStoreName(), now),
                 temporaryPassword);
@@ -191,13 +194,6 @@ public class AccountServiceImpl implements AccountService {
         }
         return users.findById(accountId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
-    }
-
-    /** Locking or demoting this Admin must leave at least one active Admin (MSG69). */
-    static void requireAnotherActiveAdmin(UserAccountRepository users, UserAccount admin) {
-        if (users.findActiveAdminsForUpdate().stream().noneMatch(a -> !a.getId().equals(admin.getId()))) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG69");
-        }
     }
 
     private static String blankToNull(String value) {

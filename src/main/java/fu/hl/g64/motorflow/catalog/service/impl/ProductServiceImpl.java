@@ -31,7 +31,7 @@ import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
 import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
-import fu.hl.g64.motorflow.store.service.StoreScope;
+import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.catalog.service.ProductService;
 import jakarta.persistence.criteria.Predicate;

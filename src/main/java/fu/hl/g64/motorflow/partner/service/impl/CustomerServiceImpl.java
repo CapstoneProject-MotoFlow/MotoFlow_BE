@@ -25,7 +25,7 @@ import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
-import fu.hl.g64.motorflow.store.service.StoreScope;
+import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.partner.service.CustomerService;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
@@ -58,6 +58,9 @@ public class CustomerServiceImpl implements CustomerService {
     /** Credit grants and revocations by Owner (UC-63, UC-64) are kept in audit_log as CREDIT_ + event type. */
     private static final String CREDIT_PREFIX = "CREDIT_";
     private static final Set<String> CREDIT_ACTIONS = Set.of(CREDIT_PREFIX + EventType.GRANTED, CREDIT_PREFIX + EventType.REVOKED);
+
+    /** Rows of the order and payment lists on the detail screen; older ones are counted but not listed. */
+    private static final int HISTORY_SIZE = 20;
 
     private final CustomerRepository customers;
     private final ReceivableRepository receivables;

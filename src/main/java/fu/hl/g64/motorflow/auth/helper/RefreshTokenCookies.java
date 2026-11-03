@@ -1,4 +1,4 @@
-package fu.hl.g64.motorflow.auth.controller;
+package fu.hl.g64.motorflow.auth.helper;
 
 import fu.hl.g64.motorflow.auth.config.AuthProperties;
 import jakarta.servlet.http.Cookie;

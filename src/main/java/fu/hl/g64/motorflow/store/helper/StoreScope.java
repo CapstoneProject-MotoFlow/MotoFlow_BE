@@ -1,4 +1,4 @@
-package fu.hl.g64.motorflow.store.service;
+package fu.hl.g64.motorflow.store.helper;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.common.error.BusinessException;

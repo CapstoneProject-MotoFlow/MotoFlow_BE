@@ -18,29 +18,29 @@ public interface AccountService {
      * Most recent sign-in first; accounts that never signed in come last.
      * shortcut: filters in memory, fine for a chain's few hundred accounts; move to a query if they reach thousands.
      */
-    public List<AccountResponse> listAccounts(String q, Role role, Long storeId, AccountState state);
+    List<AccountResponse> listAccounts(String q, Role role, Long storeId, AccountState state);
 
-    public AccountResponse getAccount(long accountId);
+    AccountResponse getAccount(long accountId);
 
-    public CreatedAccountResponse createAccount(AuthenticatedUser admin, CreateAccountRequest request);
+    CreatedAccountResponse createAccount(AuthenticatedUser admin, CreateAccountRequest request);
 
     /** UC-10. The user is signed out on every device at once. Locking a locked account changes nothing. */
-    public void lockAccount(AuthenticatedUser admin, long accountId, String reason);
+    void lockAccount(AuthenticatedUser admin, long accountId, String reason);
 
-    public List<SessionResponse> activeSessions(long accountId);
+    List<SessionResponse> activeSessions(long accountId);
 
     /**
      * Signs the user out of one device, e.g. a lost phone, without locking the account.
      * The session ends as LOGOUT; the audit log records that Admin did it.
      */
-    public void signOutSession(AuthenticatedUser admin, long accountId, long sessionId, String reason);
+    void signOutSession(AuthenticatedUser admin, long accountId, long sessionId, String reason);
 
     /** UC-10. Lifts an Admin lock and the temporary lock after wrong passwords alike. */
-    public void unlockAccount(AuthenticatedUser admin, long accountId, String reason);
+    void unlockAccount(AuthenticatedUser admin, long accountId, String reason);
 
     /**
      * The user must change the new temporary password at the next sign-in, and every device they
      * are signed in on is signed out, because whoever knew the old password must lose access.
      */
-    public TemporaryPasswordResponse resetPassword(AuthenticatedUser admin, long accountId, String reason);
+    TemporaryPasswordResponse resetPassword(AuthenticatedUser admin, long accountId, String reason);
 }

@@ -9,7 +9,7 @@ import fu.hl.g64.motorflow.account.service.AccountService;
 import fu.hl.g64.motorflow.account.service.PermissionService;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
-import fu.hl.g64.motorflow.auth.service.PasswordPolicy;
+import fu.hl.g64.motorflow.auth.helper.PasswordPolicy;
 import fu.hl.g64.motorflow.support.IntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;

@@ -5,7 +5,7 @@ import fu.hl.g64.motorflow.account.entity.enums.PermissionCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.auth.entity.AuthSession;
-import fu.hl.g64.motorflow.auth.service.UserAgents;
+import fu.hl.g64.motorflow.auth.helper.UserAgents;
 
 import java.time.LocalDateTime;
 import java.util.Set;

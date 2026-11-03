@@ -10,5 +10,5 @@ public interface StockBalanceService {
      *
      * @return how many parts got their settings
      */
-    public int copySettings(long fromStoreId, long toStoreId, LocalDateTime now);
+    int copySettings(long fromStoreId, long toStoreId, LocalDateTime now);
 }

@@ -14,14 +14,14 @@ public interface VehicleModelService {
      * By manufacturer, then model. Every filter is optional; {@code q} matches manufacturer or model name.
      * shortcut: filters in memory, fine for a few hundred models; move to a query if they reach thousands.
      */
-    public List<VehicleModelResponse> list(String q, VehicleType vehicleType, VehicleModelStatus status);
+    List<VehicleModelResponse> list(String q, VehicleType vehicleType, VehicleModelStatus status);
 
-    public VehicleModelResponse get(long id);
+    VehicleModelResponse get(long id);
 
-    public VehicleModelResponse create(AuthenticatedUser actor, VehicleModelRequest request);
+    VehicleModelResponse create(AuthenticatedUser actor, VehicleModelRequest request);
 
-    public VehicleModelResponse update(AuthenticatedUser actor, long id, VehicleModelRequest request);
+    VehicleModelResponse update(AuthenticatedUser actor, long id, VehicleModelRequest request);
 
     /** UC-25. Parts already declared compatible keep the link; new links need an active model. */
-    public void changeStatus(AuthenticatedUser actor, long id, VehicleModelStatus status);
+    void changeStatus(AuthenticatedUser actor, long id, VehicleModelStatus status);
 }

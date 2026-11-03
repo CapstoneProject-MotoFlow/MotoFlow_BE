@@ -50,6 +50,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SupplierServiceImpl implements SupplierService {
 
+    /** Rows of each history list on the detail screen; older ones are counted but not listed. */
+    private static final int HISTORY_SIZE = 20;
+
     private final SupplierRepository suppliers;
     private final GoodsReceiptRequestRepository purchaseOrders;
     private final GoodsReceiptRequestLineRepository purchaseOrderLines;
