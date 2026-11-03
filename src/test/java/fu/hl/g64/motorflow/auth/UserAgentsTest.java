@@ -1,6 +1,6 @@
 package fu.hl.g64.motorflow.auth;
 
-import fu.hl.g64.motorflow.auth.service.UserAgents;
+import fu.hl.g64.motorflow.auth.helper.UserAgents;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 

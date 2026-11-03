@@ -1,4 +1,4 @@
-package fu.hl.g64.motorflow.auth.service;
+package fu.hl.g64.motorflow.auth.helper;
 
 import java.util.List;
 import java.util.regex.Matcher;

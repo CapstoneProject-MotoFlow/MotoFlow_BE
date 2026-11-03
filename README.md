@@ -109,7 +109,9 @@ Mỗi feature dùng các package con sau, chỉ tạo package nào thực sự c
 | Package | Chứa |
 |---|---|
 | `controller/` | REST controller: nhận request, `@Valid`, phân quyền `@PreAuthorize`, gọi service |
-| `service/` | nghiệp vụ của use case, `@Transactional` |
+| `service/` | interface `XxxService`: khai báo method nghiệp vụ, Javadoc đặt ở đây. Code ngoài feature chỉ inject interface này |
+| `service/impl/` | `XxxServiceImpl`: `@Service`, `@Transactional`, `implements XxxService` |
+| `helper/` | class tiện ích hoặc `@Component` phụ trợ dùng chung trong feature, không phải service nghiệp vụ (ví dụ `StoreScope`, `AccountRules`, `RefreshTokens`) |
 | `repository/` | `JpaRepository<Entity, Long>` |
 | `entity/` | entity JPA; enum đặt trong `entity/enums/` |
 | `dto/` | request/response (Java `record`) |
@@ -190,10 +192,15 @@ public class TransferOrder {
   - Khi cập nhật số lượng, dùng câu `UPDATE ... SET available_qty = available_qty - :q` (repository `@Modifying`) hoặc khóa dòng, để hai người thao tác cùng lúc không ghi đè nhau.
 
 ### Service
-- Mỗi use case là một method public có `@Transactional`.
+- Mỗi service gồm hai file: interface `XxxService` ở `service/`, và class `XxxServiceImpl` ở `service/impl/`.
+- `XxxService` chỉ khai báo method nghiệp vụ, Javadoc viết ở interface.
+- `XxxServiceImpl` có `@Service`, `@Transactional` (đặt ở method) và `implements XxxService`.
+- Code ngoài service (controller, service khác, test) chỉ inject interface `XxxService`, không inject `XxxServiceImpl`.
+- Mỗi use case là một method trong interface, được cài đặt ở Impl với `@Transactional`.
 - Đầu method ghi chú UC tương ứng (ví dụ `// UC-08`).
 - Nhận `AuthenticatedUser` (người đang đăng nhập) để kiểm tra role, cửa hàng và quyền.
-- Thao tác quan trọng thì ghi `AuditLog.record(...)` (xem `AccountService`).
+- Thao tác quan trọng thì ghi `AuditLog.record(...)` (xem `AccountServiceImpl`).
+- Helper không phải service đặt trong `helper/` của feature (ví dụ `account/helper/AccountRules`), không đặt trong `service/`.
 
 ### Lỗi và thông báo
 - Lỗi nghiệp vụ: `throw new BusinessException(HttpStatus.CONFLICT, "MSG45", username);`.
@@ -221,7 +228,7 @@ Ví dụ thêm UC-xx "Dispatch Transfer Order":
 1. Đọc UC spec và các BR liên quan trong Report 3.
 2. **Entity:** thêm method nghiệp vụ vào `TransferOrder` (`dispatch(...)`), kiểm trạng thái và BR ngay trong đó.
 3. **Repository:** thêm query nếu cần (`findBy...`, hoặc `@Query`).
-4. **Service:** tạo `transfer/service/TransferOrderService` với method `dispatch(user, id, request)` có `@Transactional`. Method này kiểm quyền và cửa hàng, gọi entity, ghi `stock_movement` và audit.
+4. **Service:** tạo interface `transfer/service/TransferOrderService` khai báo `dispatch(user, id, request)`, và class `transfer/service/impl/TransferOrderServiceImpl` (`@Service`, `@Transactional`, `implements TransferOrderService`). Method này kiểm quyền và cửa hàng, gọi entity, ghi `stock_movement` và audit. Helper dùng chung đặt trong `transfer/helper/`.
 5. **DTO + controller:** `POST /api/v1/transfer-orders/{id}/dispatch`, có `@PreAuthorize`.
 6. **Message:** thêm mã MSG mới vào `messages.properties` nếu cần.
 7. **Test:** `transfer/TransferOrderApiTest extends IntegrationTest`.

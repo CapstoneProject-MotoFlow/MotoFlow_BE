@@ -1,4 +1,4 @@
-package fu.hl.g64.motorflow.auth.service;
+package fu.hl.g64.motorflow.auth.helper;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -22,7 +22,7 @@ public final class PasswordPolicy {
     private PasswordPolicy() {
     }
 
-    static boolean fitsBcrypt(String password) {
+    public static boolean fitsBcrypt(String password) {
         return password.getBytes(StandardCharsets.UTF_8).length <= MAX_BYTES;
     }
 

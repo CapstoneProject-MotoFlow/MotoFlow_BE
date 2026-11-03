@@ -1,7 +1,7 @@
 package fu.hl.g64.motorflow.auth.dto;
 
 import fu.hl.g64.motorflow.auth.entity.AuthSession;
-import fu.hl.g64.motorflow.auth.service.UserAgents;
+import fu.hl.g64.motorflow.auth.helper.UserAgents;
 
 import java.time.LocalDateTime;
 

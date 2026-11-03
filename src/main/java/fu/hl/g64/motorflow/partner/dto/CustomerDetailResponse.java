@@ -15,7 +15,7 @@ import java.util.List;
  * UC-28: the customer with credit history, unsettled debts, and newest orders and payments.
  * A Branch Manager sees only the documents of their own store, Owner and the central-warehouse Branch Manager see every
  * store (BR-03); the debt totals in {@code customer} always cover the whole chain (BR-53). Orders and payments hold at
- * most the newest {@code CustomerService.HISTORY_SIZE} rows; the counts cover all of them.
+ * most the newest 20 rows; the counts cover all of them.
  */
 public record CustomerDetailResponse(CustomerResponse customer, List<CreditEvent> creditHistory, List<DebtRow> debts,
                                      List<OrderRow> orders, long orderCount, List<PaymentRow> payments, long paymentCount) {

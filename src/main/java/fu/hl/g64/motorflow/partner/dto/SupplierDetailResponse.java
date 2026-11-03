@@ -10,7 +10,7 @@ import java.util.List;
 
 /**
  * UC-32: the supplier with its newest purchase orders (goods receipt requests), deliveries and discrepancies.
- * Each list holds at most the newest {@code SupplierService.HISTORY_SIZE} rows; the counts cover all of them.
+ * Each list holds at most the newest 20 rows; the counts cover all of them.
  */
 public record SupplierDetailResponse(SupplierResponse supplier,
                                      List<PurchaseOrder> purchaseOrders, long purchaseOrderCount,
