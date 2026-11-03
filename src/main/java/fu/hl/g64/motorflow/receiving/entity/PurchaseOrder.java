@@ -1,6 +1,6 @@
 package fu.hl.g64.motorflow.receiving.entity;
 
-import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptRequestStatus;
+import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -18,10 +18,10 @@ import java.time.LocalDateTime;
 
 /** A purchase agreed between Owner and a supplier outside MotoFlow, sent to the receiving warehouse (BR-19, BR-20). */
 @Entity
-@Table(name = "goods_receipt_request")
+@Table(name = "purchase_order")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class GoodsReceiptRequest {
+public class PurchaseOrder {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -44,7 +44,7 @@ public class GoodsReceiptRequest {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private GoodsReceiptRequestStatus status;
+    private PurchaseOrderStatus status;
 
     @Column(name = "created_by", nullable = false)
     private Long createdBy;

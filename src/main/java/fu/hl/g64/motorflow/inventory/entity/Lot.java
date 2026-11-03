@@ -37,8 +37,8 @@ public class Lot {
     @Column(name = "source_type", nullable = false, length = 15)
     private LotSourceType sourceType;
 
-    @Column(name = "goods_receipt_line_id", unique = true)
-    private Long goodsReceiptLineId;
+    @Column(name = "goods_receipt_note_line_id", unique = true)
+    private Long goodsReceiptNoteLineId;
 
     @Column(name = "stock_count_id")
     private Long stockCountId;

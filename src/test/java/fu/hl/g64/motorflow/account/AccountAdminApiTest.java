@@ -579,12 +579,12 @@ class AccountAdminApiTest extends IntegrationTest {
     private Long assignInspectionTask(long assigneeId, long managerId) {
         Long supplierId = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC01', 'NCC') "
                 + "RETURNING id", Long.class);
-        Long requestId = jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, store_id, created_by) "
+        Long requestId = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, created_by) "
                 + "VALUES (?, ?, ?) RETURNING id", Long.class, supplierId, storeId, managerId);
-        Long receiptId = jdbc.queryForObject("INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, "
+        Long receiptId = jdbc.queryForObject("INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, "
                 + "delivery_document_no, arrived_at) VALUES ('SUPPLIER_DELIVERY', ?, 'PGH01', now()) RETURNING id",
                 Long.class, requestId);
-        return jdbc.queryForObject("INSERT INTO warehouse_task (task_type, goods_receipt_id, assigned_to, "
+        return jdbc.queryForObject("INSERT INTO warehouse_task (task_type, goods_receipt_note_id, assigned_to, "
                 + "assigned_by, assigned_at) VALUES ('INSPECTION', ?, ?, ?, now()) RETURNING id",
                 Long.class, receiptId, assigneeId, managerId);
     }

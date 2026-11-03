@@ -40,8 +40,8 @@ public class AdjustmentRequest {
     @Column(name = "payment_id")
     private Long paymentId;
 
-    @Column(name = "goods_receipt_id")
-    private Long goodsReceiptId;
+    @Column(name = "goods_receipt_note_id")
+    private Long goodsReceiptNoteId;
 
     @Column(name = "transfer_order_id")
     private Long transferOrderId;

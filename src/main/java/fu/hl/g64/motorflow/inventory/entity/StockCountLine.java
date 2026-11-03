@@ -11,6 +11,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /** Book and counted quantity of one part (and lot) in a stock count; the difference is derived, not stored. */
 @Entity
@@ -41,9 +42,24 @@ public class StockCountLine {
     @Column(name = "counted_qty")
     private Integer countedQty;
 
+    @Column(name = "counted_by")
+    private Long countedBy;
+
+    @Column(name = "counted_at")
+    private LocalDateTime countedAt;
+
     @Column
     private String reason;
 
     @Column(name = "recount_requested", nullable = false)
     private boolean recountRequested;
+
+    @Column(name = "recount_reason")
+    private String recountReason;
+
+    @Column(name = "previous_book_qty")
+    private Integer previousBookQty;
+
+    @Column(name = "previous_counted_qty")
+    private Integer previousCountedQty;
 }

@@ -13,15 +13,15 @@ public interface DiscrepancyCaseRepository extends JpaRepository<DiscrepancyCase
     @Query("""
             select c from DiscrepancyCase c
             where c.sourceType = fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType.SUPPLIER
-              and c.goodsReceiptId in (select r.id from GoodsReceipt r where r.goodsReceiptRequestId in
-                  (select q.id from GoodsReceiptRequest q where q.supplierId = :supplierId))""")
+              and c.goodsReceiptNoteId in (select r.id from GoodsReceiptNote r where r.purchaseOrderId in
+                  (select q.id from PurchaseOrder q where q.supplierId = :supplierId))""")
     Page<DiscrepancyCase> findBySupplier(Long supplierId, Pageable pageable);
 
     @Query("""
             select count(c) from DiscrepancyCase c
             where c.sourceType = fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType.SUPPLIER and c.status = :status
-              and c.goodsReceiptId in (select r.id from GoodsReceipt r where r.goodsReceiptRequestId in
-                  (select q.id from GoodsReceiptRequest q where q.supplierId = :supplierId))""")
+              and c.goodsReceiptNoteId in (select r.id from GoodsReceiptNote r where r.purchaseOrderId in
+                  (select q.id from PurchaseOrder q where q.supplierId = :supplierId))""")
     long countBySupplierAndStatus(Long supplierId, DiscrepancyCaseStatus status);
 
     /** Open cases on supplier deliveries received at the warehouse. */
@@ -29,7 +29,7 @@ public interface DiscrepancyCaseRepository extends JpaRepository<DiscrepancyCase
             select count(c) from DiscrepancyCase c
             where c.sourceType = fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType.SUPPLIER
               and c.status = fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus.OPEN
-              and c.goodsReceiptId in (select r.id from GoodsReceipt r where r.goodsReceiptRequestId in
-                  (select q.id from GoodsReceiptRequest q where q.storeId = :storeId))""")
+              and c.goodsReceiptNoteId in (select r.id from GoodsReceiptNote r where r.purchaseOrderId in
+                  (select q.id from PurchaseOrder q where q.storeId = :storeId))""")
     long countOpenSupplierCasesAtStore(Long storeId);
 }

@@ -10,7 +10,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** The part of a debt payment that settles one receivable; one payment can settle several (V10). */
+/** The part of a debt payment that settles one receivable; one payment can settle several. */
 @Entity
 @Table(name = "payment_allocation")
 @Getter

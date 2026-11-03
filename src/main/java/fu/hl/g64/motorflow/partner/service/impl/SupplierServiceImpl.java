@@ -15,11 +15,11 @@ import fu.hl.g64.motorflow.partner.dto.SupplierResponse;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.entity.enums.SupplierStatus;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
-import fu.hl.g64.motorflow.receiving.entity.GoodsReceipt;
-import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptRequest;
-import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptRepository;
-import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptRequestLineRepository;
-import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptRequestRepository;
+import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
+import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
+import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
+import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderLineRepository;
+import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
@@ -54,9 +54,9 @@ public class SupplierServiceImpl implements SupplierService {
     private static final int HISTORY_SIZE = 20;
 
     private final SupplierRepository suppliers;
-    private final GoodsReceiptRequestRepository purchaseOrders;
-    private final GoodsReceiptRequestLineRepository purchaseOrderLines;
-    private final GoodsReceiptRepository deliveries;
+    private final PurchaseOrderRepository purchaseOrders;
+    private final PurchaseOrderLineRepository purchaseOrderLines;
+    private final GoodsReceiptNoteRepository deliveries;
     private final DiscrepancyCaseRepository discrepancies;
     private final StoreRepository stores;
     private final ProductRepository products;
@@ -76,13 +76,13 @@ public class SupplierServiceImpl implements SupplierService {
     public SupplierDetailResponse detail(long id) {
         Supplier supplier = find(id);
         Pageable newest = PageRequest.of(0, HISTORY_SIZE, Sort.by(Sort.Direction.DESC, "id"));
-        Page<GoodsReceiptRequest> orders = purchaseOrders.findBySupplierId(id, newest);
-        Page<GoodsReceipt> received = deliveries.findBySupplier(id, newest);
+        Page<PurchaseOrder> orders = purchaseOrders.findBySupplierId(id, newest);
+        Page<GoodsReceiptNote> received = deliveries.findBySupplier(id, newest);
         Page<DiscrepancyCase> cases = discrepancies.findBySupplier(id, newest);
 
         return new SupplierDetailResponse(SupplierResponse.from(supplier),
                 purchaseOrderRows(orders.getContent()), orders.getTotalElements(),
-                received.map(r -> new SupplierDetailResponse.Delivery(r.getId(), r.getGoodsReceiptRequestId(),
+                received.map(r -> new SupplierDetailResponse.Delivery(r.getId(), r.getPurchaseOrderId(),
                         r.getDeliveryDocumentNo(), r.getStatus(), r.getArrivedAt(), r.getConfirmedAt())).getContent(),
                 received.getTotalElements(),
                 discrepancyRows(cases.getContent()), cases.getTotalElements(),
@@ -144,13 +144,13 @@ public class SupplierServiceImpl implements SupplierService {
         auditLog.save(AuditLog.record("SUPPLIER", id, action, actor.id(), null, now));
     }
 
-    private List<SupplierDetailResponse.PurchaseOrder> purchaseOrderRows(List<GoodsReceiptRequest> orders) {
+    private List<SupplierDetailResponse.PurchaseOrder> purchaseOrderRows(List<PurchaseOrder> orders) {
         if (orders.isEmpty()) {
             return List.of();
         }
-        Map<Long, Object[]> totals = purchaseOrderLines.summarizeByRequest(orders.stream().map(GoodsReceiptRequest::getId).toList())
+        Map<Long, Object[]> totals = purchaseOrderLines.summarizeByRequest(orders.stream().map(PurchaseOrder::getId).toList())
                 .stream().collect(Collectors.toMap(row -> (Long) row[0], Function.identity()));
-        Map<Long, String> storeNames = stores.findAllById(orders.stream().map(GoodsReceiptRequest::getStoreId)
+        Map<Long, String> storeNames = stores.findAllById(orders.stream().map(PurchaseOrder::getStoreId)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Store::getId, Store::getStoreName));
 
         return orders.stream().map(order -> {
@@ -167,7 +167,7 @@ public class SupplierServiceImpl implements SupplierService {
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
         return cases.stream().map(c -> {
             Product product = productById.get(c.getProductId());
-            return new SupplierDetailResponse.Discrepancy(c.getId(), c.getGoodsReceiptId(), c.getProductId(),
+            return new SupplierDetailResponse.Discrepancy(c.getId(), c.getGoodsReceiptNoteId(), c.getProductId(),
                     product.getSku(), product.getPartName(), c.getShortQty(), c.getWrongItemQty(), c.getDamagedQty(),
                     c.getRejectedExcessQty(), c.getStatus(), c.getOpenedAt(), c.getClosedAt());
         }).toList();
@@ -202,7 +202,7 @@ public class SupplierServiceImpl implements SupplierService {
     }
 
     /**
-     * Another Owner saved the same name a moment earlier (ux_supplier_name_ci, V13), or the code sequence met a code
+     * Another Owner saved the same name a moment earlier (ux_supplier_name_ci), or the code sequence met a code
      * typed in by hand before codes were generated.
      */
     private static BusinessException conflict(DataIntegrityViolationException e, String name) {

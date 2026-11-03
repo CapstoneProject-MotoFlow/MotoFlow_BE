@@ -11,7 +11,7 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long>, JpaSp
 
     boolean existsBySupplierNameIgnoreCaseAndIdNot(String supplierName, Long id);
 
-    /** Number of the next generated code (V12); a rolled-back create only leaves a gap. */
+    /** Number of the next generated code; a rolled-back create only leaves a gap. */
     @Query(value = "select nextval('supplier_code_seq')", nativeQuery = true)
     long nextCodeNumber();
 }

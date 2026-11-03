@@ -2,10 +2,11 @@ package fu.hl.g64.motorflow.operation.entity.enums;
 
 /** Values of attachment.owner_type (CHECK in the schema). */
 public enum OwnerType {
-    GOODS_RECEIPT,
+    GOODS_RECEIPT_NOTE,
     PAYMENT,
     RECEIVABLE,
     DISCREPANCY_CASE,
     DISCREPANCY_RESOLUTION_EVENT,
-    ADJUSTMENT_REQUEST
+    ADJUSTMENT_REQUEST,
+    TRANSFER_ORDER
 }

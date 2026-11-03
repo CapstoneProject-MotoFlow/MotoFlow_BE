@@ -87,7 +87,7 @@ public class PermissionServiceImpl implements PermissionService {
                 auditLog.save(history(accountId, "ROLE_CHANGED", null, oldRole.name(), role.name(), reason, admin.id(), now));
             }
             if (storeChanged) {
-                // Values are store ids (the store has no code since V7); null means no store.
+                // Values are store ids; null means no store.
                 auditLog.save(history(accountId, "STORE_CHANGED", null, Objects.toString(oldStoreId, null),
                         Objects.toString(storeId, null), reason, admin.id(), now));
             }

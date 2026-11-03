@@ -84,8 +84,8 @@ class HomeApiTest extends IntegrationTest {
         receiptLine(receipt, product, "AWAITING_OWNER");
         receiptLine(receipt, otherProduct, "AWAITING_OWNER");
         receiptLine(supplierDelivery(centralWarehouse, "CONFIRMED"), product, "ACCEPTED");
-        jdbc.update("INSERT INTO stock_count (store_id, count_type, scope_type, status, created_by) "
-                + "VALUES (?, 'OPENING', 'WHOLE', 'AWAITING_APPROVAL', ?)", centralWarehouse, owner.getId());
+        jdbc.update("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, status, created_by) "
+                + "VALUES (?, 'OPENING', CURRENT_DATE, 'WHOLE', 'AWAITING_APPROVAL', ?)", centralWarehouse, owner.getId());
         replenishment(branch, "AWAITING_COORDINATION");
         replenishment(branch, "IN_PROGRESS");
         for (int i = 1; i <= 7; i++) {
@@ -137,7 +137,7 @@ class HomeApiTest extends IntegrationTest {
         // to this warehouse awaiting confirmation, and a delivery at another warehouse.
         long delivery = supplierDelivery(branchWarehouse, "AWAITING_INSPECTION");
         long incoming = transfer(centralWarehouse, branchWarehouse, "IN_TRANSIT");
-        task("INSPECTION", "goods_receipt_id", transferReceipt("TRANSFER_IN", incoming, "AWAITING_INSPECTION"), staff,
+        task("INSPECTION", "goods_receipt_note_id", transferReceipt("TRANSFER_IN", incoming, "AWAITING_INSPECTION"), staff,
                 "ASSIGNED");
         long outgoing = transfer(branchWarehouse, centralWarehouse, "RECONCILING");
         transferReceipt("RETURN_TO_SOURCE", outgoing, "AWAITING_CONFIRMATION");
@@ -146,7 +146,7 @@ class HomeApiTest extends IntegrationTest {
         transfer(branchWarehouse, centralWarehouse, "AWAITING_DISPATCH");
         transfer(centralWarehouse, branchWarehouse, "AWAITING_DISPATCH");
         long product = addProduct("BRK-01");
-        jdbc.update("INSERT INTO discrepancy_case (source_type, goods_receipt_id, product_id, short_qty, opened_at) "
+        jdbc.update("INSERT INTO discrepancy_case (source_type, goods_receipt_note_id, product_id, short_qty, opened_at) "
                 + "VALUES ('SUPPLIER', ?, ?, 2, ?)", delivery, product, LocalDateTime.now(clock));
         replenishment(branch, "AWAITING_COORDINATION");
         notify(manager.getId(), "Có đơn mới", LocalDateTime.now(clock), false);
@@ -180,7 +180,7 @@ class HomeApiTest extends IntegrationTest {
         task("PICKING", "sales_order_id", order(branch, "AWAITING_PICKING"), staff, "ASSIGNED");
         task("PICKING", "sales_order_id", order(branch, "PICKED"), staff, "RESULT_SUBMITTED");
         task("PICKING", "sales_order_id", order(branch, "AWAITING_PICKING"), colleague, "ASSIGNED");
-        task("INSPECTION", "goods_receipt_id", supplierDelivery(branchWarehouse, "AWAITING_INSPECTION"), staff,
+        task("INSPECTION", "goods_receipt_note_id", supplierDelivery(branchWarehouse, "AWAITING_INSPECTION"), staff,
                 "ASSIGNED");
         task("DISPATCH_PREPARATION", "transfer_order_id", transfer(branchWarehouse, central,
                 "AWAITING_DISPATCH"), staff, "DONE");
@@ -238,7 +238,7 @@ class HomeApiTest extends IntegrationTest {
         Long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) "
                 + "SELECT 'NCC' || n, 'Minh Phát ' || n FROM (SELECT count(*) + 1 AS n FROM supplier) c RETURNING id",
                 Long.class);
-        Long request = jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, store_id, status, "
+        Long request = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, status, "
                 + "created_by) VALUES (?, ?, 'RECEIVING', ?) RETURNING id", Long.class, supplier, storeId, owner.getId());
         return receipt("SUPPLIER_DELIVERY", request, null, status);
     }
@@ -250,7 +250,7 @@ class HomeApiTest extends IntegrationTest {
     /** Inspected receipts were recorded by the owner account, which is enough for these counts. */
     private long receipt(String type, Long requestId, Long transferOrderId, String status) {
         boolean inspected = !status.equals("AWAITING_INSPECTION");
-        return jdbc.queryForObject("INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, transfer_order_id, "
+        return jdbc.queryForObject("INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, transfer_order_id, "
                         + "delivery_document_no, arrived_at, status, recorded_by, submitted_at) "
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id", Long.class, type, requestId, transferOrderId,
                 requestId == null ? null : "PX-" + requestId, LocalDateTime.now(clock), status,
@@ -258,7 +258,7 @@ class HomeApiTest extends IntegrationTest {
     }
 
     private void receiptLine(long receiptId, long productId, String excessDecision) {
-        jdbc.update("INSERT INTO goods_receipt_line (goods_receipt_id, product_id, document_qty, delivered_qty, passed_qty, "
+        jdbc.update("INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, delivered_qty, passed_qty, "
                 + "excess_qty, excess_decision) VALUES (?, ?, 10, 12, 12, 2, ?)", receiptId, productId, excessDecision);
     }
 

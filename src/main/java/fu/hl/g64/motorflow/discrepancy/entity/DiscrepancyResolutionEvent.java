@@ -36,8 +36,8 @@ public class DiscrepancyResolutionEvent {
     @Column(nullable = false)
     private int quantity;
 
-    @Column(name = "goods_receipt_id")
-    private Long goodsReceiptId;
+    @Column(name = "goods_receipt_note_id")
+    private Long goodsReceiptNoteId;
 
     @Column(name = "adjustment_request_id")
     private Long adjustmentRequestId;

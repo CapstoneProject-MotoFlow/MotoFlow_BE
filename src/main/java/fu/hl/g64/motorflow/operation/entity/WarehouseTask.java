@@ -34,8 +34,8 @@ public class WarehouseTask {
     @Column(name = "sales_order_id")
     private Long salesOrderId;
 
-    @Column(name = "goods_receipt_id")
-    private Long goodsReceiptId;
+    @Column(name = "goods_receipt_note_id")
+    private Long goodsReceiptNoteId;
 
     @Column(name = "transfer_order_id")
     private Long transferOrderId;

@@ -15,6 +15,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -44,6 +45,9 @@ public class StockCount {
     @Enumerated(EnumType.STRING)
     @Column(name = "count_type", nullable = false, length = 10)
     private CountType countType;
+
+    @Column(name = "count_date", nullable = false)
+    private LocalDate countDate;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "scope_type", nullable = false, length = 10)

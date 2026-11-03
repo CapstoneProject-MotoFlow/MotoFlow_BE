@@ -44,7 +44,7 @@ Không có profile mặc định: thiếu profile thì ứng dụng không chạ
 
 ### Dữ liệu demo
 - `psql -h localhost -U root -d motoflow -v ON_ERROR_STOP=1 -f scripts/seed/seed_demo_data.sql` nạp dữ liệu Nga Minh
-  (3 cửa hàng, tài khoản mọi vai trò, 30 sản phẩm, tồn kho, nhập hàng, điều chuyển, bán hàng, công nợ) vào database đã ở V11.
+  (3 cửa hàng, tài khoản mọi vai trò, 30 sản phẩm, tồn kho, nhập hàng, điều chuyển, bán hàng, công nợ) vào database vừa được Flyway tạo.
   Chạy lại không làm gì; tài khoản Admin có sẵn không bị đụng tới. Mọi tài khoản demo dùng mật khẩu `Demo@2026`.
 - `scripts/seed/check_stock_consistency.sql` kiểm tra `stock_balance` = `lot_balance` = `stock_movement`; không có dòng nào là khớp.
 
@@ -95,7 +95,7 @@ src/main/java/fu/hl/g64/motorflow/
 ├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
 ├── sales/               SalesOrder, SalesOrderLine (phiên bản cũ của đơn nằm trong audit_log)
 ├── receivable/          Receivable, Payment, PaymentAllocation
-├── receiving/           GoodsReceiptRequest(+Line), GoodsReceipt(+Line)
+├── receiving/           PurchaseOrder(+Line), GoodsReceiptNote(+Line)
 ├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line)
 ├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent
 ├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
@@ -127,32 +127,28 @@ Ngoại lệ duy nhất: **ghi tồn kho** (`stock_balance`, `stock_movement`) c
 ## 3. Database
 
 ### Nguồn gốc
-- Schema theo Report 4, mục 3 (Database Design, 50 bảng). V1..V5 dựng thiết kế logic 43 bảng ban đầu
-  (`MotoFlow_Logical_3NF/model.py`, cùng cấp với thư mục `SourceCode`); V7 đưa schema lên 50 bảng của Report 4.
-- `schema_postgres.sql` được sinh từ `model.py` bằng `python ddl.py`.
+- Schema theo Report 4, mục 3 (Database Design, 44 bảng). Thứ tự bảng và thứ tự cột trong migration theo đúng mục 3.1–3.44 của Report 4.
+- Ngày 03/11/2026 các migration cũ V1..V13 được gộp lại thành một file `V1__init_schema.sql`, kèm các thay đổi ngày 03/11:
+  - đổi tên `goods_receipt_request` thành `purchase_order` và `goods_receipt` thành `goods_receipt_note`; bảng dòng và các cột FK đổi theo;
+  - yêu cầu kiểm kê do Owner tạo, BM tạo phiếu kiểm kê: bỏ các cột `decided_*`, trạng thái chỉ còn `PENDING`/`DONE`/`CANCELLED`;
+  - bỏ phần cung cấp một phần (`partial_*`, `proposed_qty`, `accepted_qty`, trạng thái `PROPOSED`/`CANCELLED` của lệnh điều chuyển);
+  - thêm `stock_count.count_date` và, ở `stock_count_line`, các cột `counted_by`, `counted_at`, `recount_reason`, `previous_book_qty`, `previous_counted_qty`;
+  - thêm `goods_receipt_note.delivery_document_date`, `deliverer_name`, `vehicle_plate_no`; `attachment.owner_type` thêm `TRANSFER_ORDER`.
+- **Database đã chạy các migration cũ phải xóa và tạo lại** (embedded: xóa thư mục `.dev-postgres/`; Docker: `docker compose down -v`; server: drop database). Không làm vậy thì Flyway báo lỗi checksum khi khởi động.
 
 ### Flyway migration
 Các migration nằm trong `src/main/resources/db/migration/`:
 
 | File | Nội dung |
 |---|---|
-| `V1__store_and_user_account.sql` | store, warehouse, user_account, user_permission, permission_history |
-| `V2__auth_session.sql` | auth_session (phiên đăng nhập, refresh token) |
-| `V3__audit_log.sql` | audit_log |
-| `V4__updated_at_default_and_fk_indexes.sql` | `DEFAULT NOW()` và index cho FK |
-| `V5__remaining_tables.sql` | 36 bảng còn lại |
-| `V6__single_central_warehouse.sql` | Chuỗi chỉ có một kho tổng |
-| `V7__r4_database_design_50_tables.sql` | Report 4 mục 3: 43 → 50 bảng (bỏ mã do hệ thống cấp, `pricing_policy`, hạng khách hàng, lô, kỳ kho, kiểm kê, số dư kỳ/ngày) |
-| `V10__receivable_due_date_payment_allocation.sql` | `receivable.due_date`; `payment_allocation` thay `payment.receivable_id` (một lần trả nợ trả được nhiều khoản nợ) |
-| `V11__reduce_to_44_tables.sql` | 51 → 44 bảng: `warehouse` gộp vào `store` (`is_central`, cột `*_warehouse_id` thành `*_store_id`); `user_permission` thành 2 cờ trên `user_account`; `permission_history`, `credit_eligibility_event`, `sales_order_version` chuyển vào `audit_log`; bỏ `unmet_demand`, `daily_stock_balance` |
+| `V1__init_schema.sql` | Toàn bộ 44 bảng, FK và index theo Report 4 mục 3 |
 
 **Quy tắc:**
 - **Không sửa migration đã có** (Flyway sẽ báo checksum sai trên mọi máy đã chạy nó).
 - Muốn đổi DB thì làm theo thứ tự:
-  1. Sửa `model.py`.
-  2. Chạy `python ddl.py` và `python build.py`.
-  3. Viết `V<n+1>__mo_ta.sql` chỉ chứa phần thay đổi.
-  4. Sửa entity cho khớp.
+  1. Sửa Report 4 mục 3.
+  2. Viết `V<n+1>__mo_ta.sql` chỉ chứa phần thay đổi.
+  3. Sửa entity cho khớp.
 - `spring.jpa.hibernate.ddl-auto=validate`: Hibernate không tự tạo bảng. Nếu entity lệch với DB thì ứng dụng không khởi động được, và test cũng fail. Đây là cách phát hiện lệch sớm.
 
 ---

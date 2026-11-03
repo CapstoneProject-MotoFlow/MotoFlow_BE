@@ -1,5 +1,5 @@
 -- MotoFlow demo data (Nga Minh motorbike parts), for trying the system end to end on a local database.
--- Not a Flyway migration: run it by hand on a database already migrated to V13.
+-- Not a Flyway migration: run it by hand on a database already migrated by Flyway (V1).
 --
 --   psql -h localhost -U root -d motoflow -v ON_ERROR_STOP=1 -f scripts/seed/seed_demo_data.sql
 --
@@ -30,7 +30,7 @@ CREATE FUNCTION pg_temp.mv(p_store bigint, p_lot bigint, p_status text, p_qty in
     RETURNS void LANGUAGE sql AS
 $$
 INSERT INTO stock_movement (store_id, product_id, stock_status, quantity_change, movement_type, sales_order_id,
-                            goods_receipt_id, transfer_order_id, stock_count_id, reason, performed_by, occurred_at,
+                            goods_receipt_note_id, transfer_order_id, stock_count_id, reason, performed_by, occurred_at,
                             lot_id, inventory_period_id, unit_cost, value)
 SELECT p_store, l.product_id, p_status, p_qty, p_type, p_so, p_gr, p_to, p_sc, p_reason, p_by, p_at,
        l.id, ip.id, l.purchase_unit_price, p_qty::bigint * l.purchase_unit_price
@@ -249,7 +249,7 @@ BEGIN
     sup2 := (SELECT id FROM supplier WHERE supplier_code = 'NCC002');
     sup3 := (SELECT id FROM supplier WHERE supplier_code = 'NCC003');
     sup4 := (SELECT id FROM supplier WHERE supplier_code = 'NCC004');
-    PERFORM setval('supplier_code_seq', 5, false); -- Codes created in the app continue at NCC005 (V12).
+    PERFORM setval('supplier_code_seq', 5, false); -- Codes created in the app continue at NCC005.
 
     INSERT INTO customer (customer_name, phone, address, tax_code, credit_status, created_by, created_at, updated_at)
     SELECT v.name, v.phone, v.address, v.tax, v.credit, v.creator, opening_at - interval '1 day', opening_at - interval '1 day'
@@ -288,9 +288,9 @@ BEGIN
     -- ===== Opening stock: one completed OPENING count per store, one lot per product =====
     FOR st IN SELECT * FROM (VALUES (s_central, u_bm_kho, u_kho1, 'c'), (s_cg, u_bm_cg, u_cg1, 'cg'),
                                     (s_hd, u_bm_hd, u_hd1, 'hd')) AS t(store_id, bm, staff, k) LOOP
-        INSERT INTO stock_count (store_id, count_type, scope_type, scope_note, status, created_by, counting_started_at,
+        INSERT INTO stock_count (store_id, count_type, count_date, scope_type, scope_note, status, created_by, counting_started_at,
                                  confirmed_by, confirmed_at, approved_by, approved_at, created_at)
-        VALUES (st.store_id, 'OPENING', 'WHOLE', 'Kiểm kê đầu kỳ khi đưa hệ thống vào sử dụng', 'COMPLETED', st.bm,
+        VALUES (st.store_id, 'OPENING', opening_at::date, 'WHOLE', 'Kiểm kê đầu kỳ khi đưa hệ thống vào sử dụng', 'COMPLETED', st.bm,
                 opening_at, st.bm, opening_at + interval '4 hours', u_owner, opening_at + interval '6 hours',
                 opening_at - interval '1 hour')
         RETURNING id INTO sc_cycle;
@@ -317,81 +317,81 @@ BEGIN
 
     -- ===== Supplier purchases into the central store (current month) =====
     -- GRR1: fully received, confirmed, no discrepancy.
-    INSERT INTO goods_receipt_request (supplier_id, store_id, expected_arrival, note, status, created_by, created_at, updated_at)
+    INSERT INTO purchase_order (supplier_id, store_id, expected_arrival, note, status, created_by, created_at, updated_at)
     VALUES (sup2, s_central, pg_temp.ts(0.15)::date, 'Nhập nhớt định kỳ', 'FULLY_RECEIVED', u_owner, pg_temp.ts(0.1), pg_temp.ts(0.2))
     RETURNING id INTO grr1;
-    INSERT INTO goods_receipt_request_line (goods_receipt_request_id, product_id, ordered_qty, purchase_price) VALUES
+    INSERT INTO purchase_order_line (purchase_order_id, product_id, ordered_qty, purchase_price) VALUES
         (grr1, pg_temp.pid('NHOT-MOTUL-08'), 48, 97000),
         (grr1, pg_temp.pid('NHOT-CASTROL-1L'), 36, 117000),
         (grr1, pg_temp.pid('NHOT-HONDA-HS'), 60, 22000);
-    INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, delivery_document_no, arrived_at, status,
+    INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, delivery_document_no, arrived_at, status,
                                recorded_by, submitted_at, confirmed_by, confirmed_at)
     VALUES ('SUPPLIER_DELIVERY', grr1, 'PGH-SV-0001', pg_temp.ts(0.15), 'CONFIRMED', u_kho1, pg_temp.ts(0.16),
             u_bm_kho, pg_temp.ts(0.17))
     RETURNING id INTO gr1;
-    INSERT INTO goods_receipt_line (goods_receipt_id, product_id, document_qty, delivered_qty, passed_qty, unit_price,
+    INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, delivered_qty, passed_qty, unit_price,
                                     manufacturer_lot_no, manufacture_date, expiry_date)
     SELECT gr1, l.product_id, l.ordered_qty, l.ordered_qty, l.ordered_qty, l.purchase_price,
            'SV-' || to_char(pg_temp.ts(0.15), 'YYMMDD'), (pg_temp.ts(0.15) - interval '2 months')::date,
            (pg_temp.ts(0.15) + interval '3 years')::date
-    FROM goods_receipt_request_line l WHERE l.goods_receipt_request_id = grr1;
+    FROM purchase_order_line l WHERE l.purchase_order_id = grr1;
 
     -- GRR2: partly received; 12 on the delivery note, 10 arrived, 2 of them damaged, so a discrepancy case is open.
-    INSERT INTO goods_receipt_request (supplier_id, store_id, expected_arrival, status, created_by, created_at, updated_at)
+    INSERT INTO purchase_order (supplier_id, store_id, expected_arrival, status, created_by, created_at, updated_at)
     VALUES (sup1, s_central, pg_temp.ts(0.4)::date, 'RECEIVING', u_owner, pg_temp.ts(0.3), pg_temp.ts(0.45))
     RETURNING id INTO grr2;
-    INSERT INTO goods_receipt_request_line (goods_receipt_request_id, product_id, ordered_qty, purchase_price) VALUES
+    INSERT INTO purchase_order_line (purchase_order_id, product_id, ordered_qty, purchase_price) VALUES
         (grr2, pg_temp.pid('MPH-VISION'), 30, 78000),
         (grr2, pg_temp.pid('CUROA-VISION'), 12, 190000);
-    INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, delivery_document_no, arrived_at, status,
+    INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, delivery_document_no, arrived_at, status,
                                recorded_by, submitted_at, confirmed_by, confirmed_at)
     VALUES ('SUPPLIER_DELIVERY', grr2, 'PGH-MP-0107', pg_temp.ts(0.4), 'CONFIRMED', u_kho2, pg_temp.ts(0.41),
             u_bm_kho, pg_temp.ts(0.42))
     RETURNING id INTO gr2;
-    INSERT INTO goods_receipt_line (goods_receipt_id, product_id, document_qty, delivered_qty, passed_qty, damaged_qty, unit_price)
+    INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, delivered_qty, passed_qty, damaged_qty, unit_price)
     VALUES (gr2, pg_temp.pid('MPH-VISION'), 30, 30, 30, 0, 78000),
            (gr2, pg_temp.pid('CUROA-VISION'), 12, 10, 8, 2, 190000);
 
     -- Lots and movements for both confirmed supplier receipts (passed goods AVAILABLE, damaged goods DAMAGED).
-    FOR grl IN SELECT l.id FROM goods_receipt_line l WHERE l.goods_receipt_id IN (gr1, gr2) ORDER BY l.id LOOP
-        INSERT INTO lot (product_id, source_type, goods_receipt_line_id, supplier_id, store_id, received_date,
+    FOR grl IN SELECT l.id FROM goods_receipt_note_line l WHERE l.goods_receipt_note_id IN (gr1, gr2) ORDER BY l.id LOOP
+        INSERT INTO lot (product_id, source_type, goods_receipt_note_line_id, supplier_id, store_id, received_date,
                          purchase_unit_price, manufacturer_lot_no, manufacture_date, expiry_date)
         SELECT l.product_id, 'RECEIPT', l.id, r.supplier_id, s_central, g.arrived_at::date, l.unit_price,
                l.manufacturer_lot_no, l.manufacture_date, l.expiry_date
-        FROM goods_receipt_line l JOIN goods_receipt g ON g.id = l.goods_receipt_id
-        JOIN goods_receipt_request r ON r.id = g.goods_receipt_request_id
+        FROM goods_receipt_note_line l JOIN goods_receipt_note g ON g.id = l.goods_receipt_note_id
+        JOIN purchase_order r ON r.id = g.purchase_order_id
         WHERE l.id = grl
         RETURNING id INTO v_lot;
         PERFORM pg_temp.mv(s_central, v_lot, 'AVAILABLE', l.passed_qty, 'RECEIPT_CONFIRMED', g.confirmed_by,
                            g.confirmed_at, NULL, g.id, NULL, NULL, NULL)
-        FROM goods_receipt_line l JOIN goods_receipt g ON g.id = l.goods_receipt_id WHERE l.id = grl AND l.passed_qty > 0;
+        FROM goods_receipt_note_line l JOIN goods_receipt_note g ON g.id = l.goods_receipt_note_id WHERE l.id = grl AND l.passed_qty > 0;
         PERFORM pg_temp.mv(s_central, v_lot, 'DAMAGED', l.damaged_qty, 'RECEIPT_CONFIRMED', g.confirmed_by,
                            g.confirmed_at, NULL, g.id, NULL, NULL, 'Hàng móp méo khi vận chuyển')
-        FROM goods_receipt_line l JOIN goods_receipt g ON g.id = l.goods_receipt_id WHERE l.id = grl AND l.damaged_qty > 0;
+        FROM goods_receipt_note_line l JOIN goods_receipt_note g ON g.id = l.goods_receipt_note_id WHERE l.id = grl AND l.damaged_qty > 0;
     END LOOP;
 
-    INSERT INTO discrepancy_case (source_type, goods_receipt_id, product_id, short_qty, damaged_qty, return_required_qty,
+    INSERT INTO discrepancy_case (source_type, goods_receipt_note_id, product_id, short_qty, damaged_qty, return_required_qty,
                                   replacement_required_qty, status, opened_at)
     VALUES ('SUPPLIER', gr2, pg_temp.pid('CUROA-VISION'), 2, 2, 2, 4, 'OPEN', pg_temp.ts(0.42))
     RETURNING id INTO dc1;
 
     -- GRR3: goods just arrived and wait for inspection (no stock yet).
-    INSERT INTO goods_receipt_request (supplier_id, store_id, expected_arrival, status, created_by, created_at, updated_at)
+    INSERT INTO purchase_order (supplier_id, store_id, expected_arrival, status, created_by, created_at, updated_at)
     VALUES (sup3, s_central, pg_temp.ts(0.95)::date, 'RECEIVING', u_owner, pg_temp.ts(0.6), pg_temp.ts(0.95))
     RETURNING id INTO grr3;
-    INSERT INTO goods_receipt_request_line (goods_receipt_request_id, product_id, ordered_qty, purchase_price) VALUES
+    INSERT INTO purchase_order_line (purchase_order_id, product_id, ordered_qty, purchase_price) VALUES
         (grr3, pg_temp.pid('LOP-IRC-80'), 20, 285000),
         (grr3, pg_temp.pid('SAM-CS-17'), 40, 56000);
-    INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, delivery_document_no, arrived_at, status)
+    INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, delivery_document_no, arrived_at, status)
     VALUES ('SUPPLIER_DELIVERY', grr3, 'PGH-TC-2231', pg_temp.ts(0.95), 'AWAITING_INSPECTION')
     RETURNING id INTO gr3;
 
     -- GRR4: ordered, not delivered yet.
-    INSERT INTO goods_receipt_request (supplier_id, store_id, expected_arrival, note, status, created_by, created_at, updated_at)
+    INSERT INTO purchase_order (supplier_id, store_id, expected_arrival, note, status, created_by, created_at, updated_at)
     VALUES (sup4, s_central, (localtimestamp + interval '5 days')::date, 'Đặt ắc quy cho mùa mưa', 'AWAITING_DELIVERY',
             u_owner, pg_temp.ts(0.9), pg_temp.ts(0.9))
     RETURNING id INTO grr4;
-    INSERT INTO goods_receipt_request_line (goods_receipt_request_id, product_id, ordered_qty, purchase_price) VALUES
+    INSERT INTO purchase_order_line (purchase_order_id, product_id, ordered_qty, purchase_price) VALUES
         (grr4, pg_temp.pid('AQ-GS-5'), 20, 295000),
         (grr4, pg_temp.pid('AQ-GS-7'), 10, 425000);
 
@@ -408,11 +408,11 @@ BEGIN
     RETURNING id INTO tr1;
     INSERT INTO transfer_order_line (transfer_order_id, product_id, planned_qty, prepared_qty, dispatched_qty) VALUES
         (tr1, pg_temp.pid('NHOT-MOTUL-08'), 20, 20, 20), (tr1, pg_temp.pid('BUG-NGK-CPR9'), 10, 10, 10);
-    INSERT INTO goods_receipt (receipt_type, transfer_order_id, arrived_at, status, recorded_by, submitted_at,
+    INSERT INTO goods_receipt_note (receipt_type, transfer_order_id, arrived_at, status, recorded_by, submitted_at,
                                confirmed_by, confirmed_at)
     VALUES ('TRANSFER_IN', tr1, pg_temp.ts(0.27), 'CONFIRMED', u_cg1, pg_temp.ts(0.28), u_bm_cg, pg_temp.ts(0.3))
     RETURNING id INTO gr_tr;
-    INSERT INTO goods_receipt_line (goods_receipt_id, product_id, document_qty, delivered_qty, passed_qty)
+    INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, delivered_qty, passed_qty)
     SELECT gr_tr, product_id, dispatched_qty, dispatched_qty, dispatched_qty FROM transfer_order_line WHERE transfer_order_id = tr1;
     FOR st IN SELECT tl.product_id, tl.dispatched_qty AS qty, pg_temp.opening_lot(s_central, p.sku) AS lot
               FROM transfer_order_line tl JOIN product p ON p.id = tl.product_id WHERE tl.transfer_order_id = tr1 LOOP
@@ -544,13 +544,13 @@ BEGIN
 
     -- ===== Counting =====
     -- Cycle count in progress at Hà Đông (oil shelf).
-    INSERT INTO stock_count (store_id, inventory_period_id, count_type, scope_type, scope_note, status, created_by,
+    INSERT INTO stock_count (store_id, inventory_period_id, count_type, count_date, scope_type, scope_note, status, created_by,
                              counting_started_at, created_at)
-    VALUES (s_hd, p_cur, 'CYCLE', 'AREA', 'Kệ dầu nhớt', 'COUNTING', u_bm_hd, pg_temp.ts(0.96), pg_temp.ts(0.95))
+    VALUES (s_hd, p_cur, 'CYCLE', pg_temp.ts(0.96)::date, 'AREA', 'Kệ dầu nhớt', 'COUNTING', u_bm_hd, pg_temp.ts(0.96), pg_temp.ts(0.95))
     RETURNING id INTO sc_cycle;
-    -- Request from Cầu Giấy for a product count, waiting for the Owner's decision.
+    -- Owner asks Cầu Giấy to count the spark plugs; waiting for the Branch Manager to create the count.
     INSERT INTO stock_count_request (store_id, scope_type, reason, status, requested_by, requested_at)
-    VALUES (s_cg, 'PRODUCTS', 'Lệch số lượng bugi khi bán', 'PENDING', u_bm_cg, pg_temp.ts(0.97))
+    VALUES (s_cg, 'PRODUCTS', 'Lệch số lượng bugi khi bán', 'PENDING', u_owner, pg_temp.ts(0.97))
     RETURNING id INTO scr1;
     INSERT INTO stock_count_request_product (stock_count_request_id, product_id)
     VALUES (scr1, pg_temp.pid('BUG-NGK-CPR8')), (scr1, pg_temp.pid('BUG-NGK-CPR9'));
@@ -606,7 +606,7 @@ BEGIN
     WHERE b.store_id = s_hd AND b.stock_status = 'AVAILABLE' AND c.category_name = 'Dầu nhớt';
 
     -- ===== Warehouse tasks =====
-    INSERT INTO warehouse_task (task_type, goods_receipt_id, assigned_to, assigned_by, assigned_at, status, result_submitted_at) VALUES
+    INSERT INTO warehouse_task (task_type, goods_receipt_note_id, assigned_to, assigned_by, assigned_at, status, result_submitted_at) VALUES
         ('INSPECTION', gr1, u_kho1, u_bm_kho, pg_temp.ts(0.15), 'DONE', pg_temp.ts(0.16)),
         ('INSPECTION', gr2, u_kho2, u_bm_kho, pg_temp.ts(0.4), 'DONE', pg_temp.ts(0.41)),
         ('INSPECTION', gr3, u_kho1, u_bm_kho, pg_temp.ts(0.96), 'ASSIGNED', NULL);
@@ -626,7 +626,7 @@ BEGIN
         (u_owner, 'ADJUSTMENT_SUBMITTED', 'Có đề nghị điều chỉnh tồn kho chờ duyệt.', 'ADJUSTMENT_REQUEST', adj1, FALSE, pg_temp.ts(0.9), NULL),
         (u_owner, 'DISCREPANCY_OPENED', 'Phiếu nhập PGH-MP-0107 thiếu 2 và hỏng 2 dây curoa Vision.', 'DISCREPANCY_CASE', dc1, TRUE, pg_temp.ts(0.42), pg_temp.ts(0.45)),
         (u_bm_hd, 'PAYMENT_TO_VERIFY', 'Chuyển khoản của Garage Hải Nam chờ xác nhận.', 'SALES_ORDER', so2, FALSE, pg_temp.ts(0.72), NULL),
-        (u_kho1, 'TASK_ASSIGNED', 'Bạn được giao kiểm hàng phiếu PGH-TC-2231.', 'GOODS_RECEIPT', gr3, FALSE, pg_temp.ts(0.96), NULL),
+        (u_kho1, 'TASK_ASSIGNED', 'Bạn được giao kiểm hàng phiếu PGH-TC-2231.', 'GOODS_RECEIPT_NOTE', gr3, FALSE, pg_temp.ts(0.96), NULL),
         (u_kho2, 'TASK_ASSIGNED', 'Bạn được giao chuẩn bị hàng điều chuyển đi Hà Đông.', 'TRANSFER_ORDER', tr3, FALSE, pg_temp.ts(0.86), NULL),
         (u_hd1, 'TASK_ASSIGNED', 'Bạn được giao soạn hàng cho đơn của chị Bích.', 'SALES_ORDER', so4, FALSE, pg_temp.ts(0.98), NULL),
         (u_hd2, 'TASK_ASSIGNED', 'Bạn được giao kiểm kê kệ dầu nhớt.', 'STOCK_COUNT', sc_cycle, FALSE, pg_temp.ts(0.96), NULL),

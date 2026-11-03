@@ -96,7 +96,7 @@ public class Product {
         updatedAt = now;
     }
 
-    /** UC-17: no new sales orders or goods receipt requests; history stays (BR-07). */
+    /** UC-17: no new sales orders or purchase orders; history stays (BR-07). */
     public void discontinue(LocalDateTime now) {
         status = ProductStatus.DISCONTINUED;
         discontinuedAt = now;

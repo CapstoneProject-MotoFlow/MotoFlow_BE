@@ -32,8 +32,8 @@ public class DiscrepancyCase {
     @Column(name = "source_type", nullable = false, length = 10)
     private SourceType sourceType;
 
-    @Column(name = "goods_receipt_id")
-    private Long goodsReceiptId;
+    @Column(name = "goods_receipt_note_id")
+    private Long goodsReceiptNoteId;
 
     @Column(name = "transfer_order_id")
     private Long transferOrderId;

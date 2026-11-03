@@ -1,6 +1,5 @@
 package fu.hl.g64.motorflow.transfer.entity;
 
-import fu.hl.g64.motorflow.transfer.entity.enums.PartialSupplyDecision;
 import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -33,16 +32,6 @@ public class ReplenishmentRequest {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private ReplenishmentRequestStatus status;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "partial_supply_decision", length = 10)
-    private PartialSupplyDecision partialSupplyDecision;
-
-    @Column(name = "partial_decided_by")
-    private Long partialDecidedBy;
-
-    @Column(name = "partial_decided_at")
-    private LocalDateTime partialDecidedAt;
 
     @Column(length = 500)
     private String note;
