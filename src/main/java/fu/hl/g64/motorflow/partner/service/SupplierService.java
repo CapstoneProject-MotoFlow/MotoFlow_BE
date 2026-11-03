@@ -88,26 +88,23 @@ public class SupplierService {
                 discrepancies.countBySupplierAndStatus(id, DiscrepancyCaseStatus.OPEN));
     }
 
-    /** UC-31. A new supplier is active. */
+    /** UC-31. A new supplier is active and gets the next generated code. */
     @Transactional
     public SupplierResponse create(AuthenticatedUser actor, SupplierRequest request) {
-        if (!StringUtils.hasText(request.supplierCode())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        String name = normalizeName(request.supplierName());
+        if (suppliers.existsBySupplierNameIgnoreCase(name)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG78", name);
         }
-        String code = request.supplierCode().strip().toUpperCase(Locale.ROOT);
-        if (suppliers.existsBySupplierCode(code)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG72", code);
-        }
+        String code = "NCC%03d".formatted(suppliers.nextCodeNumber());
 
         LocalDateTime now = LocalDateTime.now(clock);
-        Supplier supplier = Supplier.create(code, request.supplierName().strip(), blankToNull(request.contactName()),
-                blankToNull(request.phone()), blankToNull(request.email()), blankToNull(request.address()),
+        Supplier supplier = Supplier.create(code, name, request.contactName().strip(),
+                request.phone().strip(), blankToNull(request.email()), blankToNull(request.address()),
                 blankToNull(request.taxCode()), now);
         try {
             supplier = suppliers.saveAndFlush(supplier);
         } catch (DataIntegrityViolationException e) {
-            // Another Owner session created the same code a moment earlier.
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG72", code);
+            throw conflict(e, name);
         }
         auditLog.save(AuditLog.record("SUPPLIER", supplier.getId(), "SUPPLIER_CREATED", actor.id(), null, now));
         return SupplierResponse.from(supplier);
@@ -117,9 +114,18 @@ public class SupplierService {
     @Transactional
     public SupplierResponse update(AuthenticatedUser actor, long id, SupplierRequest request) {
         Supplier supplier = find(id);
+        String name = normalizeName(request.supplierName());
+        if (suppliers.existsBySupplierNameIgnoreCaseAndIdNot(name, id)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG78", name);
+        }
         LocalDateTime now = LocalDateTime.now(clock);
-        supplier.update(request.supplierName().strip(), blankToNull(request.contactName()), blankToNull(request.phone()),
+        supplier.update(name, request.contactName().strip(), request.phone().strip(),
                 blankToNull(request.email()), blankToNull(request.address()), blankToNull(request.taxCode()), now);
+        try {
+            suppliers.saveAndFlush(supplier);
+        } catch (DataIntegrityViolationException e) {
+            throw conflict(e, name);
+        }
         auditLog.save(AuditLog.record("SUPPLIER", id, "SUPPLIER_UPDATED", actor.id(), null, now));
         return SupplierResponse.from(supplier);
     }
@@ -187,6 +193,22 @@ public class SupplierService {
 
     private Supplier find(long id) {
         return suppliers.findById(id).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG73"));
+    }
+
+    /** Trimmed, with repeated spaces made single, so "Minh  Phát" and "Minh Phát" are the same name. */
+    private static String normalizeName(String name) {
+        return name.strip().replaceAll("\\s+", " ");
+    }
+
+    /**
+     * Another Owner saved the same name a moment earlier (ux_supplier_name_ci, V13), or the code sequence met a code
+     * typed in by hand before codes were generated.
+     */
+    private static BusinessException conflict(DataIntegrityViolationException e, String name) {
+        String detail = String.valueOf(e.getMostSpecificCause().getMessage());
+        return detail.contains("ux_supplier_name_ci")
+                ? new BusinessException(HttpStatus.CONFLICT, "MSG78", name)
+                : new BusinessException(HttpStatus.CONFLICT, "MSG72");
     }
 
     private static String blankToNull(String value) {

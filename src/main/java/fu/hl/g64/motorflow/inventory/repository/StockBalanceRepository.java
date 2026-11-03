@@ -25,6 +25,13 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
                   + b.awaitingSupplierReturnQty + b.inTransitQty > 0""")
     long countProductsHeldBy(Long storeId);
 
+    /** Parts still on sale that the store is set up to sell (a row in its warehouse, e.g. copied in UC-05). */
+    @Query("""
+            select b.productId from StockBalance b join Product p on p.id = b.productId
+            where b.storeId = :storeId
+              and p.status = fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus.ACTIVE""")
+    List<Long> findActiveProductIdsOf(Long storeId);
+
     List<StockBalance> findByStoreIdAndProductIdIn(Long storeId, Collection<Long> productIds);
 
     /** Rows of a warehouse that place a part still on sale or set its low-stock threshold (UC-05). */

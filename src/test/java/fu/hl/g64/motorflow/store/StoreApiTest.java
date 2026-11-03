@@ -130,7 +130,7 @@ class StoreApiTest extends IntegrationTest {
     void aStoreClosesOnlyWithNoStockAndNoActiveAccounts() throws Exception {
         long central = createdId(createStore(store("CH01", true)));
         long branch = createdId(createStore(store("CH02", false)));
-        updateStore(branch, update("ACTIVE", false)).andExpect(status().isOk());
+        openDirectly(branch);
 
         updateStore(central, update("INACTIVE", true))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG65"));
@@ -153,13 +153,15 @@ class StoreApiTest extends IntegrationTest {
 
         updateStore(branch, update("INACTIVE", false))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("INACTIVE"));
-        // Closed stores still take edits, and reopen without the closing checks.
+        // Closed stores still take edits; they reopen only by going back to planned (PM 02/11).
         jdbc.update("UPDATE user_account SET status = 'ACTIVE' WHERE id = ?", staff.getId());
         updateStore(branch, update("INACTIVE", false)).andExpect(status().isOk());
-        updateStore(branch, update("PLANNED", false))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG68"));
         updateStore(branch, update("ACTIVE", false))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG83"))
+                .andExpect(jsonPath("$.message")
+                        .value("Cửa hàng đã ngừng hoạt động phải chuyển về trạng thái chuẩn bị trước khi mở lại."));
+        updateStore(branch, update("PLANNED", false))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PLANNED"));
 
         long planned = createdId(createStore(store("CH03", false)));
         updateStore(planned, update("PLANNED", false)).andExpect(status().isOk());
@@ -169,14 +171,14 @@ class StoreApiTest extends IntegrationTest {
     @Test
     void updatesTheStore() throws Exception {
         long id = createdId(createStore(store("CH01", false)));
-        Map<String, Object> body = update("ACTIVE", false);
+        Map<String, Object> body = update("PLANNED", false);
         body.put("address", "Đà Nẵng");
 
         updateStore(id, body)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id))
                 .andExpect(jsonPath("$.storeName").value("Cửa hàng mới " + id))
-                .andExpect(jsonPath("$.status").value("ACTIVE"));
+                .andExpect(jsonPath("$.status").value("PLANNED"));
 
         assertThat(jdbc.queryForObject("SELECT address FROM store WHERE id = ?", String.class, id))
                 .isEqualTo("Đà Nẵng");
@@ -188,7 +190,7 @@ class StoreApiTest extends IntegrationTest {
     void listShowsActiveManagersAndProductsInStockAndFilters() throws Exception {
         createStore(store("CH01", true)).andExpect(status().isCreated());
         long branch = createdId(createStore(store("CH02", false)));
-        updateStore(branch, update("ACTIVE", false)).andExpect(status().isOk());
+        openDirectly(branch);
         createUser("bm01", Role.BRANCH_MANAGER, branch);
         UserAccount locked = createUser("bm02", Role.BRANCH_MANAGER, branch);
         jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", locked.getId());
@@ -197,8 +199,9 @@ class StoreApiTest extends IntegrationTest {
 
         listStores("")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[*].storeName", contains("Cửa hàng CH01", "Cửa hàng mới " + branch)))
+                .andExpect(jsonPath("$[*].storeName", contains("Cửa hàng CH01", "Cửa hàng CH02")))
                 .andExpect(jsonPath("$[1].managers[*].fullName", contains("Test bm01")))
+                .andExpect(jsonPath("$[1].managers[0].role").value("BRANCH_MANAGER"))
                 .andExpect(jsonPath("$[1].productsInStock").value(1));
         listStores("?status=ACTIVE").andExpect(jsonPath("$[*].id", contains((int) branch)));
         listStores("?central=true").andExpect(jsonPath("$[*].storeName", contains("Cửa hàng CH01")));
@@ -278,6 +281,123 @@ class StoreApiTest extends IntegrationTest {
     }
 
     @Test
+    void aPlannedStoreOpensOnlyWithAManagerPartsToSellAndTheirPrices() throws Exception {
+        long id = createdId(createStore(store("CH01", false)));
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG79"))
+                .andExpect(jsonPath("$.message").value("Cửa hàng không thể hoạt động do chưa có người quản lý."));
+        UserAccount locked = createUser("bm01", Role.BRANCH_MANAGER, id);
+        jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", locked.getId());
+        updateStore(id, update("ACTIVE", false)).andExpect(jsonPath("$.code").value("MSG79"));
+        createUser("bm02", Role.BRANCH_MANAGER, id);
+
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG80"))
+                .andExpect(jsonPath("$.message").value("Cửa hàng không thể hoạt động do chưa cấu hình hàng bán."));
+        long stopped = addProduct("SKU0", "DISCONTINUED");
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id) VALUES (?, ?)", id, stopped);
+        updateStore(id, update("ACTIVE", false)).andExpect(jsonPath("$.code").value("MSG80"));
+
+        long brake = addProduct("SKU1", "ACTIVE");
+        long chain = addProduct("SKU2", "ACTIVE");
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id) VALUES (?, ?), (?, ?)", id, brake, id, chain);
+        addRetailPrice(brake, LocalDateTime.now(clock).minusDays(1));
+        addRetailPrice(chain, LocalDateTime.now(clock).plusDays(1)); // Not in effect yet.
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG81"))
+                .andExpect(jsonPath("$.message").value("Cửa hàng không thể hoạt động do chưa thiết lập giá bán cho 1 phụ tùng."));
+
+        addRetailPrice(chain, LocalDateTime.now(clock).minusHours(1));
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+    }
+
+    @Test
+    void theOwnerMayManageAStoreAndThatLetsItOpen() throws Exception {
+        long id = createdId(createStore(store("CH01", false)));
+        long brake = addProduct("SKU1", "ACTIVE");
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id) VALUES (?, ?)", id, brake);
+        addRetailPrice(brake, LocalDateTime.now(clock).minusDays(1));
+
+        setOwnerManager(id, owner.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.ownerManagerId").value(owner.getId()))
+                .andExpect(jsonPath("$.managers[0].fullName").value("Test owner"))
+                .andExpect(jsonPath("$.managers[0].role").value("OWNER"));
+        listStores("?q=test owner").andExpect(jsonPath("$[*].id", contains((int) id)));
+        updateStore(id, update("ACTIVE", false)).andExpect(status().isOk());
+
+        UserAccount staff = createUser("staff01", Role.STAFF, id);
+        setOwnerManager(id, staff.getId())
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG82"));
+        setOwnerManager(9999L, owner.getId())
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG52"));
+
+        // Closing the store ends the Owner managing it, and a closed store takes no manager.
+        jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", staff.getId());
+        updateStore(id, update("INACTIVE", false))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.ownerManagerId").doesNotExist());
+        setOwnerManager(id, owner.getId())
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG46"));
+        setOwnerManager(id, null).andExpect(status().isOk());
+        assertThat(jdbc.queryForList("SELECT action FROM audit_log WHERE action LIKE 'STORE_OWNER%' ORDER BY id",
+                String.class)).containsExactly("STORE_OWNER_MANAGER_SET", "STORE_OWNER_MANAGER_REMOVED",
+                "STORE_OWNER_MANAGER_REMOVED");
+        assertThat(jdbc.queryForObject("SELECT reason FROM audit_log WHERE action = 'STORE_OWNER_MANAGER_REMOVED' "
+                + "ORDER BY id LIMIT 1", String.class)).isEqualTo("Đóng cửa hàng");
+    }
+
+    @Test
+    void aClosedStoreReopensThroughPlannedAndTheOpeningChecks() throws Exception {
+        long id = createdId(createStore(store("CH01", false)));
+        UserAccount bm = createUser("bm01", Role.BRANCH_MANAGER, id);
+        long brake = addProduct("SKU1", "ACTIVE");
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id) VALUES (?, ?)", id, brake);
+        addRetailPrice(brake, LocalDateTime.now(clock).minusDays(1));
+        updateStore(id, update("ACTIVE", false)).andExpect(status().isOk());
+
+        jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", bm.getId());
+        updateStore(id, update("INACTIVE", false)).andExpect(status().isOk());
+        updateStore(id, update("ACTIVE", false)).andExpect(jsonPath("$.code").value("MSG83"));
+        updateStore(id, update("PLANNED", false)).andExpect(status().isOk());
+
+        // Back to planned, the store takes a manager again and must pass MSG79-MSG81 to open.
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG79"));
+        setOwnerManager(id, owner.getId()).andExpect(status().isOk());
+        updateStore(id, update("ACTIVE", false))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("ACTIVE"));
+        updateStore(id, update("PLANNED", false))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG68"))
+                .andExpect(jsonPath("$.message").value("Cửa hàng đã mở thì không thể quay lại trạng thái chuẩn bị."));
+    }
+
+    @Test
+    void theEmployeesOfAStoreListManagersFirstWithTheirStatus() throws Exception {
+        long id = createdId(createStore(store("CH01", false)));
+        long other = createdId(createStore(store("CH02", false)));
+        createUser("staff02", Role.STAFF, id, "Bình");
+        UserAccount lockedStaff = createUser("staff01", Role.STAFF, id, "An");
+        jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", lockedStaff.getId());
+        createUser("bm01", Role.BRANCH_MANAGER, id, "Cường");
+        createUser("bm02", Role.BRANCH_MANAGER, other, "Dũng");
+        setOwnerManager(id, owner.getId()).andExpect(status().isOk());
+
+        employees(token, id)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].fullName", contains("Test owner", "Cường", "An", "Bình")))
+                .andExpect(jsonPath("$[*].role", contains("OWNER", "BRANCH_MANAGER", "STAFF", "STAFF")))
+                .andExpect(jsonPath("$[2].status").value("LOCKED"))
+                .andExpect(jsonPath("$[0].phone").doesNotExist());
+        employees(token, other).andExpect(jsonPath("$[*].fullName", contains("Dũng")));
+        employees(token, 9999L).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG52"));
+
+        createUser("admin01", Role.ADMIN, null);
+        employees(signIn("admin01"), id).andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(4)));
+        employees(signIn("bm01"), id).andExpect(status().isForbidden());
+    }
+
+    @Test
     void branchManagersMayNotManageStores() throws Exception {
         long id = createdId(createStore(store("CH01", false)));
         createUser("bm01", Role.BRANCH_MANAGER, id);
@@ -313,10 +433,25 @@ class StoreApiTest extends IntegrationTest {
                 + "VALUES (?, 'Phụ tùng', ?, 'Cái', ?, ?) RETURNING id", Long.class, sku, categoryId, status, owner.getId());
     }
 
+    /** Opens a store without the opening checks, for tests about something else. */
+    private void openDirectly(long storeId) {
+        jdbc.update("UPDATE store SET status = 'ACTIVE' WHERE id = ?", storeId);
+    }
+
+    private void addRetailPrice(long productId, LocalDateTime effectiveFrom) {
+        jdbc.update("INSERT INTO pricing_policy (policy_type, product_id, unit_price, effective_from, status, set_by, set_at) "
+                + "VALUES ('RETAIL_PRICE', ?, 150000, ?, 'ACTIVE', ?, ?)", productId, effectiveFrom, owner.getId(),
+                LocalDateTime.now(clock));
+    }
+
     private UserAccount createUser(String username, Role role, Long store) {
+        return createUser(username, role, store, "Test " + username);
+    }
+
+    private UserAccount createUser(String username, Role role, Long store, String fullName) {
         LocalDateTime now = LocalDateTime.now(clock);
         String hash = passwordEncoder.encode(PASSWORD);
-        UserAccount user = UserAccount.create(username, hash, "Test " + username, role, store, null, now);
+        UserAccount user = UserAccount.create(username, hash, fullName, role, store, null, now);
         user.changePassword(hash, now);
         return users.save(user);
     }
@@ -355,6 +490,17 @@ class StoreApiTest extends IntegrationTest {
         withName.putIfAbsent("storeName", "Cửa hàng mới " + id);
         return mvc.perform(put("/api/v1/stores/{id}", id).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(withName)));
+    }
+
+    private ResultActions setOwnerManager(long storeId, Long ownerId) throws Exception {
+        Map<String, Object> body = new HashMap<>();
+        body.put("ownerId", ownerId);
+        return mvc.perform(put("/api/v1/stores/{id}/owner-manager", storeId).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(jsonMapper.writeValueAsString(body)));
+    }
+
+    private ResultActions employees(String bearer, long storeId) throws Exception {
+        return mvc.perform(get("/api/v1/stores/{id}/employees", storeId).header(HttpHeaders.AUTHORIZATION, "Bearer " + bearer));
     }
 
     private long createdId(ResultActions created) throws Exception {

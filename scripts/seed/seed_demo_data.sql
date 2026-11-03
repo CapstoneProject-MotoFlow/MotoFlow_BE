@@ -1,5 +1,5 @@
 -- MotoFlow demo data (Nga Minh motorbike parts), for trying the system end to end on a local database.
--- Not a Flyway migration: run it by hand on a database already migrated to V11.
+-- Not a Flyway migration: run it by hand on a database already migrated to V13.
 --
 --   psql -h localhost -U root -d motoflow -v ON_ERROR_STOP=1 -f scripts/seed/seed_demo_data.sql
 --
@@ -249,6 +249,7 @@ BEGIN
     sup2 := (SELECT id FROM supplier WHERE supplier_code = 'NCC002');
     sup3 := (SELECT id FROM supplier WHERE supplier_code = 'NCC003');
     sup4 := (SELECT id FROM supplier WHERE supplier_code = 'NCC004');
+    PERFORM setval('supplier_code_seq', 5, false); -- Codes created in the app continue at NCC005 (V12).
 
     INSERT INTO customer (customer_name, phone, address, tax_code, credit_status, created_by, created_at, updated_at)
     SELECT v.name, v.phone, v.address, v.tax, v.credit, v.creator, opening_at - interval '1 day', opening_at - interval '1 day'
