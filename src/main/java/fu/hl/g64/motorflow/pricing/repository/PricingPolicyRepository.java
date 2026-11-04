@@ -15,4 +15,10 @@ public interface PricingPolicyRepository extends JpaRepository<PricingPolicy, Lo
             + "and p.status = fu.hl.g64.motorflow.pricing.entity.enums.PricingPolicyStatus.ACTIVE "
             + "and p.productId in :productIds and p.effectiveFrom <= :now order by p.effectiveFrom")
     List<PricingPolicy> findRetailPricesInEffect(Collection<Long> productIds, LocalDateTime now);
+
+    /** UC-107: the expiry-warning settings in effect, newest first; the first one applies (BR-76). */
+    @Query("select p from PricingPolicy p where p.policyType = fu.hl.g64.motorflow.pricing.entity.enums.PolicyType.EXPIRY_WARNING "
+            + "and p.status = fu.hl.g64.motorflow.pricing.entity.enums.PricingPolicyStatus.ACTIVE "
+            + "and p.effectiveFrom <= :now order by p.effectiveFrom desc, p.id desc")
+    List<PricingPolicy> findExpiryWarningsInEffect(LocalDateTime now);
 }

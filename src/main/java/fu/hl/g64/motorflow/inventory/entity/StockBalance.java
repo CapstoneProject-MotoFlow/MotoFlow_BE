@@ -103,4 +103,27 @@ public class StockBalance {
         }
         updatedAt = now;
     }
+
+    /** UC-51: where Staff find the part in this warehouse. */
+    public void moveTo(String newStorageArea, String newBinLocation, LocalDateTime now) {
+        storageArea = newStorageArea;
+        binLocation = newBinLocation;
+        updatedAt = now;
+    }
+
+    /** UC-52: null removes the threshold. */
+    public void setLowStockThreshold(Integer threshold, LocalDateTime now) {
+        lowStockThreshold = threshold;
+        updatedAt = now;
+    }
+
+    /** Sellable stock is below the threshold (UC-52, JOB-02). */
+    public boolean isLowStock() {
+        return lowStockThreshold != null && availableQty < lowStockThreshold;
+    }
+
+    /** Stock that carries the moving average (see InventoryPostingService): not wrong, damaged or awaiting return. */
+    public int valuedQty() {
+        return availableQty + awaitingInspectionQty + inTransitQty;
+    }
 }
