@@ -43,7 +43,7 @@ public abstract class IntegrationTest {
 
     /** Empties every table and puts the clock back to {@link #START}. */
     protected void resetDatabaseAndClock() {
-        jdbc.execute("TRUNCATE audit_log, auth_session, notification, warehouse_task, "
+        jdbc.execute("TRUNCATE audit_log, auth_session, notification, warehouse_task, inventory_period, "
                 + "goods_receipt_note, purchase_order, supplier, stock_balance, pricing_policy, product_identifier, "
                 + "product_image, product_vehicle_model, vehicle_model, product, part_category, user_account, store "
                 + "RESTART IDENTITY CASCADE");

@@ -41,4 +41,13 @@ public class LotBalance {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /** Adds (or removes, when negative) quantity; the posting service checked it stays at zero or above. */
+    public void change(int delta, LocalDateTime now) {
+        if (quantity + delta < 0) {
+            throw new IllegalStateException("lot_balance would go negative");
+        }
+        quantity += delta;
+        updatedAt = now;
+    }
 }

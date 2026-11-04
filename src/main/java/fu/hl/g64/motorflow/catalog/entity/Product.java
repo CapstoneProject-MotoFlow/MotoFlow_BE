@@ -14,6 +14,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 
 /** A spare part (SKU) stocked, priced and sold across the chain. */
@@ -107,5 +108,23 @@ public class Product {
         status = ProductStatus.ACTIVE;
         discontinuedAt = null;
         updatedAt = now;
+    }
+
+    /**
+     * Moving average after stock comes in (BR-74): {@code (heldQty x average + inQty x inUnitCost) / (heldQty + inQty)},
+     * chain-wide. With no average yet the first one is the incoming unit cost (the initial unit cost for an opening lot).
+     * Only {@code InventoryPostingService} calls this, with the product row locked.
+     */
+    public void receiveIntoAverage(long heldQty, int inQty, long inUnitCost) {
+        if (inQty <= 0) {
+            return;
+        }
+        BigDecimal in = BigDecimal.valueOf(inUnitCost);
+        if (movingAvgCost == null || heldQty <= 0) {
+            movingAvgCost = in.setScale(4, RoundingMode.HALF_UP);
+            return;
+        }
+        BigDecimal total = movingAvgCost.multiply(BigDecimal.valueOf(heldQty)).add(in.multiply(BigDecimal.valueOf(inQty)));
+        movingAvgCost = total.divide(BigDecimal.valueOf(heldQty + inQty), 4, RoundingMode.HALF_UP);
     }
 }
