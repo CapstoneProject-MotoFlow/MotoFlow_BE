@@ -11,6 +11,9 @@ import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
+import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
+import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.support.IntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +45,15 @@ class InventoryPostingServiceTest extends IntegrationTest {
 
     @Autowired
     private TransactionTemplate tx;
+
+    @Autowired
+    private StockBalanceRepository stockBalances;
+
+    @Autowired
+    private LotBalanceRepository lotBalances;
+
+    @Autowired
+    private ProductRepository products;
 
     private long owner;
     private long store;
@@ -220,16 +232,125 @@ class InventoryPostingServiceTest extends IntegrationTest {
         assertConsistent();
     }
 
+    @Test
+    void callerThatAlreadyLoadedTheStockBalanceDoesNotLoseAConcurrentPosting() throws Exception {
+        receive(grn, 10, 0, 100_000, null);
+        runWhileOtherSaleCommits(() -> stockBalances.findAll());
+        assertThat(balance(store, "available_qty")).isEqualTo(5);
+        assertConsistent();
+    }
+
+    @Test
+    void callerThatAlreadyLoadedTheLotBalancesDoesNotLoseAConcurrentPosting() throws Exception {
+        Lot lot = receive(grn, 10, 0, 100_000, null);
+        runWhileOtherSaleCommits(() -> lotBalances.findAll());
+        assertThat(lotQty(lot.getId(), store, "AVAILABLE")).isEqualTo(5);
+        assertConsistent();
+    }
+
+    @Test
+    void callerThatAlreadyLoadedTheProductDoesNotLoseAConcurrentAverage() throws Exception {
+        receive(grn, 10, 0, 100_000, null);
+        long otherGrn = newGrn("PX-2");
+        long lastGrn = newGrn("PX-3");
+        CountDownLatch loaded = new CountDownLatch(1);
+        CountDownLatch otherDone = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> a = pool.submit(() -> inTx(() -> {
+                products.findAll();
+                loaded.countDown();
+                await(otherDone);
+                return receiveInTx(lastGrn, 20, 160_000);
+            }));
+            Future<?> b = pool.submit(() -> {
+                await(loaded);
+                receive(otherGrn, 10, 0, 130_000, null);
+                otherDone.countDown();
+                return null;
+            });
+            b.get();
+            a.get();
+        } finally {
+            pool.shutdown();
+        }
+        // 20 held at 115,000 after the other receipt, then 20 more at 160,000: (20 x 115,000 + 20 x 160,000) / 40.
+        assertThat(avgCost()).isEqualByComparingTo("137500");
+        assertConsistent();
+    }
+
+    @Test
+    void chosenLotsMustHavePositiveQuantitiesAndNoRepeats() {
+        Lot a = receive(grn, 10, 0, 100_000, null);
+        Lot b = receive(newGrn("PX-2"), 10, 0, 100_000, null);
+
+        assertThatThrownBy(() -> inTx(() -> posting.takeOut(new OutPosting(store, product, StockStatus.AVAILABLE, 5,
+                List.of(new LotQuantity(a.getId(), 10), new LotQuantity(b.getId(), -5)), MovementType.SALE_ISSUE,
+                SourceRef.salesOrder(sale), owner, null))))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> inTx(() -> posting.takeOut(new OutPosting(store, product, StockStatus.AVAILABLE, 8,
+                List.of(new LotQuantity(a.getId(), 4), new LotQuantity(a.getId(), 4)), MovementType.SALE_ISSUE,
+                SourceRef.salesOrder(sale), owner, null))))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(balance(store, "available_qty")).isEqualTo(20);
+        assertConsistent();
+    }
+
+    /** Tx A runs {@code preload} first, waits while another sale of 3 commits, then sells 2 itself. 10 - 3 - 2 = 5. */
+    private void runWhileOtherSaleCommits(Runnable preload) throws Exception {
+        long otherSale = id("INSERT INTO sales_order (store_id, price_type, created_by) VALUES (" + store
+                + ", 'RETAIL', " + owner + ") RETURNING id");
+        CountDownLatch loaded = new CountDownLatch(1);
+        CountDownLatch otherDone = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> a = pool.submit(() -> inTx(() -> {
+                preload.run();
+                loaded.countDown();
+                await(otherDone);
+                return posting.takeOut(sale(2));
+            }));
+            Future<?> b = pool.submit(() -> {
+                await(loaded);
+                inTx(() -> posting.takeOut(new OutPosting(store, product, StockStatus.AVAILABLE, 3, null,
+                        MovementType.SALE_ISSUE, SourceRef.salesOrder(otherSale), owner, null)));
+                otherDone.countDown();
+                return null;
+            });
+            b.get();
+            a.get();
+        } finally {
+            pool.shutdown();
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------------------
 
+    private Lot receiveInTx(long grnId, int passed, long price) {
+        return newLot(grnId, passed, 0, price, null);
+    }
+
     private Lot receive(long grnId, int passed, int damaged, long price, LocalDate expiry) {
+        return inTx(() -> newLot(grnId, passed, damaged, price, expiry));
+    }
+
+    private Lot newLot(long grnId, int passed, int damaged, long price, LocalDate expiry) {
         long line = id("INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, "
                 + "delivered_qty, passed_qty, damaged_qty) VALUES (" + grnId + ", " + product + ", " + (passed + damaged)
                 + ", " + (passed + damaged) + ", " + passed + ", " + damaged + ") RETURNING id");
-        return inTx(() -> posting.receiveNewLot(new NewLotPosting(store, product, LotSourceType.RECEIPT, line,
+        return posting.receiveNewLot(new NewLotPosting(store, product, LotSourceType.RECEIPT, line,
                 supplier, TODAY, price, null, null, expiry,
                 Map.of(StockStatus.AVAILABLE, passed, StockStatus.DAMAGED, damaged),
-                MovementType.RECEIPT_CONFIRMED, SourceRef.goodsReceiptNote(grnId), owner, null)));
+                MovementType.RECEIPT_CONFIRMED, SourceRef.goodsReceiptNote(grnId), owner, null));
     }
 
     private long newGrn(String documentNo) {

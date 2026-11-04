@@ -15,8 +15,10 @@ import java.util.List;
  * (BR-29), so the three always agree. Movements go into the open inventory period of today's month; the month is
  * opened on first use, and a closed month is refused (MSG85).
  *
- * <p>Concurrency: the stock_balance row of the part and warehouse is locked first (and the product row before it when
- * the moving average changes), so two postings of the same part never overwrite each other or sell the same unit.
+ * <p>Concurrency: the stock_balance row of the part and warehouse is locked first, then the product row when the
+ * moving average changes, then the lot_balance rows. Every locked row is read again from the database after the lock,
+ * so an entity the caller loaded earlier in the transaction never hides another transaction's committed posting.
+ * Two postings of the same part therefore never overwrite each other or sell the same unit.
  * A caller that posts several parts in one transaction should post them in product id order to avoid deadlocks.
  *
  * <p>Posting the same source document twice for the same lot and status breaks the unique key of stock_movement,

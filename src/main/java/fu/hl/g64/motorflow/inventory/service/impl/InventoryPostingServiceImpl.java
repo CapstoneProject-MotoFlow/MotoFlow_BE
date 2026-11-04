@@ -23,6 +23,7 @@ import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockMovementRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -55,15 +57,17 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private final StockMovementRepository movements;
     private final InventoryPeriodRepository periods;
     private final Clock clock;
+    private final EntityManager em;
 
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
     public Lot receiveNewLot(NewLotPosting p) {
         LocalDateTime now = LocalDateTime.now(clock);
         InventoryPeriod period = openPeriod(now.toLocalDate());
-        Product product = products.findByIdForUpdate(p.productId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57"));
+        // Lock order everywhere: stock_balance, then product, then lot_balance.
         StockBalance balance = lockBalance(p.storeId(), p.productId(), now);
+        Product product = fresh(products.findByIdForUpdate(p.productId())
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
 
         int available = p.quantities().getOrDefault(StockStatus.AVAILABLE, 0);
         product.receiveIntoAverage(stockBalances.sumValuedQuantity(p.productId()), available, p.purchaseUnitPrice());
@@ -181,7 +185,14 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         List<Pick> picks = new ArrayList<>();
         if (wanted != null && !wanted.isEmpty()) {
             int total = 0;
+            Set<Long> seen = new HashSet<>();
             for (LotQuantity w : wanted) {
+                if (w.quantity() <= 0) {
+                    throw new IllegalArgumentException("lot " + w.lotId() + " must have a positive quantity");
+                }
+                if (!seen.add(w.lotId())) {
+                    throw new IllegalArgumentException("lot " + w.lotId() + " is listed twice");
+                }
                 Lot lot = lots.findById(w.lotId())
                         .filter(l -> l.getProductId().equals(product.getId()))
                         .orElseThrow(() -> new IllegalArgumentException("lot " + w.lotId() + " is not of this part"));
@@ -202,7 +213,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         }
         int left = quantity;
         int usable = 0;
-        for (LotBalance lb : lotBalances.findPickableForUpdate(storeId, product.getId(), status)) {
+        for (LotBalance locked : lotBalances.findPickableForUpdate(storeId, product.getId(), status)) {
+            LotBalance lb = fresh(locked);
             Lot lot = lots.findById(lb.getLotId()).orElseThrow();
             if (freshOnly && lot.isExpiredOn(today)) {
                 continue;
@@ -233,12 +245,23 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
 
     private StockBalance lockBalance(Long storeId, Long productId, LocalDateTime now) {
         stockBalances.insertIfMissing(storeId, productId, now);
-        return stockBalances.findForUpdate(storeId, productId).orElseThrow();
+        return fresh(stockBalances.findForUpdate(storeId, productId).orElseThrow());
     }
 
     private LotBalance lotBalance(Long lotId, Long storeId, StockStatus status, LocalDateTime now) {
         lotBalances.insertIfMissing(lotId, storeId, status.name(), now);
-        return lotBalances.findForUpdate(lotId, storeId, status).orElseThrow();
+        return fresh(lotBalances.findForUpdate(lotId, storeId, status).orElseThrow());
+    }
+
+    /**
+     * Reads a row again from the database. A locking query returns the entity already in the persistence context
+     * without its new values, so without this a caller that loaded the row earlier would post on a stale quantity
+     * and overwrite another transaction's committed posting. Pending changes are flushed first so none is lost.
+     */
+    private <T> T fresh(T entity) {
+        em.flush();
+        em.refresh(entity);
+        return entity;
     }
 
     private void refreshDepletion(Lot lot) {
@@ -257,7 +280,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     }
 
     private Product product(Long productId) {
-        return products.findById(productId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57"));
+        return fresh(products.findById(productId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
     }
 
     /** Outgoing and moved stock is valued at the moving average; a part with no average yet uses the lot's price. */
