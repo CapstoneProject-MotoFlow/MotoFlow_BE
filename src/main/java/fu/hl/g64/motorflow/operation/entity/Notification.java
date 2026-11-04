@@ -58,4 +58,12 @@ public class Notification {
         notification.createdAt = now;
         return notification;
     }
+
+    /** UC-87: opening or ticking a notification marks it read once; reading it again changes nothing. */
+    public void markRead(LocalDateTime now) {
+        if (!isRead) {
+            isRead = true;
+            readAt = now;
+        }
+    }
 }

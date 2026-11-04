@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.account.service.impl;
 
 import fu.hl.g64.motorflow.account.dto.AccountResponse;
+import fu.hl.g64.motorflow.account.dto.BranchManagerResponse;
+import fu.hl.g64.motorflow.account.dto.ManagerPermissionsRequest;
 import fu.hl.g64.motorflow.account.dto.PermissionHistoryResponse;
 import fu.hl.g64.motorflow.account.dto.UpdatePermissionsRequest;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
@@ -31,6 +33,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -114,11 +117,47 @@ public class PermissionServiceImpl implements PermissionService {
         return entries.stream().map(entry -> PermissionHistoryResponse.from(entry, names.get(entry.getActorId()))).toList();
     }
 
+    // UC-38
+    @Transactional(readOnly = true)
+    @Override
+    public List<BranchManagerResponse> listBranchManagers(Long storeId) {
+        List<UserAccount> managers = users.findByRole(Role.BRANCH_MANAGER).stream()
+                .filter(m -> storeId == null || storeId.equals(m.getStoreId()))
+                .toList();
+        Map<Long, String> storeNames = stores.findAllById(managers.stream().map(UserAccount::getStoreId)
+                        .collect(Collectors.toSet())).stream()
+                .collect(Collectors.toMap(Store::getId, Store::getStoreName));
+        return managers.stream()
+                .map(m -> BranchManagerResponse.from(m, storeNames.get(m.getStoreId())))
+                .sorted(Comparator.comparing(BranchManagerResponse::storeName, Comparator.nullsLast(Comparator.naturalOrder()))
+                        .thenComparing(BranchManagerResponse::fullName))
+                .toList();
+    }
+
+    // UC-38
+    @Transactional
+    @Override
+    public BranchManagerResponse updateManagerPermissions(AuthenticatedUser owner, long managerId,
+                                                          ManagerPermissionsRequest request) {
+        UserAccount manager = users.findById(managerId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG48"));
+        if (manager.getRole() != Role.BRANCH_MANAGER) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG88");
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        String reason = StringUtils.hasText(request.reason()) ? request.reason().strip() : null;
+        setPermission(manager, PermissionCode.CATALOG_EDIT, request.catalogEdit(), reason, owner, now);
+        setPermission(manager, PermissionCode.RETAIL_PRICE_EDIT, request.retailPriceEdit(), reason, owner, now);
+        String storeName = manager.getStoreId() == null ? null
+                : stores.findById(manager.getStoreId()).map(Store::getStoreName).orElse(null);
+        return BranchManagerResponse.from(manager, storeName);
+    }
+
     private void setPermission(UserAccount account, PermissionCode code, boolean granted, String reason,
-                               AuthenticatedUser admin, LocalDateTime now) {
+                               AuthenticatedUser actor, LocalDateTime now) {
         if (account.setPermission(code, granted, now)) {
             auditLog.save(history(account.getId(), granted ? "PERMISSION_GRANTED" : "PERMISSION_REVOKED", code, null,
-                    null, reason, admin.id(), now));
+                    null, reason, actor.id(), now));
         }
     }
 

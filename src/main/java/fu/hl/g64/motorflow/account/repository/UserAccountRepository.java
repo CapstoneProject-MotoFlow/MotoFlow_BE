@@ -26,6 +26,8 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, Long> 
 
     List<UserAccount> findByRoleAndStatus(Role role, AccountStatus status);
 
+    List<UserAccount> findByRole(Role role);
+
     /** Row-locked so that two Admins locking or demoting each other at once cannot leave none. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select u from UserAccount u where u.role = fu.hl.g64.motorflow.account.entity.enums.Role.ADMIN "
