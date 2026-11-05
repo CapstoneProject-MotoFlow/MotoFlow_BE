@@ -67,4 +67,13 @@ public interface WarehouseTaskRepository extends JpaRepository<WarehouseTask, Lo
               and t.goodsReceiptNoteId in (select r.id from GoodsReceiptNote r
                   where r.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.SUPPLIER_DELIVERY)""")
     Page<WarehouseTask> findOpenSupplierInspections(Long userId, Pageable pageable);
+
+    /** The open inspection task (ASSIGNED or RESULT_SUBMITTED) of each of the given receipts that has one. */
+    @Query("""
+            select t from WarehouseTask t
+            where t.taskType = fu.hl.g64.motorflow.operation.entity.enums.TaskType.INSPECTION
+              and t.goodsReceiptNoteId in :receiptIds
+              and t.status in (fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.ASSIGNED,
+                               fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.RESULT_SUBMITTED)""")
+    List<WarehouseTask> findOpenInspections(Collection<Long> receiptIds);
 }

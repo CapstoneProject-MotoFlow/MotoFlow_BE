@@ -2,12 +2,15 @@ package fu.hl.g64.motorflow.receiving.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.receiving.dto.CancelPurchaseOrderRequest;
+import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptDetail;
+import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptRequest;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderRequest;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderSearch;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderSummary;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderUpdateRequest;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderView;
+import fu.hl.g64.motorflow.receiving.service.GoodsReceiptService;
 import fu.hl.g64.motorflow.receiving.service.PurchaseOrderService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,6 +42,7 @@ import java.time.LocalDate;
 public class PurchaseOrderController {
 
     private final PurchaseOrderService purchaseOrders;
+    private final GoodsReceiptService goodsReceipts;
 
     @Operation(summary = "Purchase orders of every warehouse (Owner) or of the user's warehouse (UC-39)",
             description = "q: PO number (with or without #) or supplier name or code. view: OPEN (default), "
@@ -80,6 +84,19 @@ public class PurchaseOrderController {
     public PurchaseOrderDetail update(@AuthenticationPrincipal AuthenticatedUser owner, @PathVariable long id,
                                       @Valid @RequestBody PurchaseOrderUpdateRequest request) {
         return purchaseOrders.update(owner, id, request);
+    }
+
+    @Operation(summary = "Record a delivery that arrived for the purchase order (UC-106)",
+            description = "Branch Manager of the receiving warehouse. Without replacementForCaseIds the GRN has one "
+                    + "line per PO line still outstanding; with them it is a replacement delivery for those "
+                    + "discrepancy cases of the PO. Next step: assign the inspection (UC-86).")
+    @PostMapping("/{id}/goods-receipt-notes")
+    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    public ResponseEntity<GoodsReceiptDetail> createReceipt(@AuthenticationPrincipal AuthenticatedUser manager,
+                                                            @PathVariable long id,
+                                                            @Valid @RequestBody GoodsReceiptRequest request) {
+        GoodsReceiptDetail created = goodsReceipts.create(manager, id, request);
+        return ResponseEntity.created(URI.create("/api/v1/goods-receipt-notes/" + created.id())).body(created);
     }
 
     @Operation(summary = "Cancel a purchase order that has no GRN yet (UC-42)")

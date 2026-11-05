@@ -105,6 +105,23 @@ public class PurchaseOrder {
         updatedAt = now;
     }
 
+    /** UC-106: its first delivery is recorded, so the PO can no longer change or be cancelled (BR-21). */
+    public void startReceiving(LocalDateTime now) {
+        if (status == PurchaseOrderStatus.AWAITING_DELIVERY) {
+            status = PurchaseOrderStatus.RECEIVING;
+            updatedAt = now;
+        }
+    }
+
+    /** UC-44 step 8: every line has been delivered in full (BR-22); later deliveries can only be replacements. */
+    public void completeReceiving(LocalDateTime now) {
+        if (status != PurchaseOrderStatus.RECEIVING) {
+            throw new IllegalStateException("purchase order " + id + " is " + status + ", expected RECEIVING");
+        }
+        status = PurchaseOrderStatus.FULLY_RECEIVED;
+        updatedAt = now;
+    }
+
     private void requireAwaitingDelivery() {
         if (status != PurchaseOrderStatus.AWAITING_DELIVERY) {
             throw new IllegalStateException("purchase order " + id + " is " + status + ", expected AWAITING_DELIVERY");
