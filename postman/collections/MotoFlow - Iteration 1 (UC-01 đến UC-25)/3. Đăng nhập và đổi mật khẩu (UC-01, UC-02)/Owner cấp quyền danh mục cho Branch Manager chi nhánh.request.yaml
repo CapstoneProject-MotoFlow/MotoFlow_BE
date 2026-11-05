@@ -1,5 +1,5 @@
 $kind: http-request
-url: "{{baseUrl}}/api/v1/accounts/{{bmId}}/permissions"
+url: "{{baseUrl}}/api/v1/branch-managers/{{bmId}}/permissions"
 method: PUT
 headers:
   Content-Type: application/json
@@ -7,19 +7,18 @@ body:
   type: json
   content: |-
     {
-      "role": "BRANCH_MANAGER",
-      "storeId": {{branchStoreId}},
       "catalogEdit": true,
+      "retailPriceEdit": false,
       "reason": "Phụ trách danh mục"
     }
 auth:
   type: bearer
   credentials:
-    token: "{{adminToken}}"
+    token: "{{ownerToken}}"
 scripts:
   - type: afterResponse
     code: |-
       pm.test('HTTP 200', () => pm.response.to.have.status(200));
-      pm.test('Có quyền CATALOG_EDIT', () => pm.expect(pm.response.json().permissions).to.include('CATALOG_EDIT'));
+      pm.test('Có quyền danh mục', () => pm.expect(pm.response.json().catalogEdit).to.eql(true));
     language: text/javascript
-order: 11000
+order: 6500
