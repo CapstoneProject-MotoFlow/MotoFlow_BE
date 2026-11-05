@@ -44,11 +44,11 @@ public interface WarehouseTaskRepository extends JpaRepository<WarehouseTask, Lo
     @Query("select t from WarehouseTask t where " + OF_DOCUMENT + " order by t.assignedAt desc, t.id desc")
     List<WarehouseTask> findHistory(TaskType type, Long documentId);
 
-    /** [assignedTo, number of tasks of this type given to them and not recorded yet], for the listed Staff members. */
+    /** [assignedTo, number of tasks of this type they hold and have not recorded yet], for the listed accounts. */
     @Query("""
             select t.assignedTo, count(t) from WarehouseTask t
-            where t.taskType = :type and t.assignedTo in :staffIds
+            where t.taskType = :type and t.assignedTo in :assigneeIds
               and t.status = fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.ASSIGNED
             group by t.assignedTo""")
-    List<Object[]> countAssignedByStaff(TaskType type, Collection<Long> staffIds);
+    List<Object[]> countAssignedByAssignee(TaskType type, Collection<Long> assigneeIds);
 }

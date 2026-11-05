@@ -17,7 +17,8 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * Assignment of a picking, inspection, dispatch-preparation or counting task to one Staff member (BR-32, UC-86).
+ * Assignment of a picking, inspection, dispatch-preparation or counting task to one person (BR-32, UC-86): a Staff
+ * member, or a Branch Manager who took it themself (MSG40).
  * A document has at most one open task (ASSIGNED or RESULT_SUBMITTED); giving it to someone else cancels the open task
  * and adds a new one, so the rows of a document are its assignment history.
  */
@@ -63,8 +64,11 @@ public class WarehouseTask {
     @Column(name = "result_submitted_at")
     private LocalDateTime resultSubmittedAt;
 
-    /** UC-86: gives the task of one document to a Staff member; the task type decides which document column is set. */
-    public static WarehouseTask assign(TaskType type, long documentId, long staffId, long assignedBy,
+    /**
+     * UC-86: gives the task of one document to a Staff member, or to the Branch Manager who takes it themself;
+     * the task type decides which document column is set.
+     */
+    public static WarehouseTask assign(TaskType type, long documentId, long assigneeId, long assignedBy,
                                        LocalDateTime now) {
         WarehouseTask task = new WarehouseTask();
         task.taskType = type;
@@ -74,7 +78,7 @@ public class WarehouseTask {
             case DISPATCH_PREPARATION -> task.transferOrderId = documentId;
             case COUNTING -> task.stockCountId = documentId;
         }
-        task.assignedTo = staffId;
+        task.assignedTo = assigneeId;
         task.assignedBy = assignedBy;
         task.assignedAt = now;
         task.status = WarehouseTaskStatus.ASSIGNED;

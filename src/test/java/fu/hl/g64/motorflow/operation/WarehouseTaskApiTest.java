@@ -38,10 +38,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** UC-86 Assign Warehouse Staff, and BR-32 for the features that record a task's result. */
+/** UC-86 Assign Warehouse Staff, and BR-32 and BR-26 for the features that record and confirm a task's result. */
 class WarehouseTaskApiTest extends ApiTestUsers {
 
     private static final String MSG39 = "Staff đã gửi kết quả cho chứng từ này nên không thể đổi người được giao.";
+    private static final String MSG40 = "Bạn tự nhận việc này nên kết quả phải do người khác xác nhận.";
 
     @Autowired
     private WarehouseTaskService warehouseTasks;
@@ -84,21 +85,25 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.canAssign").value(true))
                 .andExpect(jsonPath("$.blockedCode").doesNotExist())
                 .andExpect(jsonPath("$.current").doesNotExist())
-                // Active Staff of the store only, by name: not the locked one, nor Staff of another store.
-                .andExpect(jsonPath("$.eligibleStaff[*].fullName", contains("Test staff1", "Test staff2")))
-                .andExpect(jsonPath("$.eligibleStaff[*].openTasks", contains(0, 0)))
+                // Active Staff of the store by name (not the locked one, nor Staff of another store), then the
+                // manager themself.
+                .andExpect(jsonPath("$.eligibleAssignees[*].fullName", contains("Test staff1", "Test staff2", "Test bm")))
+                .andExpect(jsonPath("$.eligibleAssignees[*].self", contains(false, false, true)))
+                .andExpect(jsonPath("$.eligibleAssignees[*].openTasks", contains(0, 0, 0)))
                 .andExpect(jsonPath("$.history", hasSize(0)));
 
         assign(token, TaskType.PICKING, order, staff1.getId())
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.current.staffId").value(staff1.getId()))
-                .andExpect(jsonPath("$.current.staffName").value("Test staff1"))
+                .andExpect(jsonPath("$.current.assigneeId").value(staff1.getId()))
+                .andExpect(jsonPath("$.current.assigneeName").value("Test staff1"))
                 .andExpect(jsonPath("$.current.status").value("ASSIGNED"))
                 .andExpect(jsonPath("$.current.assignedById").value(manager.getId()))
                 .andExpect(jsonPath("$.current.assignedByName").value("Test bm"))
                 .andExpect(jsonPath("$.current.assignedAt").isNotEmpty())
                 .andExpect(jsonPath("$.current.resultSubmittedAt").doesNotExist())
-                .andExpect(jsonPath("$.eligibleStaff[*].openTasks", contains(1, 0)))
+                .andExpect(jsonPath("$.current.selfAssigned").value(false))
+                .andExpect(jsonPath("$.noticeCode").doesNotExist())
+                .andExpect(jsonPath("$.eligibleAssignees[*].openTasks", contains(1, 0, 0)))
                 .andExpect(jsonPath("$.history", hasSize(1)));
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM warehouse_task WHERE task_type = 'PICKING' "
@@ -116,10 +121,10 @@ class WarehouseTaskApiTest extends ApiTestUsers {
 
         assign(token, TaskType.PICKING, order, staff2.getId())
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.current.staffId").value(staff2.getId()))
-                .andExpect(jsonPath("$.history[*].staffName", contains("Test staff2", "Test staff1")))
+                .andExpect(jsonPath("$.current.assigneeId").value(staff2.getId()))
+                .andExpect(jsonPath("$.history[*].assigneeName", contains("Test staff2", "Test staff1")))
                 .andExpect(jsonPath("$.history[*].status", contains("ASSIGNED", "CANCELLED")))
-                .andExpect(jsonPath("$.eligibleStaff[*].openTasks", contains(0, 1)));
+                .andExpect(jsonPath("$.eligibleAssignees[*].openTasks", contains(0, 1, 0)));
 
         assertThat(notificationsOf(staff1)).containsExactly(
                 List.of("TASK_ASSIGNED", "Bạn được giao lấy hàng cho đơn bán #" + order + ".", "SALES_ORDER", order),
@@ -136,7 +141,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
 
         assign(token, TaskType.PICKING, order, staff1.getId())
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.current.staffId").value(staff1.getId()))
+                .andExpect(jsonPath("$.current.assigneeId").value(staff1.getId()))
                 .andExpect(jsonPath("$.history", hasSize(1)));
         assertThat(notificationsOf(staff1)).hasSize(1);
     }
@@ -172,16 +177,17 @@ class WarehouseTaskApiTest extends ApiTestUsers {
         jdbc.update("UPDATE goods_receipt_note SET status = 'AWAITING_RECOUNT' WHERE id = ?", receipt);
         assignment(token, TaskType.INSPECTION, receipt)
                 .andExpect(jsonPath("$.canAssign").value(true))
-                .andExpect(jsonPath("$.current.staffId").value(staff1.getId()))
+                .andExpect(jsonPath("$.current.assigneeId").value(staff1.getId()))
                 .andExpect(jsonPath("$.current.status").value("ASSIGNED"))
                 .andExpect(jsonPath("$.current.resultSubmittedAt").doesNotExist());
         assign(token, TaskType.INSPECTION, receipt, staff2.getId())
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.current.staffId").value(staff2.getId()));
+                .andExpect(jsonPath("$.current.assigneeId").value(staff2.getId()));
     }
 
     @Test
-    void onlyAnActiveStaffMemberOfTheStoreCanTakeTheTask() throws Exception {
+    void onlyActiveStaffOfTheStoreOrTheManagerThemselfCanTakeTheTask() throws Exception {
+        UserAccount peer = createUser("bm3", Role.BRANCH_MANAGER, store);
         long order = order("AWAITING_PICKING");
 
         assign(token, TaskType.PICKING, order, otherStoreStaff.getId())
@@ -191,11 +197,11 @@ class WarehouseTaskApiTest extends ApiTestUsers {
         assign(token, TaskType.PICKING, order, lockedStaff.getId())
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG41"));
-        // A Branch Manager cannot take the task either, not even their own store's one.
-        assign(token, TaskType.PICKING, order, manager.getId())
+        // Another Branch Manager of the store cannot be given the task: only the manager can take it themself.
+        assign(token, TaskType.PICKING, order, peer.getId())
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG122"))
-                .andExpect(jsonPath("$.message").value("Chỉ có thể giao việc cho tài khoản Staff."));
+                .andExpect(jsonPath("$.message").value("Chỉ có thể giao việc cho Staff hoặc tự nhận việc."));
         assign(token, TaskType.PICKING, order, 999_999)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG48"));
@@ -204,10 +210,66 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                         .content(json(Map.of("taskType", "PICKING", "documentId", order))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"))
-                .andExpect(jsonPath("$.fieldErrors.staffId").value("Vui lòng chọn Staff."));
+                .andExpect(jsonPath("$.fieldErrors.assigneeId").value("Vui lòng chọn người được giao."));
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM warehouse_task", Long.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification", Long.class)).isZero();
+    }
+
+    @Test
+    void aManagerCanTakeTheTaskThemselfButSomeoneElseConfirmsTheResult() throws Exception {
+        UserAccount peer = createUser("bm3", Role.BRANCH_MANAGER, store);
+        long order = order("AWAITING_PICKING");
+        long receipt = supplierReceipt(store, "AWAITING_INSPECTION");
+
+        assign(token, TaskType.PICKING, order, manager.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.assigneeId").value(manager.getId()))
+                .andExpect(jsonPath("$.current.selfAssigned").value(true))
+                .andExpect(jsonPath("$.noticeCode").value("MSG40"))
+                .andExpect(jsonPath("$.noticeMessage").value(MSG40))
+                .andExpect(jsonPath("$.eligibleAssignees[2].self").value(true))
+                .andExpect(jsonPath("$.eligibleAssignees[2].openTasks").value(1));
+        // MSG40 speaks to the manager who took the task; another manager of the store sees who holds it.
+        assignment(signIn("bm3"), TaskType.PICKING, order)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.assigneeName").value("Test bm"))
+                .andExpect(jsonPath("$.current.selfAssigned").value(true))
+                .andExpect(jsonPath("$.noticeCode").doesNotExist());
+        // Nobody is notified of a task they took themself.
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification", Long.class)).isZero();
+
+        // The manager records like the Staff member would, but cannot confirm their own result (BR-26).
+        warehouseTasks.requireAssignee(principal(manager), TaskType.PICKING, order);
+        warehouseTasks.submitResult(principal(manager), TaskType.PICKING, order);
+        assertThatThrownBy(() -> warehouseTasks.confirmResult(principal(manager), TaskType.PICKING, order))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG124"));
+        warehouseTasks.confirmResult(principal(peer), TaskType.PICKING, order);
+        assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE sales_order_id = ?", String.class,
+                order)).isEqualTo("DONE");
+
+        // A goods receipt note has its own SRS message for this.
+        assign(token, TaskType.INSPECTION, receipt, manager.getId()).andExpect(status().isOk());
+        warehouseTasks.submitResult(principal(manager), TaskType.INSPECTION, receipt);
+        assertThatThrownBy(() -> warehouseTasks.confirmResult(principal(manager), TaskType.INSPECTION, receipt))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG32"));
+    }
+
+    @Test
+    void aManagerCanHandTheirOwnTaskToAStaffMemberBeforeTheResult() throws Exception {
+        long count = stockCount("DRAFT");
+        assign(token, TaskType.COUNTING, count, manager.getId()).andExpect(status().isOk());
+        clock.advance(Duration.ofMinutes(5));
+
+        assign(token, TaskType.COUNTING, count, staff1.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.assigneeId").value(staff1.getId()))
+                .andExpect(jsonPath("$.noticeCode").doesNotExist())
+                .andExpect(jsonPath("$.history[*].selfAssigned", contains(false, true)))
+                .andExpect(jsonPath("$.history[*].status", contains("ASSIGNED", "CANCELLED")));
+        assertThat(notificationsOf(manager)).isEmpty();
+        assertThat(notificationsOf(staff1)).containsExactly(List.of("TASK_ASSIGNED",
+                "Bạn được giao đếm hàng cho phiếu kiểm kê #" + count + ".", "STOCK_COUNT", count));
     }
 
     @Test
@@ -286,7 +348,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
             assign(token, c.type(), c.id(), staff1.getId())
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.storeId").value(store))
-                    .andExpect(jsonPath("$.current.staffId").value(staff1.getId()));
+                    .andExpect(jsonPath("$.current.assigneeId").value(staff1.getId()));
         }
 
         assertThat(notificationsOf(staff1)).containsExactlyElementsOf(cases.stream()
@@ -321,7 +383,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                 .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG05"));
 
         // The Branch Manager confirms; while the count waits for the Owner, nobody else can take it.
-        warehouseTasks.confirmResult(TaskType.COUNTING, count);
+        warehouseTasks.confirmResult(principal(manager), TaskType.COUNTING, count);
         jdbc.update("UPDATE stock_count SET status = 'AWAITING_APPROVAL' WHERE id = ?", count);
         assertThat(taskStatuses(count)).containsExactly("DONE");
         assign(token, TaskType.COUNTING, count, staff2.getId())
@@ -385,10 +447,10 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                 .param("taskType", type.name()).param("documentId", String.valueOf(documentId)));
     }
 
-    private ResultActions assign(String bearer, TaskType type, long documentId, long staffId) throws Exception {
+    private ResultActions assign(String bearer, TaskType type, long documentId, long assigneeId) throws Exception {
         return mvc.perform(post("/api/v1/warehouse-tasks").header(HttpHeaders.AUTHORIZATION, bearer)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("taskType", type, "documentId", documentId, "staffId", staffId))));
+                .content(json(Map.of("taskType", type, "documentId", documentId, "assigneeId", assigneeId))));
     }
 
     /** [type, message, refType, refId] of the user's notifications, oldest first. */

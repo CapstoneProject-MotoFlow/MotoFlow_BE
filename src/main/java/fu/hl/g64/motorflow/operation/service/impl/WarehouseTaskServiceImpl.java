@@ -8,7 +8,7 @@ import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.repository.StockCountRepository;
 import fu.hl.g64.motorflow.operation.dto.AssignTaskRequest;
 import fu.hl.g64.motorflow.operation.dto.TaskAssignmentResponse;
-import fu.hl.g64.motorflow.operation.dto.TaskAssignmentResponse.StaffOption;
+import fu.hl.g64.motorflow.operation.dto.TaskAssignmentResponse.AssigneeOption;
 import fu.hl.g64.motorflow.operation.dto.TaskAssignmentResponse.TaskRow;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.text.Collator;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -43,6 +44,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -79,7 +81,7 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     @Transactional(readOnly = true)
     @Override
     public TaskAssignmentResponse assignment(AuthenticatedUser manager, TaskType type, long documentId) {
-        return view(type, documentId, requireManagedDocument(manager, type, documentId));
+        return view(manager, type, documentId, requireManagedDocument(manager, type, documentId));
     }
 
     // UC-86
@@ -94,9 +96,9 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         if (blocked != null) {
             throw new BusinessException(HttpStatus.CONFLICT, blocked);
         }
-        UserAccount staff = requireEligibleStaff(request.staffId(), document.storeId());
-        if (open.isPresent() && open.get().getAssignedTo().equals(staff.getId())) {
-            return view(type, documentId, document);
+        UserAccount assignee = requireEligibleAssignee(manager, request.assigneeId(), document.storeId());
+        if (open.isPresent() && open.get().getAssignedTo().equals(assignee.getId())) {
+            return view(manager, type, documentId, document);
         }
         String task = describe(type, documentId);
         open.ifPresent(previous -> {
@@ -104,19 +106,23 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             // A document has one open task at most (ux_warehouse_task_4), so the old one must close in the database
             // before the new one is inserted.
             tasks.flush();
-            notifications.notify(previous.getAssignedTo(), "TASK_REASSIGNED",
-                    "Việc %s đã được giao cho người khác.".formatted(task), refType(type), documentId);
+            if (previous.getAssignedTo() != manager.id()) {
+                notifications.notify(previous.getAssignedTo(), "TASK_REASSIGNED",
+                        "Việc %s đã được giao cho người khác.".formatted(task), refType(type), documentId);
+            }
         });
         try {
-            tasks.saveAndFlush(WarehouseTask.assign(type, documentId, staff.getId(), manager.id(),
+            tasks.saveAndFlush(WarehouseTask.assign(type, documentId, assignee.getId(), manager.id(),
                     LocalDateTime.now(clock)));
         } catch (DataIntegrityViolationException e) {
             // Another Branch Manager gave the document to someone between our read and our insert.
             throw new BusinessException(HttpStatus.CONFLICT, "MSG123");
         }
-        notifications.notify(staff.getId(), "TASK_ASSIGNED", "Bạn được giao %s.".formatted(task), refType(type),
-                documentId);
-        return view(type, documentId, document);
+        if (assignee.getId() != manager.id()) {
+            notifications.notify(assignee.getId(), "TASK_ASSIGNED", "Bạn được giao %s.".formatted(task),
+                    refType(type), documentId);
+        }
+        return view(manager, type, documentId, document);
     }
 
     // BR-32
@@ -146,10 +152,14 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
 
     @Transactional
     @Override
-    public void confirmResult(TaskType type, long documentId) {
-        tasks.findOpenForUpdate(type, documentId)
-                .orElseThrow(() -> new IllegalStateException("no open " + type + " task for " + documentId))
-                .complete();
+    public void confirmResult(AuthenticatedUser confirmer, TaskType type, long documentId) {
+        WarehouseTask task = tasks.findOpenForUpdate(type, documentId)
+                .orElseThrow(() -> new IllegalStateException("no open " + type + " task for " + documentId));
+        // BR-26: whoever recorded the result, a Branch Manager who took the task included (MSG40), cannot confirm it.
+        if (task.getAssignedTo() == confirmer.id()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, type == TaskType.INSPECTION ? "MSG32" : "MSG124");
+        }
+        task.complete();
     }
 
     @Transactional
@@ -219,17 +229,23 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         return resultIn ? "MSG39" : null;
     }
 
-    /** UC-86 step 4: an active Staff account of the document's store. */
-    private UserAccount requireEligibleStaff(long staffId, long storeId) {
-        UserAccount staff = users.findById(staffId)
+    /**
+     * UC-86 step 4: an active Staff account of the document's store, or the Branch Manager themself (MSG40; they
+     * already passed {@link #requireManagedDocument}).
+     */
+    private UserAccount requireEligibleAssignee(AuthenticatedUser manager, long assigneeId, long storeId) {
+        UserAccount assignee = users.findById(assigneeId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG48"));
-        if (staff.getRole() != Role.STAFF) {
+        if (assignee.getId() == manager.id()) {
+            return assignee;
+        }
+        if (assignee.getRole() != Role.STAFF) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG122");
         }
-        if (staff.getStatus() != AccountStatus.ACTIVE || !Objects.equals(staff.getStoreId(), storeId)) {
+        if (assignee.getStatus() != AccountStatus.ACTIVE || !Objects.equals(assignee.getStoreId(), storeId)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG41");
         }
-        return staff;
+        return assignee;
     }
 
     /** BR-32: the open task, if the user holds it and has not sent the result yet (MSG05 otherwise). */
@@ -239,26 +255,31 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.FORBIDDEN, "MSG05"));
     }
 
-    private TaskAssignmentResponse view(TaskType type, long documentId, Document document) {
+    private TaskAssignmentResponse view(AuthenticatedUser manager, TaskType type, long documentId,
+                                        Document document) {
         List<WarehouseTask> history = tasks.findHistory(type, documentId);
         Optional<WarehouseTask> open = history.stream()
                 .filter(task -> task.getStatus() == WarehouseTaskStatus.ASSIGNED
                         || task.getStatus() == WarehouseTaskStatus.RESULT_SUBMITTED)
                 .findFirst();
         String blocked = blockedCode(document, open);
+        // MSG40 speaks to the Branch Manager who took the task, so only they get it.
+        String notice = open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
 
         Collator byName = Collator.getInstance(VIETNAMESE);
         List<UserAccount> staff = users.findByRoleAndStoreIdAndStatus(Role.STAFF, document.storeId(),
                         AccountStatus.ACTIVE).stream()
                 .sorted(Comparator.comparing(UserAccount::getFullName, byName).thenComparing(UserAccount::getId))
                 .toList();
-        Map<Long, Long> openTasks = staff.isEmpty() ? Map.of()
-                : tasks.countAssignedByStaff(type, staff.stream().map(UserAccount::getId).toList()).stream()
-                .collect(Collectors.toMap(row -> (Long) row[0], row -> (Long) row[1]));
-        List<StaffOption> eligible = staff.stream()
-                .map(u -> new StaffOption(u.getId(), u.getUsername(), u.getFullName(),
-                        openTasks.getOrDefault(u.getId(), 0L)))
+        List<Long> candidates = Stream.concat(staff.stream().map(UserAccount::getId), Stream.of(manager.id()))
                 .toList();
+        Map<Long, Long> openTasks = tasks.countAssignedByAssignee(type, candidates).stream()
+                .collect(Collectors.toMap(row -> (Long) row[0], row -> (Long) row[1]));
+        List<AssigneeOption> eligible = new ArrayList<>();
+        staff.forEach(u -> eligible.add(new AssigneeOption(u.getId(), u.getUsername(), u.getFullName(), false,
+                openTasks.getOrDefault(u.getId(), 0L))));
+        eligible.add(new AssigneeOption(manager.id(), manager.username(), manager.fullName(), true,
+                openTasks.getOrDefault(manager.id(), 0L)));
 
         Set<Long> people = new HashSet<>();
         history.forEach(task -> {
@@ -268,12 +289,17 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         Map<Long, String> names = users.findAllById(people).stream()
                 .collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
         Function<WarehouseTask, TaskRow> row = task -> new TaskRow(task.getId(), task.getAssignedTo(),
-                names.get(task.getAssignedTo()), task.getStatus(), task.getAssignedBy(), names.get(task.getAssignedBy()),
-                task.getAssignedAt(), task.getResultSubmittedAt());
+                names.get(task.getAssignedTo()), task.getAssignedTo().equals(task.getAssignedBy()), task.getStatus(),
+                task.getAssignedBy(), names.get(task.getAssignedBy()), task.getAssignedAt(),
+                task.getResultSubmittedAt());
 
         return new TaskAssignmentResponse(type, documentId, document.storeId(), blocked == null, blocked,
-                blocked == null ? null : messages.getMessage(blocked, null, blocked, VIETNAMESE),
-                open.map(row).orElse(null), eligible, history.stream().map(row).toList());
+                text(blocked), notice, text(notice), open.map(row).orElse(null), eligible,
+                history.stream().map(row).toList());
+    }
+
+    private String text(String code) {
+        return code == null ? null : messages.getMessage(code, null, code, VIETNAMESE);
     }
 
     /** How the task reads in a notification, for example "lấy hàng cho đơn bán #12". */
