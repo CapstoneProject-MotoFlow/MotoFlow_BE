@@ -66,4 +66,24 @@ public class Payment {
 
     @Column(name = "rejection_reason")
     private String rejectionReason;
+
+    /**
+     * UC-66 steps 5-6: a debt payment the collector has verified on receipt, so it counts at once (BR-46). It belongs to
+     * no order; its payment_allocation rows tie it to the receivables it settles.
+     */
+    public static Payment verifiedDebtPayment(long amount, Long tenderedAmount, PaymentMethod method,
+                                              String transactionReference, long collector, LocalDateTime now) {
+        Payment payment = new Payment();
+        payment.paymentType = PaymentType.DEBT_PAYMENT;
+        payment.amount = amount;
+        payment.tenderedAmount = tenderedAmount;
+        payment.paymentMethod = method;
+        payment.transactionReference = transactionReference;
+        payment.status = PaymentStatus.VERIFIED;
+        payment.recordedBy = collector;
+        payment.recordedAt = now;
+        payment.verifiedBy = collector;
+        payment.verifiedAt = now;
+        return payment;
+    }
 }
