@@ -7,6 +7,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.List;
+
 public interface GoodsReceiptNoteRepository extends JpaRepository<GoodsReceiptNote, Long> {
 
     /**
@@ -38,4 +40,10 @@ public interface GoodsReceiptNoteRepository extends JpaRepository<GoodsReceiptNo
                               and t.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED)
               and """ + RECEIVED_AT_STORE)
     long countAwaitingInspectionWithoutTask(Long storeId);
+
+    /** BR-21: once a GRN is recorded for a PO, the PO can no longer be changed or cancelled. */
+    boolean existsByPurchaseOrderId(Long purchaseOrderId);
+
+    /** The deliveries of a PO in the order they arrived (UC-41). */
+    List<GoodsReceiptNote> findByPurchaseOrderIdOrderByArrivedAtAscIdAsc(Long purchaseOrderId);
 }

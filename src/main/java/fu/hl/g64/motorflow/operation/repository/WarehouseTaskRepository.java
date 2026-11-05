@@ -4,6 +4,8 @@ import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -51,4 +53,18 @@ public interface WarehouseTaskRepository extends JpaRepository<WarehouseTask, Lo
               and t.status = fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.ASSIGNED
             group by t.assignedTo""")
     List<Object[]> countAssignedByAssignee(TaskType type, Collection<Long> assigneeIds);
+
+    /**
+     * Inspections of supplier deliveries given to the user and not finished: the result is still to be recorded or
+     * waits for confirmation (UC-39 for Staff, and for a Branch Manager who took the task).
+     */
+    @Query("""
+            select t from WarehouseTask t
+            where t.assignedTo = :userId
+              and t.taskType = fu.hl.g64.motorflow.operation.entity.enums.TaskType.INSPECTION
+              and t.status in (fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.ASSIGNED,
+                               fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.RESULT_SUBMITTED)
+              and t.goodsReceiptNoteId in (select r.id from GoodsReceiptNote r
+                  where r.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.SUPPLIER_DELIVERY)""")
+    Page<WarehouseTask> findOpenSupplierInspections(Long userId, Pageable pageable);
 }
