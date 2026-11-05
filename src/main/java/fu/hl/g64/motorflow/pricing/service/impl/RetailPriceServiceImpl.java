@@ -114,6 +114,10 @@ public class RetailPriceServiceImpl implements RetailPriceService {
             // The suggestion moves with each supplier receipt and markup change: apply only the one the user saw.
             Suggestion suggestion = suggestions.suggest(List.of(product), suggestions.rulesInEffect(now))
                     .get(product.getId());
+            if (suggestion.suggestedPrice() == null) {
+                // No supplier receipt yet, or no markup rate applies (BR-69): there is nothing to apply.
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG145", product.getSku());
+            }
             if (!request.unitPrice().equals(suggestion.suggestedPrice())) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG126", product.getSku());
             }

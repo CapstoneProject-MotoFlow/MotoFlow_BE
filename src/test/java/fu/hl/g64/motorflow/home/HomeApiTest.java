@@ -172,6 +172,23 @@ class HomeApiTest extends IntegrationTest {
     }
 
     @Test
+    void aBranchManagerAlsoGetsTheTasksTheyTookOnThemself() throws Exception {
+        UserAccount manager = createUser("bm02", Role.BRANCH_MANAGER, branch);
+        task("INSPECTION", "goods_receipt_note_id", supplierDelivery(branch, "AWAITING_INSPECTION"), manager,
+                "ASSIGNED");
+        task("PICKING", "sales_order_id", order(branch, "PICKED"), manager, "RESULT_SUBMITTED");
+
+        // Only the types they hold work of are added, after the store's own work.
+        home(signIn("bm02"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.shortcuts[*].key", contains("ORDERS_TO_ASSIGN", "ORDERS_AWAITING_CONFIRMATION",
+                        "ORDERS_AWAITING_COMPLETION", "PAYMENTS_AWAITING_VERIFICATION", "RECEIPTS_TO_ASSIGN",
+                        "RECEIPTS_AWAITING_CONFIRMATION", "TRANSFERS_AWAITING_DISPATCH", "OPEN_DISCREPANCIES",
+                        "INSPECTION_TASKS")))
+                .andExpect(jsonPath("$.shortcuts[*].count", contains(0, 1, 0, 0, 0, 0, 0, 0, 1)));
+    }
+
+    @Test
     void staffGetTheTasksGivenToThemByType() throws Exception {
         UserAccount staff = createUser("staff02", Role.STAFF, branch);
         UserAccount colleague = createUser("staff03", Role.STAFF, branch);

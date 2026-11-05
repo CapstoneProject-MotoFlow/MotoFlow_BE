@@ -230,8 +230,12 @@ class RetailPriceApiTest extends PricingTestData {
                 .andExpect(jsonPath("$.code").value("MSG126"))
                 .andExpect(jsonPath("$.message").value(
                         "Giá gợi ý của phụ tùng MA-PHANH-01 đã thay đổi. Vui lòng tải lại để xem giá gợi ý mới."));
-        // A part never bought has no suggestion to apply.
-        setPrice(ownerToken, lamp, 50_000, TODAY, null, true).andExpect(status().isConflict());
+        // A part never bought has no suggestion to apply: reloading would not help.
+        setPrice(ownerToken, lamp, 50_000, TODAY, null, true)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG145"))
+                .andExpect(jsonPath("$.message").value("Phụ tùng DEN-01 chưa có giá gợi ý vì chưa có giá nhập từ nhà "
+                        + "cung cấp hoặc chưa có tỷ lệ cộng thêm."));
 
         setPrice(pricerToken, pad, 161_000, TODAY, "Theo giá nhập mới", true)
                 .andExpect(status().isOk())
