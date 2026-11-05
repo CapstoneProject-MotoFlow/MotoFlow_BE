@@ -101,7 +101,7 @@ src/main/java/fu/hl/g64/motorflow/
 ├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
 │                        PeriodStockBalance
 ├── adjustment/          AdjustmentRequest, AdjustmentStockLine, AdjustmentAmountLine
-└── operation/           WarehouseTask, Notification, Attachment; UC-86 giao việc kho cho Staff (BR-32), UC-87 thông báo
+└── operation/           WarehouseTask, Notification, Attachment; UC-86 giao việc kho (BR-32), UC-85 thông báo
 ```
 
 Mỗi feature dùng các package con sau, chỉ tạo package nào thực sự cần:
