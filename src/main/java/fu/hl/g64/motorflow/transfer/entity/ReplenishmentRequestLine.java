@@ -32,10 +32,4 @@ public class ReplenishmentRequestLine {
 
     @Column(name = "to_purchase_qty", nullable = false)
     private int toPurchaseQty;
-
-    @Column(name = "proposed_qty")
-    private Integer proposedQty;
-
-    @Column(name = "accepted_qty")
-    private Integer acceptedQty;
 }

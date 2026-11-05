@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.inventory.entity;
 
+import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -69,5 +70,37 @@ public class StockBalance {
         balance.lowStockThreshold = template.lowStockThreshold;
         balance.updatedAt = now;
         return balance;
+    }
+
+    /** Quantity held in one stock status. */
+    public int quantityOf(StockStatus status) {
+        return switch (status) {
+            case AVAILABLE -> availableQty;
+            case AWAITING_INSPECTION -> awaitingInspectionQty;
+            case WRONG_ITEM -> wrongItemQty;
+            case DAMAGED -> damagedQty;
+            case AWAITING_SUPPLIER_RETURN -> awaitingSupplierReturnQty;
+            case IN_TRANSIT -> inTransitQty;
+        };
+    }
+
+    /**
+     * Adds (or, when negative, removes) stock in one status. Only {@code InventoryPostingService} calls this, in the
+     * same transaction as the stock_movement row (BR-29); it has already checked that the result is not negative.
+     */
+    public void change(StockStatus status, int delta, LocalDateTime now) {
+        int result = quantityOf(status) + delta;
+        if (result < 0) {
+            throw new IllegalStateException("stock_balance would go negative");
+        }
+        switch (status) {
+            case AVAILABLE -> availableQty = result;
+            case AWAITING_INSPECTION -> awaitingInspectionQty = result;
+            case WRONG_ITEM -> wrongItemQty = result;
+            case DAMAGED -> damagedQty = result;
+            case AWAITING_SUPPLIER_RETURN -> awaitingSupplierReturnQty = result;
+            case IN_TRANSIT -> inTransitQty = result;
+        }
+        updatedAt = now;
     }
 }

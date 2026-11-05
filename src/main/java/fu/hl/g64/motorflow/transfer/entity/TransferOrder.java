@@ -62,13 +62,4 @@ public class TransferOrder {
 
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
-
-    @Column(name = "cancelled_by")
-    private Long cancelledBy;
-
-    @Column(name = "cancelled_at")
-    private LocalDateTime cancelledAt;
-
-    @Column(name = "cancellation_reason")
-    private String cancellationReason;
 }

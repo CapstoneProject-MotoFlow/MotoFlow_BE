@@ -12,17 +12,17 @@ import lombok.NoArgsConstructor;
 
 /** Agreed quantity and purchase price of one part. */
 @Entity
-@Table(name = "goods_receipt_request_line")
+@Table(name = "purchase_order_line")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class GoodsReceiptRequestLine {
+public class PurchaseOrderLine {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "goods_receipt_request_id", nullable = false)
-    private Long goodsReceiptRequestId;
+    @Column(name = "purchase_order_id", nullable = false)
+    private Long purchaseOrderId;
 
     @Column(name = "product_id", nullable = false)
     private Long productId;

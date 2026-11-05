@@ -17,8 +17,8 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * A Branch Manager's request to count the warehouse of their own store, decided by the Owner.
- * An approved request creates exactly one cycle count.
+ * The Owner's request that a store's Branch Manager count its warehouse (BR-78).
+ * The Branch Manager answers it by creating exactly one cycle count, which marks the request DONE.
  */
 @Entity
 @Table(name = "stock_count_request")
@@ -52,15 +52,6 @@ public class StockCountRequest {
 
     @Column(name = "requested_at", nullable = false)
     private LocalDateTime requestedAt;
-
-    @Column(name = "decided_by")
-    private Long decidedBy;
-
-    @Column(name = "decided_at")
-    private LocalDateTime decidedAt;
-
-    @Column(name = "decision_reason")
-    private String decisionReason;
 
     @Column(name = "cancelled_at")
     private LocalDateTime cancelledAt;

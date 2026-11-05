@@ -28,7 +28,7 @@ public final class AccountRules {
         }
     }
 
-    /** Same shape as the rows V11 moved over from permission_history; null values are left out. */
+    /** Same shape as the permission_history rows moved into audit_log; null values are left out. */
     public static AuditLog history(Long userId, String action, PermissionCode code, String oldValue, String newValue,
                                    String reason, Long changedBy, LocalDateTime now) {
         return AuditLog.record("USER_ACCOUNT", userId, action, changedBy, reason,

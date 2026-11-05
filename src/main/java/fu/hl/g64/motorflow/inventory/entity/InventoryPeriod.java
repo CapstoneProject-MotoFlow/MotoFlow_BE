@@ -48,4 +48,8 @@ public class InventoryPeriod {
 
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
+
+    public boolean isOpen() {
+        return status == InventoryPeriodStatus.OPEN;
+    }
 }

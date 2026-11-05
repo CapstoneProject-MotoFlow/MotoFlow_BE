@@ -13,9 +13,9 @@ import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.repository.NotificationRepository;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
-import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptStatus;
-import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptLineRepository;
-import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptRepository;
+import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
+import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
+import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
@@ -42,8 +42,8 @@ public class HomeServiceImpl implements HomeService {
     private final UserAccountRepository users;
     private final StoreRepository stores;
     private final AdjustmentRequestRepository adjustments;
-    private final GoodsReceiptRepository receipts;
-    private final GoodsReceiptLineRepository receiptLines;
+    private final GoodsReceiptNoteRepository receipts;
+    private final GoodsReceiptNoteLineRepository receiptLines;
     private final StockCountRepository stockCounts;
     private final ReplenishmentRequestRepository replenishments;
     private final TransferOrderRepository transfers;
@@ -110,7 +110,7 @@ public class HomeServiceImpl implements HomeService {
 
         counts.put(HomeShortcut.RECEIPTS_TO_ASSIGN, receipts.countAwaitingInspectionWithoutTask(storeId));
         counts.put(HomeShortcut.RECEIPTS_AWAITING_CONFIRMATION,
-                receipts.countAtStore(storeId, GoodsReceiptStatus.AWAITING_CONFIRMATION));
+                receipts.countAtStore(storeId, GoodsReceiptNoteStatus.AWAITING_CONFIRMATION));
         counts.put(HomeShortcut.TRANSFERS_AWAITING_DISPATCH,
                 transfers.countBySourceStoreIdAndStatus(storeId, TransferOrderStatus.AWAITING_DISPATCH));
         counts.put(HomeShortcut.OPEN_DISCREPANCIES, discrepancies.countOpenSupplierCasesAtStore(storeId));

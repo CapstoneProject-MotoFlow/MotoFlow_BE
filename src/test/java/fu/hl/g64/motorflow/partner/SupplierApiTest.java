@@ -93,7 +93,7 @@ class SupplierApiTest extends IntegrationTest {
     @Test
     void codesContinueAfterTheCodesAlreadyInUse() throws Exception {
         jdbc.update("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC041', 'Có sẵn')");
-        jdbc.execute("SELECT setval('supplier_code_seq', 42, false)"); // What V12 does with existing codes.
+        jdbc.execute("SELECT setval('supplier_code_seq', 42, false)");
         send(post("/api/v1/suppliers"), supplier("Minh Phát"))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.supplierCode").value("NCC042"));
     }
@@ -187,16 +187,16 @@ class SupplierApiTest extends IntegrationTest {
         long chain = addProduct("CHN-01", "Xích tải");
 
         long order = addPurchaseOrder(supplier, store, "FULLY_RECEIVED");
-        jdbc.update("INSERT INTO goods_receipt_request_line (goods_receipt_request_id, product_id, ordered_qty, purchase_price) "
+        jdbc.update("INSERT INTO purchase_order_line (purchase_order_id, product_id, ordered_qty, purchase_price) "
                 + "VALUES (?, ?, 10, 50000), (?, ?, 4, 120000)", order, brake, order, chain);
         long newerOrder = addPurchaseOrder(supplier, store, "AWAITING_DELIVERY");
         addPurchaseOrder(other, store, "AWAITING_DELIVERY");
-        Long delivery = jdbc.queryForObject("INSERT INTO goods_receipt (receipt_type, goods_receipt_request_id, "
+        Long delivery = jdbc.queryForObject("INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, "
                 + "delivery_document_no, arrived_at, status, recorded_by, submitted_at, confirmed_by, confirmed_at) "
                 + "VALUES ('SUPPLIER_DELIVERY', ?, 'PX-001', '2026-10-10 09:00', 'CONFIRMED', ?, '2026-10-10 10:00', ?, "
                 + "'2026-10-10 11:00') RETURNING id", Long.class, order, owner.getId(), createUser("bm01", Role.BRANCH_MANAGER,
                 store).getId());
-        jdbc.update("INSERT INTO discrepancy_case (source_type, goods_receipt_id, product_id, short_qty, opened_at) "
+        jdbc.update("INSERT INTO discrepancy_case (source_type, goods_receipt_note_id, product_id, short_qty, opened_at) "
                 + "VALUES ('SUPPLIER', ?, ?, 2, '2026-10-10 11:00')", delivery, brake);
 
         send(get("/api/v1/suppliers/{id}", supplier))
@@ -264,7 +264,7 @@ class SupplierApiTest extends IntegrationTest {
     }
 
     private long addPurchaseOrder(long supplierId, long storeId, String status) {
-        return jdbc.queryForObject("INSERT INTO goods_receipt_request (supplier_id, store_id, status, created_by) "
+        return jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, status, created_by) "
                 + "VALUES (?, ?, ?, ?) RETURNING id", Long.class, supplierId, storeId, status, owner.getId());
     }
 

@@ -17,17 +17,17 @@ import java.time.LocalDate;
 
 /** Inspection result of one part in one delivery. */
 @Entity
-@Table(name = "goods_receipt_line")
+@Table(name = "goods_receipt_note_line")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class GoodsReceiptLine {
+public class GoodsReceiptNoteLine {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "goods_receipt_id", nullable = false)
-    private Long goodsReceiptId;
+    @Column(name = "goods_receipt_note_id", nullable = false)
+    private Long goodsReceiptNoteId;
 
     @Column(name = "product_id", nullable = false)
     private Long productId;

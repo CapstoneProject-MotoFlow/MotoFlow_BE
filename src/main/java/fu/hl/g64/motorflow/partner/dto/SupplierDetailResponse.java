@@ -1,15 +1,15 @@
 package fu.hl.g64.motorflow.partner.dto;
 
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
-import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptRequestStatus;
-import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptStatus;
+import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
+import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * UC-32: the supplier with its newest purchase orders (goods receipt requests), deliveries and discrepancies.
+ * UC-32: the supplier with its newest purchase orders, deliveries and discrepancies.
  * Each list holds at most the newest 20 rows; the counts cover all of them.
  */
 public record SupplierDetailResponse(SupplierResponse supplier,
@@ -18,11 +18,11 @@ public record SupplierDetailResponse(SupplierResponse supplier,
                                      List<Discrepancy> discrepancies, long discrepancyCount, long openDiscrepancyCount) {
 
     /** {@code orderedValue} is the sum of ordered quantity × agreed purchase price, in VND. */
-    public record PurchaseOrder(long id, long storeId, String storeName, GoodsReceiptRequestStatus status,
+    public record PurchaseOrder(long id, long storeId, String storeName, PurchaseOrderStatus status,
                                 LocalDate expectedArrival, long lineCount, long orderedValue, LocalDateTime createdAt) {
     }
 
-    public record Delivery(long id, long purchaseOrderId, String deliveryDocumentNo, GoodsReceiptStatus status,
+    public record Delivery(long id, long purchaseOrderId, String deliveryDocumentNo, GoodsReceiptNoteStatus status,
                            LocalDateTime arrivedAt, LocalDateTime confirmedAt) {
     }
 

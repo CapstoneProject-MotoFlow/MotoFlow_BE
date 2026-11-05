@@ -267,7 +267,7 @@ public class StoreServiceImpl implements StoreService {
         }
     }
 
-    // Parallel requests that both pass this check are stopped by the unique index ux_store_central (V11).
+    // Parallel requests that both pass this check are stopped by the unique index ux_store_central.
     private void requireNoOtherCentral(Long storeId) {
         stores.findByIsCentralTrue()
                 .filter(central -> !central.getId().equals(storeId))
