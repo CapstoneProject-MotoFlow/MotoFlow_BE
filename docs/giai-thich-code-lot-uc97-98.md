@@ -79,10 +79,10 @@ Lấy tối đa 20 lô cùng phụ tùng từng có ở kho đang xem, theo th�
 | Query | Làm gì |
 |---|---|
 | `findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc` | 10 biến động mới nhất của lô tại kho đang xem |
-| `sumIncoming` | Tổng `quantity_change > 0` theo danh sách loại biến động, dùng cho `receivedQty` |
+| `sumIncoming` | Tổng `quantity_change > 0` theo danh sách loại biến động và phiếu kiểm kê nếu có, dùng cho `receivedQty` |
 | `existsByLotIdAndStoreId` | Kiểm tra lô từng có biến động ở kho này chưa, dùng cho quyền của BM |
 
-`receivedQty` chỉ tính tại `lot.storeId`, với 4 loại `RECEIPT_CONFIRMED`, `EXCESS_ACCEPTED`, `OPENING_BALANCE`, `COUNT_ADJUSTMENT`. Vì vậy hàng chuyển kho không bị cộng thành hàng nhận.
+`receivedQty` là số lượng lúc tạo lô, chỉ tính tại `lot.storeId`, nên hàng chuyển kho không bị cộng thành hàng nhận. Lô `RECEIPT` tính `RECEIPT_CONFIRMED` và `EXCESS_ACCEPTED`. Lô tạo từ kiểm kê tính `OPENING_BALANCE` và `COUNT_ADJUSTMENT` của đúng phiếu kiểm kê đã tạo lô (`lot.stockCountId`), nên chênh lệch của các lần kiểm kê sau không bị cộng vào.
 
 ### `LotBalanceRepository.findByLotIdAndStoreIdOrderByStockStatusAsc` (UC-98)
 

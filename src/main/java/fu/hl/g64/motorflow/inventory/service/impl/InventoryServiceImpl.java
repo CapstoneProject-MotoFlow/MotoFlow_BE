@@ -85,8 +85,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class InventoryServiceImpl implements InventoryService {
 
-    private static final Set<MovementType> FIRST_RECEIPT = Set.of(MovementType.RECEIPT_CONFIRMED,
-            MovementType.EXCESS_ACCEPTED, MovementType.OPENING_BALANCE, MovementType.COUNT_ADJUSTMENT);
+    private static final Set<MovementType> RECEIPT_MOVEMENTS = Set.of(MovementType.RECEIPT_CONFIRMED,
+            MovementType.EXCESS_ACCEPTED);
+    private static final Set<MovementType> COUNT_MOVEMENTS = Set.of(MovementType.OPENING_BALANCE,
+            MovementType.COUNT_ADJUSTMENT);
     private static final int ISSUE_ORDER_LINES = 20;
 
     private final StockBalanceRepository balances;
@@ -300,7 +302,9 @@ public class InventoryServiceImpl implements InventoryService {
                 lot.getSupplierId() == null ? null : suppliers.findById(lot.getSupplierId()).orElseThrow().getSupplierName(),
                 sourceDocument(lot), lot.getStoreId(), stores.findById(lot.getStoreId()).orElseThrow().getStoreName(),
                 lot.getReceivedDate(), lot.getManufacturerLotNo(), lot.getManufactureDate(), lot.getExpiryDate(),
-                movements.sumIncoming(lotId, lot.getStoreId(), FIRST_RECEIPT), viewStoreId, remaining,
+                movements.sumIncoming(lotId, lot.getStoreId(), lot.getStockCountId(),
+                        lot.getSourceType() == LotSourceType.RECEIPT ? RECEIPT_MOVEMENTS : COUNT_MOVEMENTS),
+                viewStoreId, remaining,
                 held.stream().filter(b -> b.getQuantity() > 0)
                         .map(b -> new StatusQty(b.getStockStatus(), b.getQuantity())).toList(),
                 movementRows(user, movements.findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc(lotId, viewStoreId)),

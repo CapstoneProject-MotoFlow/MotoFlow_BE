@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.inventory;
 
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.inventory.dto.LotAdjustPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
@@ -242,6 +243,18 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void laterCountSurplusIsNotReceivedQuantity() throws Exception {
+        countSurplus(a);
+        countSurplus(f);
+        lot("bm", a, "")
+                .andExpect(jsonPath("$.receivedQty").value(3))
+                .andExpect(jsonPath("$.remainingQty").value(5));
+        lot("bm", f, "")
+                .andExpect(jsonPath("$.receivedQty").value(3))
+                .andExpect(jsonPath("$.remainingQty").value(5));
+    }
+
+    @Test
     void openingLotComesFromAStockCount() throws Exception {
         long count = jdbc.queryForObject("SELECT stock_count_id FROM lot WHERE id = ?", Long.class, f);
         lot("bm", f, "")
@@ -420,6 +433,15 @@ class LotApiTest extends ApiTestUsers {
                 received, 80_000, null, null, null, Map.of(StockStatus.AVAILABLE, 3),
                 MovementType.OPENING_BALANCE, SourceRef.stockCount(count), owner.getId(), null)));
         return newestLot();
+    }
+
+    /** A count at the branch, later than the one that may have created the lot, finds 2 more units of it. */
+    private void countSurplus(long lotId) {
+        long count = jdbc.queryForObject("INSERT INTO stock_count (store_id, count_type, inventory_period_id, "
+                + "count_date, scope_type, created_by) VALUES (?, 'CYCLE', (SELECT max(id) FROM inventory_period), ?, 'WHOLE', ?) "
+                + "RETURNING id", Long.class, branch, today, owner.getId());
+        tx.executeWithoutResult(s -> posting.adjustLot(new LotAdjustPosting(branch, lotId, StockStatus.AVAILABLE, 2,
+                MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(count), owner.getId(), null)));
     }
 
     private void sellAll(long store, long product, int qty) {
