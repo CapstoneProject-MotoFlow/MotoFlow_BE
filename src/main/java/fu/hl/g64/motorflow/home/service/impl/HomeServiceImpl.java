@@ -87,16 +87,29 @@ public class HomeServiceImpl implements HomeService {
                 counts.put(HomeShortcut.REPLENISHMENTS_AWAITING_COORDINATION,
                         replenishments.countByStatus(ReplenishmentRequestStatus.AWAITING_COORDINATION));
             }
-            case BRANCH_MANAGER -> branchManagerShortcuts(user.storeId(), counts);
-            case STAFF -> {
-                Map<TaskType, Long> byType = new EnumMap<>(TaskType.class);
-                tasks.countAssignedByType(user.id()).forEach(row -> byType.put((TaskType) row[0], (Long) row[1]));
-                counts.put(HomeShortcut.PICKING_TASKS, byType.getOrDefault(TaskType.PICKING, 0L));
-                counts.put(HomeShortcut.INSPECTION_TASKS, byType.getOrDefault(TaskType.INSPECTION, 0L));
-                counts.put(HomeShortcut.DISPATCH_PREPARATION_TASKS, byType.getOrDefault(TaskType.DISPATCH_PREPARATION, 0L));
-                counts.put(HomeShortcut.COUNTING_TASKS, byType.getOrDefault(TaskType.COUNTING, 0L));
+            case BRANCH_MANAGER -> {
+                branchManagerShortcuts(user.storeId(), counts);
+                // Work the Branch Manager took on themself (UC-86, MSG40), only when there is some.
+                assignedTasks(user.id()).forEach((shortcut, count) -> {
+                    if (count > 0) {
+                        counts.put(shortcut, count);
+                    }
+                });
             }
+            case STAFF -> counts.putAll(assignedTasks(user.id()));
         }
+        return counts;
+    }
+
+    /** Tasks given to the user and not started on yet, by type (SCR-31). */
+    private Map<HomeShortcut, Long> assignedTasks(long userId) {
+        Map<TaskType, Long> byType = new EnumMap<>(TaskType.class);
+        tasks.countAssignedByType(userId).forEach(row -> byType.put((TaskType) row[0], (Long) row[1]));
+        Map<HomeShortcut, Long> counts = new EnumMap<>(HomeShortcut.class);
+        counts.put(HomeShortcut.PICKING_TASKS, byType.getOrDefault(TaskType.PICKING, 0L));
+        counts.put(HomeShortcut.INSPECTION_TASKS, byType.getOrDefault(TaskType.INSPECTION, 0L));
+        counts.put(HomeShortcut.DISPATCH_PREPARATION_TASKS, byType.getOrDefault(TaskType.DISPATCH_PREPARATION, 0L));
+        counts.put(HomeShortcut.COUNTING_TASKS, byType.getOrDefault(TaskType.COUNTING, 0L));
         return counts;
     }
 

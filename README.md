@@ -91,7 +91,7 @@ src/main/java/fu/hl/g64/motorflow/
 ├── home/                Trang chủ sau đăng nhập (SCR-03): thông báo chưa đọc, việc đang chờ theo vai trò
 ├── store/               Store (mỗi cửa hàng là một kho, có cờ kho tổng), UC-05 sao chép cấu hình cửa hàng
 ├── catalog/             PartCategory, VehicleModel, Product, ProductIdentifier, ProductImage, ProductVehicleModel
-├── pricing/             PricingPolicy
+├── pricing/             PricingPolicy; UC-34..36 bảng giá, sửa giá, lịch sử giá, UC-38 ngưỡng chiết khấu và biên lợi nhuận, UC-101 quy tắc giá gợi ý (BR-69)
 ├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
 ├── sales/               SalesOrder, SalesOrderLine (phiên bản cũ của đơn nằm trong audit_log)
 ├── receivable/          Receivable, Payment, PaymentAllocation
@@ -101,7 +101,7 @@ src/main/java/fu/hl/g64/motorflow/
 ├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
 │                        PeriodStockBalance
 ├── adjustment/          AdjustmentRequest, AdjustmentStockLine, AdjustmentAmountLine
-└── operation/           WarehouseTask, Notification, Attachment
+└── operation/           WarehouseTask, Notification, Attachment; UC-86 giao việc kho (BR-32), UC-85 thông báo
 ```
 
 Mỗi feature dùng các package con sau, chỉ tạo package nào thực sự cần:
