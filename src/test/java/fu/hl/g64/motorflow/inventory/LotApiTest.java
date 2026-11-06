@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.inventory;
 
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.inventory.dto.LotAdjustPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
@@ -113,6 +114,13 @@ class LotApiTest extends ApiTestUsers {
     void lotMarkedExpiredCountsAsExpired() throws Exception {
         jdbc.update("UPDATE lot SET status = 'EXPIRED' WHERE id = ?", c);
         lots("bm", "?tab=EXPIRED").andExpect(jsonPath("$.page.items[*].lotId", contains((int) b, (int) c)));
+    }
+
+    @Test
+    void lotMarkedExpiredLeavesTheNearExpiryTab() throws Exception {
+        jdbc.update("UPDATE lot SET status = 'EXPIRED' WHERE id = ?", a);
+        lots("bm", "?tab=NEAR_EXPIRY").andExpect(jsonPath("$.page.items", empty()));
+        lots("bm", "?tab=EXPIRED").andExpect(jsonPath("$.page.items[*].lotId", contains((int) b, (int) a)));
     }
 
     @Test
@@ -235,6 +243,18 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void laterCountSurplusIsNotReceivedQuantity() throws Exception {
+        countSurplus(a);
+        countSurplus(f);
+        lot("bm", a, "")
+                .andExpect(jsonPath("$.receivedQty").value(3))
+                .andExpect(jsonPath("$.remainingQty").value(5));
+        lot("bm", f, "")
+                .andExpect(jsonPath("$.receivedQty").value(3))
+                .andExpect(jsonPath("$.remainingQty").value(5));
+    }
+
+    @Test
     void openingLotComesFromAStockCount() throws Exception {
         long count = jdbc.queryForObject("SELECT stock_count_id FROM lot WHERE id = ?", Long.class, f);
         lot("bm", f, "")
@@ -312,6 +332,27 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void lotsSoldOutDoNotPushTheLotInViewOutOfTheIssueOrder() throws Exception {
+        long part = product("LOC-GIO", "Lọc gió", jdbc.queryForObject("SELECT category_id FROM product WHERE id = ?",
+                Long.class, brake));
+        long oldest = receive(branch, part, honda, today.minusDays(60), today.plusDays(1), null);
+        for (int i = 2; i <= 22; i++) {
+            receive(branch, part, honda, today.minusDays(60), today.plusDays(i), null);
+        }
+        sellAll(branch, part, 66);
+        long inStock = receive(branch, part, honda, today.minusDays(1), today.plusDays(200), null);
+
+        lot("bm", inStock, "")
+                .andExpect(jsonPath("$.issueOrder[*].lotId", contains((int) inStock)))
+                .andExpect(jsonPath("$.issueOrder[0].current").value(true))
+                .andExpect(jsonPath("$.issueOrder[0].skipped").value(false));
+        lot("bm", oldest, "")
+                .andExpect(jsonPath("$.issueOrder[*].lotId", contains((int) oldest, (int) inStock)))
+                .andExpect(jsonPath("$.issueOrder[0].current").value(true))
+                .andExpect(jsonPath("$.issueOrder[0].skipped").value(true));
+    }
+
+    @Test
     void pricesAreForTheOwnerOnly() throws Exception {
         lot("bm", a, "")
                 .andExpect(jsonPath("$.purchaseUnitPrice").value(nullValue()))
@@ -321,6 +362,15 @@ class LotApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.purchaseUnitPrice").value(100_000))
                 .andExpect(jsonPath("$.movements[0].unitCost").value(100_000.0))
                 .andExpect(jsonPath("$.movements[0].value").value(300_000));
+    }
+
+    @Test
+    void ownerGetsNotFoundForAWarehouseTheLotNeverReached() throws Exception {
+        lot("owner", a, "?storeId=" + central)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("MSG90"));
+        lot("owner", a, "?storeId=" + branch).andExpect(status().isOk());
+        lot("owner", a, "").andExpect(status().isOk());
     }
 
     @Test
@@ -383,6 +433,15 @@ class LotApiTest extends ApiTestUsers {
                 received, 80_000, null, null, null, Map.of(StockStatus.AVAILABLE, 3),
                 MovementType.OPENING_BALANCE, SourceRef.stockCount(count), owner.getId(), null)));
         return newestLot();
+    }
+
+    /** A count at the branch, later than the one that may have created the lot, finds 2 more units of it. */
+    private void countSurplus(long lotId) {
+        long count = jdbc.queryForObject("INSERT INTO stock_count (store_id, count_type, inventory_period_id, "
+                + "count_date, scope_type, created_by) VALUES (?, 'CYCLE', (SELECT max(id) FROM inventory_period), ?, 'WHOLE', ?) "
+                + "RETURNING id", Long.class, branch, today, owner.getId());
+        tx.executeWithoutResult(s -> posting.adjustLot(new LotAdjustPosting(branch, lotId, StockStatus.AVAILABLE, 2,
+                MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(count), owner.getId(), null)));
     }
 
     private void sellAll(long store, long product, int qty) {

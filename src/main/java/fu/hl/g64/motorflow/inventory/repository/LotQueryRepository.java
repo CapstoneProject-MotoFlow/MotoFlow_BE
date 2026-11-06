@@ -49,7 +49,8 @@ public interface LotQueryRepository extends Repository<Lot, Long> {
               and (:q is null or cast(l.id as String) = :q or lower(p.sku) like :like or lower(p.partName) like :like
                    or lower(l.manufacturerLotNo) like :like)
               and (:tab in ('IN_STOCK', 'DEPLETED')
-                   or (:tab = 'NEAR_EXPIRY' and l.expiryDate between :today and :warnUntil)
+                   or (:tab = 'NEAR_EXPIRY' and l.expiryDate between :today and :warnUntil
+                       and l.status <> fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED)
                    or (:tab = 'EXPIRED' and (l.expiryDate < :today
                        or l.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED)))
             group by l.id, p.id, s.id, su.id
@@ -74,7 +75,7 @@ public interface LotQueryRepository extends Repository<Lot, Long> {
         int getAvailable();
     }
 
-    /** UC-98: lots of a part that have been in a warehouse, in picking order (BR-75). */
+    /** UC-98: lots of a part that a warehouse still holds, plus the lot in view, in picking order (BR-75). */
     @Query("""
             select l as lot,
                    sum(case when b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE
@@ -84,6 +85,7 @@ public interface LotQueryRepository extends Repository<Lot, Long> {
             where l.productId = :productId and b.storeId = :storeId
               and b.stockStatus <> fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
             group by l.id
+            having sum(b.quantity) > 0 or l.id = :lotId
             order by l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
-    List<IssueLine> issueOrder(Long productId, Long storeId, Limit limit);
+    List<IssueLine> issueOrder(Long productId, Long storeId, Long lotId, Limit limit);
 }

@@ -3,7 +3,7 @@ package fu.hl.g64.motorflow.account.dto;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.AccountStatus;
 
-/** UC-38: a Branch Manager with the permissions the Owner can grant. */
+/** UC-37: a Branch Manager with the permissions the Owner can grant. */
 public record BranchManagerResponse(long id, String username, String fullName, Long storeId, String storeName,
                                     AccountStatus status, boolean catalogEdit, boolean retailPriceEdit) {
 

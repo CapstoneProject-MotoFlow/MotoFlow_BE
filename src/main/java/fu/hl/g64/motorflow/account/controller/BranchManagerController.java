@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-@Tag(name = "Branch Manager Permissions", description = "UC-38 (Owner)")
+@Tag(name = "Branch Manager Permissions", description = "UC-37 (Owner)")
 @RestController
 @RequestMapping("/api/v1/branch-managers")
 @PreAuthorize("hasRole('OWNER')")
@@ -30,13 +30,13 @@ public class BranchManagerController {
     private final PermissionService permissionService;
 
     @Operation(summary = "Branch Managers of a store (or of the whole chain) with their catalog and retail price "
-            + "permissions (UC-38)")
+            + "permissions (UC-37)")
     @GetMapping
     public List<BranchManagerResponse> list(@RequestParam(required = false) Long storeId) {
         return permissionService.listBranchManagers(storeId);
     }
 
-    @Operation(summary = "Grant or revoke a Branch Manager's catalog and retail price permissions (UC-38, BR-05, BR-08)")
+    @Operation(summary = "Grant or revoke a Branch Manager's catalog and retail price permissions (UC-37, BR-05, BR-08)")
     @PutMapping("/{id}/permissions")
     public BranchManagerResponse updatePermissions(@AuthenticationPrincipal AuthenticatedUser owner,
                                                    @PathVariable long id,

@@ -94,7 +94,7 @@ public class PermissionServiceImpl implements PermissionService {
             account.changeRoleAndStore(role, storeId, now);
         }
 
-        // BR-01, BR-05, BR-08: both permissions are the Owner's to give (UC-38); Admin only keeps them
+        // BR-01, BR-05, BR-08: both permissions are the Owner's to give (UC-37); Admin only keeps them
         // while the account stays a Branch Manager and removes them when it stops being one.
         boolean manager = role == Role.BRANCH_MANAGER;
         setPermission(account, PermissionCode.CATALOG_EDIT, manager && account.isCanEditCatalog(), reason, admin, now);
@@ -115,7 +115,7 @@ public class PermissionServiceImpl implements PermissionService {
         return entries.stream().map(entry -> PermissionHistoryResponse.from(entry, names.get(entry.getActorId()))).toList();
     }
 
-    // UC-38
+    // UC-37
     @Transactional(readOnly = true)
     @Override
     public List<BranchManagerResponse> listBranchManagers(Long storeId) {
@@ -132,7 +132,7 @@ public class PermissionServiceImpl implements PermissionService {
                 .toList();
     }
 
-    // UC-38
+    // UC-37
     @Transactional
     @Override
     public BranchManagerResponse updateManagerPermissions(AuthenticatedUser owner, long managerId,

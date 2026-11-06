@@ -57,7 +57,7 @@ Tab được định nghĩa như sau:
 
 | Tab | Điều kiện |
 |---|---|
-| `NEAR_EXPIRY` | Còn hàng và hạn trong [hôm nay, hôm nay + N] |
+| `NEAR_EXPIRY` | Còn hàng, hạn trong [hôm nay, hôm nay + N] và `lot.status` khác `EXPIRED` |
 | `EXPIRED` | Còn hàng và (hạn trước hôm nay hoặc `lot.status = EXPIRED`) |
 | `IN_STOCK` | Còn hàng, gồm cả lô sắp hết và đã hết hạn |
 | `DEPLETED` | Có dòng ở kho đó nhưng còn lại bằng 0 |
@@ -79,10 +79,10 @@ Lấy tối đa 20 lô cùng phụ tùng từng có ở kho đang xem, theo th�
 | Query | Làm gì |
 |---|---|
 | `findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc` | 10 biến động mới nhất của lô tại kho đang xem |
-| `sumIncoming` | Tổng `quantity_change > 0` theo danh sách loại biến động, dùng cho `receivedQty` |
+| `sumIncoming` | Tổng `quantity_change > 0` theo danh sách loại biến động và phiếu kiểm kê nếu có, dùng cho `receivedQty` |
 | `existsByLotIdAndStoreId` | Kiểm tra lô từng có biến động ở kho này chưa, dùng cho quyền của BM |
 
-`receivedQty` chỉ tính tại `lot.storeId`, với 4 loại `RECEIPT_CONFIRMED`, `EXCESS_ACCEPTED`, `OPENING_BALANCE`, `COUNT_ADJUSTMENT`. Vì vậy hàng chuyển kho không bị cộng thành hàng nhận.
+`receivedQty` là số lượng lúc tạo lô, chỉ tính tại `lot.storeId`, nên hàng chuyển kho không bị cộng thành hàng nhận. Lô `RECEIPT` tính `RECEIPT_CONFIRMED` và `EXCESS_ACCEPTED`. Lô tạo từ kiểm kê tính `OPENING_BALANCE` và `COUNT_ADJUSTMENT` của đúng phiếu kiểm kê đã tạo lô (`lot.stockCountId`), nên chênh lệch của các lần kiểm kê sau không bị cộng vào.
 
 ### `LotBalanceRepository.findByLotIdAndStoreIdOrderByStockStatusAsc` (UC-98)
 
@@ -118,7 +118,7 @@ UC-97 ghi "their warehouse", tức kho của chính họ. Hàm `scopeStoreId`, d
 
 Không dùng `storeScope.viewableStore`, vì hàm này cho BM kho tổng xem mọi kho. BM kho tổng chỉ được xem kho khác ở UC-48 khi tạo lệnh chuyển (BR-03, chú thích ⁵ của ma trận phân quyền).
 
-Ở UC-98 có thêm một lớp kiểm tra: BM mà kho mình chưa từng có lô đó (không có dòng `lot_balance`, không có `stock_movement`) sẽ nhận `MSG05`. Với Owner, không truyền `storeId` thì "kho đang xem" là `lot.storeId`, kho nhận lô lần đầu.
+Ở UC-98 có thêm một lớp kiểm tra: BM mà kho mình chưa từng có lô đó (không có dòng `lot_balance`, không có `stock_movement`) sẽ nhận `MSG05`. Owner mở lô ở kho lô chưa từng tới nhận 404 `MSG90`. Với Owner, không truyền `storeId` thì "kho đang xem" là `lot.storeId`, kho nhận lô lần đầu.
 
 ## 5. Vì sao danh sách không trả giá
 
@@ -131,7 +131,6 @@ BR-72 giới hạn thông tin giá vốn, và màn hình danh sách lô không c
 - **`issueOrder` tối đa 20 dòng:** nếu lô đang xem đứng sau vị trí 20 thì không có dòng `current = true`.
 - **`byStatus` có thể có `IN_TRANSIT`:** tổng `byStatus` có thể lớn hơn `remainingQty`.
 - **Lô đang chuyển tới kho đích:** không hiện ở tab `DEPLETED` của kho đích vì chưa tới nơi, nhưng BM kho đích vẫn mở được chi tiết vì đã có dòng `lot_balance`.
-- **`NEAR_EXPIRY` không loại `status = EXPIRED`:** lô có trạng thái này mà hạn còn trong tương lai sẽ hiện ở cả hai tab. Hiện chưa có job nào đặt trạng thái này, cần xem lại khi làm JOB-03.
 - **Trạng thái hạn tính lúc đọc:** các API này không cập nhật `lot.status`.
 
 ## 7. Cách chạy Postman

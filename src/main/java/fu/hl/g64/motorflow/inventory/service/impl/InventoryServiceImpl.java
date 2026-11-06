@@ -85,8 +85,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class InventoryServiceImpl implements InventoryService {
 
-    private static final Set<MovementType> FIRST_RECEIPT = Set.of(MovementType.RECEIPT_CONFIRMED,
-            MovementType.EXCESS_ACCEPTED, MovementType.OPENING_BALANCE, MovementType.COUNT_ADJUSTMENT);
+    private static final Set<MovementType> RECEIPT_MOVEMENTS = Set.of(MovementType.RECEIPT_CONFIRMED,
+            MovementType.EXCESS_ACCEPTED);
+    private static final Set<MovementType> COUNT_MOVEMENTS = Set.of(MovementType.OPENING_BALANCE,
+            MovementType.COUNT_ADJUSTMENT);
     private static final int ISSUE_ORDER_LINES = 20;
 
     private final StockBalanceRepository balances;
@@ -285,8 +287,9 @@ public class InventoryServiceImpl implements InventoryService {
         long viewStoreId = scoped != null ? scoped : lot.getStoreId();
         boolean owner = user.role() == Role.OWNER;
         List<LotBalance> held = lotBalances.findByLotIdAndStoreIdOrderByStockStatusAsc(lotId, viewStoreId);
-        if (!owner && held.isEmpty() && !movements.existsByLotIdAndStoreId(lotId, viewStoreId)) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        if (held.isEmpty() && !movements.existsByLotIdAndStoreId(lotId, viewStoreId)) {
+            throw owner ? new BusinessException(HttpStatus.NOT_FOUND, "MSG90")
+                    : new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         LocalDate today = LocalDate.now(clock);
         int remaining = held.stream().filter(b -> b.getStockStatus() != StockStatus.IN_TRANSIT)
@@ -299,11 +302,13 @@ public class InventoryServiceImpl implements InventoryService {
                 lot.getSupplierId() == null ? null : suppliers.findById(lot.getSupplierId()).orElseThrow().getSupplierName(),
                 sourceDocument(lot), lot.getStoreId(), stores.findById(lot.getStoreId()).orElseThrow().getStoreName(),
                 lot.getReceivedDate(), lot.getManufacturerLotNo(), lot.getManufactureDate(), lot.getExpiryDate(),
-                movements.sumIncoming(lotId, lot.getStoreId(), FIRST_RECEIPT), viewStoreId, remaining,
+                movements.sumIncoming(lotId, lot.getStoreId(), lot.getStockCountId(),
+                        lot.getSourceType() == LotSourceType.RECEIPT ? RECEIPT_MOVEMENTS : COUNT_MOVEMENTS),
+                viewStoreId, remaining,
                 held.stream().filter(b -> b.getQuantity() > 0)
                         .map(b -> new StatusQty(b.getStockStatus(), b.getQuantity())).toList(),
                 movementRows(user, movements.findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc(lotId, viewStoreId)),
-                lotQueries.issueOrder(lot.getProductId(), viewStoreId, Limit.of(ISSUE_ORDER_LINES)).stream()
+                lotQueries.issueOrder(lot.getProductId(), viewStoreId, lotId, Limit.of(ISSUE_ORDER_LINES)).stream()
                         .map(line -> new IssueOrderLine(line.getLot().getId(), line.getLot().getExpiryDate(),
                                 line.getLot().getReceivedDate(), line.getAvailable(), line.getLot().getId().equals(lotId),
                                 line.getLot().isExpiredOn(today) || line.getAvailable() == 0))
@@ -408,7 +413,7 @@ public class InventoryServiceImpl implements InventoryService {
         return totals;
     }
 
-    /** UC-107 setting in effect, or null if the Owner has not set one. */
+    /** UC-104 setting in effect, or null if the Owner has not set one. */
     private Integer expiryWarningDays() {
         return policies.findExpiryWarningsInEffect(LocalDateTime.now(clock)).stream()
                 .findFirst().map(PricingPolicy::getExpiryWarningDays).orElse(null);
