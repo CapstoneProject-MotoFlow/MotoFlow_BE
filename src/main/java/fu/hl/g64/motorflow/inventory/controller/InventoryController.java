@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.inventory.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
+import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LotTab;
@@ -34,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-@Tag(name = "Inventory", description = "UC-47 to UC-51, UC-97 (Owner, Branch Manager)")
+@Tag(name = "Inventory", description = "UC-47 to UC-51, UC-97, UC-98 (Owner, Branch Manager)")
 @RestController
 @RequestMapping("/api/v1/inventory")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
@@ -102,6 +103,14 @@ public class InventoryController {
             @RequestParam(defaultValue = "20") int size) {
         return inventoryService.listLots(user, new LotSearch(tab, q, supplierId, source, receivedFrom, receivedTo, storeId),
                 page, size);
+    }
+
+    @Operation(summary = "One lot as seen from a warehouse (UC-98). A Branch Manager sees their own warehouse; the Owner "
+            + "storeId, or without it the warehouse that first received the lot. Purchase price for the Owner only")
+    @GetMapping("/lots/{lotId}")
+    public LotDetailResponse lotDetail(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long lotId,
+                                       @RequestParam(required = false) Long storeId) {
+        return inventoryService.lotDetail(user, lotId, storeId);
     }
 
     @Operation(summary = "Update the shelf and bin of a part in a warehouse (UC-50)")

@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.inventory;
 
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
@@ -24,12 +25,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** UC-97. */
+/** UC-97, UC-98. */
 class LotApiTest extends ApiTestUsers {
 
     private static final String LOTS = "/api/v1/inventory/lots";
@@ -205,10 +207,150 @@ class LotApiTest extends ApiTestUsers {
         lots("bm", "?tab=EXPIRED").andExpect(jsonPath("$.page.items[*].lotId", contains((int) b)));
     }
 
+    @Test
+    void receiptLotShowsSupplierDocumentAndReceivedQtyWithAcceptedExcess() throws Exception {
+        long grn = jdbc.queryForObject("SELECT l.goods_receipt_note_id FROM goods_receipt_note_line l JOIN lot ON "
+                + "lot.goods_receipt_note_line_id = l.id WHERE lot.id = ?", Long.class, a);
+        jdbc.update("INSERT INTO stock_movement (store_id, product_id, lot_id, inventory_period_id, stock_status, "
+                + "quantity_change, unit_cost, value, movement_type, goods_receipt_note_id, performed_by, occurred_at) "
+                + "SELECT store_id, product_id, lot_id, inventory_period_id, stock_status, 2, unit_cost, 2 * value / 3, "
+                + "'EXCESS_ACCEPTED', goods_receipt_note_id, performed_by, occurred_at FROM stock_movement WHERE lot_id = ?", a);
+
+        lot("bm", a, "").andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("NEAR_EXPIRY"))
+                .andExpect(jsonPath("$.daysToExpiry").value(10))
+                .andExpect(jsonPath("$.sku").value("MA-PHANH"))
+                .andExpect(jsonPath("$.sourceType").value("RECEIPT"))
+                .andExpect(jsonPath("$.supplierId").value(honda))
+                .andExpect(jsonPath("$.supplierName").value("Honda"))
+                .andExpect(jsonPath("$.sourceDocument.type").value("GOODS_RECEIPT_NOTE"))
+                .andExpect(jsonPath("$.sourceDocument.id").value(grn))
+                .andExpect(jsonPath("$.firstStoreName").value("Long Biên"))
+                .andExpect(jsonPath("$.manufacturerLotNo").value("NSX-ALPHA"))
+                .andExpect(jsonPath("$.receivedQty").value(5))
+                .andExpect(jsonPath("$.viewStoreId").value(branch))
+                .andExpect(jsonPath("$.remainingQty").value(3))
+                .andExpect(jsonPath("$.byStatus[*].stockStatus", contains("AVAILABLE")))
+                .andExpect(jsonPath("$.byStatus[0].quantity").value(3));
+    }
+
+    @Test
+    void openingLotComesFromAStockCount() throws Exception {
+        long count = jdbc.queryForObject("SELECT stock_count_id FROM lot WHERE id = ?", Long.class, f);
+        lot("bm", f, "")
+                .andExpect(jsonPath("$.state").value("NO_EXPIRY"))
+                .andExpect(jsonPath("$.sourceDocument.type").value("STOCK_COUNT"))
+                .andExpect(jsonPath("$.sourceDocument.id").value(count))
+                .andExpect(jsonPath("$.supplierId").value(nullValue()))
+                .andExpect(jsonPath("$.supplierName").value(nullValue()));
+    }
+
+    @Test
+    void lotSoldOutHereIsDepleted() throws Exception {
+        lot("bm", e, "")
+                .andExpect(jsonPath("$.state").value("DEPLETED"))
+                .andExpect(jsonPath("$.remainingQty").value(0))
+                .andExpect(jsonPath("$.byStatus", empty()))
+                .andExpect(jsonPath("$.issueOrder[0].current").value(true))
+                .andExpect(jsonPath("$.issueOrder[0].skipped").value(true));
+    }
+
+    @Test
+    void transferredLotIsSeenFromTheWarehouseItWentTo() throws Exception {
+        long third = createStore("Cầu Giấy");
+        createUser("bm3", Role.BRANCH_MANAGER, third);
+        long moved = transferTwoToBranch();
+
+        lot("owner", moved, "?storeId=" + branch).andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstStoreId").value(central))
+                .andExpect(jsonPath("$.firstStoreName").value("Kho tổng"))
+                .andExpect(jsonPath("$.viewStoreId").value(branch))
+                .andExpect(jsonPath("$.remainingQty").value(2))
+                .andExpect(jsonPath("$.receivedQty").value(3))
+                .andExpect(jsonPath("$.movements[0].movementType").value("TRANSFER_RECEIPT"));
+        lot("owner", moved, "")
+                .andExpect(jsonPath("$.viewStoreId").value(central))
+                .andExpect(jsonPath("$.remainingQty").value(1));
+        lot("bm", moved, "").andExpect(status().isOk()).andExpect(jsonPath("$.remainingQty").value(2));
+        lot("bm3", moved, "").andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+    }
+
+    @Test
+    void branchManagerNeverViewsAnotherWarehouse() throws Exception {
+        lot("bm", a, "?storeId=" + central).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        lot("bmkt", a, "?storeId=" + branch).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        lot("bmkt", a, "").andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        lot("staff", a, "").andExpect(status().isForbidden());
+    }
+
+    @Test
+    void movementsStopAtTheTenNewest() throws Exception {
+        long newest = 0;
+        for (int i = 1; i <= 12; i++) {
+            newest = jdbc.queryForObject("INSERT INTO sales_order (store_id, price_type, created_by) "
+                    + "VALUES (?, 'RETAIL', ?) RETURNING id", Long.class, branch, owner.getId());
+            jdbc.update("INSERT INTO stock_movement (store_id, product_id, lot_id, inventory_period_id, stock_status, "
+                    + "quantity_change, unit_cost, value, movement_type, sales_order_id, performed_by, occurred_at) "
+                    + "SELECT store_id, product_id, lot_id, inventory_period_id, stock_status, -1, unit_cost, -unit_cost, "
+                    + "'SALE_ISSUE', ?, performed_by, occurred_at + make_interval(hours => ?) FROM stock_movement "
+                    + "WHERE lot_id = ? AND movement_type = 'RECEIPT_CONFIRMED'", newest, i, a);
+        }
+        lot("bm", a, "")
+                .andExpect(jsonPath("$.movements", hasSize(10)))
+                .andExpect(jsonPath("$.movements[0].sourceId").value(newest))
+                .andExpect(jsonPath("$.movements[9].sourceId").value(newest - 9));
+    }
+
+    @Test
+    void issueOrderIsEarliestExpiryFirstAndSkipsExpiredLots() throws Exception {
+        lot("bm", a, "")
+                .andExpect(jsonPath("$.issueOrder[*].lotId", contains((int) b, (int) a, (int) c, (int) f, (int) d)))
+                .andExpect(jsonPath("$.issueOrder[*].skipped", contains(true, false, false, false, false)))
+                .andExpect(jsonPath("$.issueOrder[*].current", contains(false, true, false, false, false)))
+                .andExpect(jsonPath("$.issueOrder[1].availableQty").value(3))
+                .andExpect(jsonPath("$.issueOrder[1].expiryDate").value(today.plusDays(10).toString()));
+    }
+
+    @Test
+    void pricesAreForTheOwnerOnly() throws Exception {
+        lot("bm", a, "")
+                .andExpect(jsonPath("$.purchaseUnitPrice").value(nullValue()))
+                .andExpect(jsonPath("$.movements[0].unitCost").value(nullValue()))
+                .andExpect(jsonPath("$.movements[0].value").value(nullValue()));
+        lot("owner", a, "")
+                .andExpect(jsonPath("$.purchaseUnitPrice").value(100_000))
+                .andExpect(jsonPath("$.movements[0].unitCost").value(100_000.0))
+                .andExpect(jsonPath("$.movements[0].value").value(300_000));
+    }
+
+    @Test
+    void unknownLotIsNotFound() throws Exception {
+        lot("owner", 9999, "").andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG90"));
+        lot("bm", 9999, "").andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG90"));
+    }
+
     // ------------------------------------------------------------------------------------------------------------
 
     private ResultActions lots(String username, String query) throws Exception {
         return mvc.perform(get(LOTS + query).header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
+    private ResultActions lot(String username, long lotId, String query) throws Exception {
+        return mvc.perform(get(LOTS + "/" + lotId + query).header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
+    /** A central warehouse lot of 3 units, 2 of them dispatched to and received by the branch; returns the lot. */
+    private long transferTwoToBranch() {
+        long part = jdbc.queryForObject("SELECT category_id FROM product WHERE id = ?", Long.class, brake);
+        long mirror = product("GUONG-XE", "Gương chiếu hậu", part);
+        long lot = receive(central, mirror, honda, today.minusDays(3), null, null);
+        long transfer = jdbc.queryForObject("INSERT INTO transfer_order (source_store_id, dest_store_id, created_by) "
+                + "VALUES (?, ?, ?) RETURNING id", Long.class, central, branch, owner.getId());
+        tx.execute(s -> posting.move(new MovePosting(mirror, central, StockStatus.AVAILABLE, branch, StockStatus.IN_TRANSIT,
+                2, null, MovementType.TRANSFER_DISPATCH, SourceRef.transferOrder(transfer), owner.getId(), null)));
+        tx.execute(s -> posting.move(new MovePosting(mirror, branch, StockStatus.IN_TRANSIT, branch, StockStatus.AVAILABLE,
+                2, null, MovementType.TRANSFER_RECEIPT, SourceRef.transferOrder(transfer), owner.getId(), null)));
+        return lot;
     }
 
     private long product(String sku, String name, long category) {

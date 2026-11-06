@@ -7,6 +7,10 @@ import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse;
+import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.IssueOrderLine;
+import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.SourceDocument;
+import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.StatusQty;
 import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotRowResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotSearch;
@@ -24,7 +28,10 @@ import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.LotBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement;
+import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotStatus;
+import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.LotStock;
@@ -36,6 +43,7 @@ import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
 import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
 import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
+import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
@@ -44,6 +52,7 @@ import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Subquery;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -75,6 +84,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class InventoryServiceImpl implements InventoryService {
 
+    private static final Set<MovementType> FIRST_RECEIPT = Set.of(MovementType.RECEIPT_CONFIRMED,
+            MovementType.EXCESS_ACCEPTED, MovementType.OPENING_BALANCE, MovementType.COUNT_ADJUSTMENT);
+    private static final int ISSUE_ORDER_LINES = 20;
+
     private final StockBalanceRepository balances;
     private final LotBalanceRepository lotBalances;
     private final LotQueryRepository lotQueries;
@@ -85,6 +98,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final SupplierRepository suppliers;
     private final UserAccountRepository users;
     private final PricingPolicyRepository policies;
+    private final GoodsReceiptNoteLineRepository receiptLines;
     private final StoreScope storeScope;
     private final Clock clock;
 
@@ -212,17 +226,7 @@ public class InventoryServiceImpl implements InventoryService {
         };
         Page<StockMovement> found = movements.findAll(spec, PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
                 Sort.by(Sort.Order.desc("occurredAt"), Sort.Order.desc("id"))));
-        List<StockMovement> content = found.getContent();
-        Map<Long, String> skus = products.findAllById(content.stream().map(StockMovement::getProductId)
-                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Product::getSku));
-        Map<Long, String> names = users.findAllById(content.stream().map(StockMovement::getPerformedBy)
-                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
-        boolean owner = user.role() == Role.OWNER;
-        return PageResponse.of(found, content.stream().map(m -> new StockMovementResponse(m.getId(), m.getOccurredAt(),
-                m.getStoreId(), m.getProductId(), skus.get(m.getProductId()), m.getLotId(), m.getMovementType(),
-                m.getStockStatus(), m.getQuantityChange(), m.source().type(), m.source().id(), m.getReason(),
-                m.getPerformedBy(), names.get(m.getPerformedBy()), owner ? m.getUnitCost() : null,
-                owner ? m.getValue() : null)).toList());
+        return PageResponse.of(found, movementRows(user, found.getContent()));
     }
 
     // UC-50
@@ -269,6 +273,41 @@ public class InventoryServiceImpl implements InventoryService {
         }).toList()));
     }
 
+    // UC-98
+    @Transactional(readOnly = true)
+    @Override
+    public LotDetailResponse lotDetail(AuthenticatedUser user, long lotId, Long storeId) {
+        Long scoped = lotStoreScope(user, storeId);
+        Lot lot = lots.findById(lotId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG90"));
+        long viewStoreId = scoped != null ? scoped : lot.getStoreId();
+        boolean owner = user.role() == Role.OWNER;
+        List<LotBalance> held = lotBalances.findByLotIdAndStoreIdOrderByStockStatusAsc(lotId, viewStoreId);
+        if (!owner && held.isEmpty() && !movements.existsByLotIdAndStoreId(lotId, viewStoreId)) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        LocalDate today = LocalDate.now(clock);
+        int remaining = held.stream().filter(b -> b.getStockStatus() != StockStatus.IN_TRANSIT)
+                .mapToInt(LotBalance::getQuantity).sum();
+        Product product = products.findById(lot.getProductId()).orElseThrow();
+        return new LotDetailResponse(lot.getId(),
+                remaining == 0 ? "DEPLETED" : expiryState(lot, today, expiryWarningDays()).name(),
+                daysToExpiry(lot, today), product.getId(), product.getSku(), product.getPartName(), product.getBaseUnit(),
+                lot.getSourceType(), lot.getSupplierId(),
+                lot.getSupplierId() == null ? null : suppliers.findById(lot.getSupplierId()).orElseThrow().getSupplierName(),
+                sourceDocument(lot), lot.getStoreId(), stores.findById(lot.getStoreId()).orElseThrow().getStoreName(),
+                lot.getReceivedDate(), lot.getManufacturerLotNo(), lot.getManufactureDate(), lot.getExpiryDate(),
+                movements.sumIncoming(lotId, lot.getStoreId(), FIRST_RECEIPT), viewStoreId, remaining,
+                held.stream().filter(b -> b.getQuantity() > 0)
+                        .map(b -> new StatusQty(b.getStockStatus(), b.getQuantity())).toList(),
+                movementRows(user, movements.findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc(lotId, viewStoreId)),
+                lotQueries.issueOrder(lot.getProductId(), viewStoreId, Limit.of(ISSUE_ORDER_LINES)).stream()
+                        .map(line -> new IssueOrderLine(line.getLot().getId(), line.getLot().getExpiryDate(),
+                                line.getLot().getReceivedDate(), line.getAvailable(), line.getLot().getId().equals(lotId),
+                                line.getLot().isExpiredOn(today) || line.getAvailable() == 0))
+                        .toList(),
+                owner ? lot.getPurchaseUnitPrice() : null);
+    }
+
     // ------------------------------------------------------------------------------------------------------------
 
     /** The warehouse a user may read: null means every warehouse (Owner without a filter). */
@@ -298,6 +337,27 @@ public class InventoryServiceImpl implements InventoryService {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         return user.storeId();
+    }
+
+    private SourceDocument sourceDocument(Lot lot) {
+        return lot.getSourceType() == LotSourceType.RECEIPT
+                ? new SourceDocument("GOODS_RECEIPT_NOTE",
+                        receiptLines.findById(lot.getGoodsReceiptNoteLineId()).orElseThrow().getGoodsReceiptNoteId())
+                : new SourceDocument("STOCK_COUNT", lot.getStockCountId());
+    }
+
+    /** Unit cost and value are filled for the Owner only (BR-72). */
+    private List<StockMovementResponse> movementRows(AuthenticatedUser user, List<StockMovement> content) {
+        Map<Long, String> skus = products.findAllById(content.stream().map(StockMovement::getProductId)
+                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Product::getSku));
+        Map<Long, String> names = users.findAllById(content.stream().map(StockMovement::getPerformedBy)
+                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
+        boolean owner = user.role() == Role.OWNER;
+        return content.stream().map(m -> new StockMovementResponse(m.getId(), m.getOccurredAt(),
+                m.getStoreId(), m.getProductId(), skus.get(m.getProductId()), m.getLotId(), m.getMovementType(),
+                m.getStockStatus(), m.getQuantityChange(), m.source().type(), m.source().id(), m.getReason(),
+                m.getPerformedBy(), names.get(m.getPerformedBy()), owner ? m.getUnitCost() : null,
+                owner ? m.getValue() : null)).toList();
     }
 
     /** UC-50, UC-51: a Branch Manager changes their own warehouse, the Owner any warehouse. */

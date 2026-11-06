@@ -3,12 +3,14 @@ package fu.hl.g64.motorflow.inventory.repository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /** Read-only queries of the lot screens; stock postings go through {@link LotBalanceRepository}. */
 public interface LotQueryRepository extends Repository<Lot, Long> {
@@ -64,4 +66,24 @@ public interface LotQueryRepository extends Repository<Lot, Long> {
     Page<LotStock> searchLots(String tab, Long storeId, Long supplierId, LotSourceType source, LocalDate receivedFrom,
                               LocalDate receivedTo, String q, String like, LocalDate today, LocalDate warnUntil,
                               Pageable pageable);
+
+    /** UC-98: one lot of the issue order and its AVAILABLE stock in the warehouse. */
+    interface IssueLine {
+        Lot getLot();
+
+        int getAvailable();
+    }
+
+    /** UC-98: lots of a part that have been in a warehouse, in picking order (BR-75). */
+    @Query("""
+            select l as lot,
+                   sum(case when b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE
+                            then b.quantity else 0 end) as available
+            from LotBalance b
+            join Lot l on l.id = b.lotId
+            where l.productId = :productId and b.storeId = :storeId
+              and b.stockStatus <> fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+            group by l.id
+            order by l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
+    List<IssueLine> issueOrder(Long productId, Long storeId, Limit limit);
 }

@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.inventory.service;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
+import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
@@ -44,4 +45,10 @@ public interface InventoryService {
 
     /** UC-97: the lots of a warehouse by tab; a Branch Manager sees their own warehouse only, central included. */
     LotListResponse listLots(AuthenticatedUser user, LotSearch filter, int page, int size);
+
+    /**
+     * UC-98: one lot as seen from a warehouse: the Branch Manager's own, or for the Owner {@code storeId} and without
+     * it the warehouse that first received the lot.
+     */
+    LotDetailResponse lotDetail(AuthenticatedUser user, long lotId, Long storeId);
 }
