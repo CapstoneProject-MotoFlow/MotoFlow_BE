@@ -149,6 +149,8 @@ aws iam add-role-to-instance-profile --instance-profile-name motoflow-ec2 --role
 
 Không có domain thì giữ `SITE_ADDRESS=":80"`, khi đó `.env` tự đặt `REFRESH_COOKIE_SECURE=false`. Đăng nhập vẫn được, nhưng chỉ nên dùng để thử. Khi có domain, sửa `SITE_ADDRESS`, `MOTOFLOW_CORS_ORIGINS=https://<domain>` và `REFRESH_COOKIE_SECURE=true` trong `/opt/motoflow/.env`, rồi chạy `sudo /opt/motoflow/bin/motoflow up -d proxy backend`.
 
+**Tải tệp lên (Cloudinary):** ảnh phụ tùng, ảnh chứng từ giao hàng và bằng chứng trả nhà cung cấp đi thẳng từ trình duyệt lên Cloudinary bằng chữ ký backend cấp. Điền `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` (Cloudinary Console → Settings → API Keys) bằng `sudo vi /opt/motoflow/.env`, rồi chạy `sudo /opt/motoflow/bin/motoflow up -d backend`. Để trống thì mọi lần tải lên bị từ chối với MSG76. Server dựng trước khi có ba biến này: thêm ba dòng đó vào `.env` (script không ghi đè `.env`), chạy lại `setup.sh` như mục 5 để `compose.yaml` truyền chúng vào backend, rồi chạy lệnh trên.
+
 Chi phí ước tính cho một môi trường: t3.small + 20 GB gp3 + một IPv4 công khai, khoảng 25 USD/tháng nếu chạy liên tục. Kiểm tra lại bằng AWS Pricing Calculator. Tắt instance khi không dùng sẽ bớt tiền EC2, nhưng IPv4 vẫn bị tính phí.
 
 ### 3.6 Server production (khi cần, ví dụ trước UAT tuần 12)
@@ -215,7 +217,7 @@ Vào máy: EC2 → chọn instance → **Connect → Session Manager**.
 sudo /opt/motoflow/bin/motoflow ps                          # trạng thái các container
 sudo /opt/motoflow/bin/motoflow logs -f --tail 200 backend  # log backend
 sudo cat /opt/motoflow/images.env                           # image đang chạy
-sudo vi /opt/motoflow/.env                                  # sửa cấu hình/secret
+sudo vi /opt/motoflow/.env                                  # sửa cấu hình/secret (cả 3 biến CLOUDINARY_*)
 sudo /opt/motoflow/bin/motoflow up -d proxy backend         # áp dụng sau khi sửa .env
 sudo /opt/motoflow/bin/motoflow exec -T db pg_dump -U motoflow motoflow > /tmp/motoflow.sql   # sao lưu DB
 ```
