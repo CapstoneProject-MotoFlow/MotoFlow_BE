@@ -42,7 +42,8 @@ public enum HomeShortcut {
     /** Open discrepancy cases on supplier deliveries received by the warehouse. */
     OPEN_DISCREPANCIES,
 
-    // Staff: tasks given to them and not started on yet (SCR-31)
+    // Staff: tasks given to them and not started on yet (SCR-31). A Branch Manager who took some on themself
+    // (UC-86) also gets the types they have.
     PICKING_TASKS,
     INSPECTION_TASKS,
     DISPATCH_PREPARATION_TASKS,

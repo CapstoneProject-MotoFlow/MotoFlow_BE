@@ -103,6 +103,33 @@ class InventoryApiTest extends ApiTestUsers {
     }
 
     @Test
+    void centralWarehouseManagerReadsOnlyTheirOwnWarehouse() throws Exception {
+        String token = signIn("bmkt");
+        mvc.perform(get("/api/v1/inventory/stock").header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].storeName", contains("Kho tổng", "Kho tổng")));
+        mvc.perform(get("/api/v1/inventory/stock?storeId={id}", branch).header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+        mvc.perform(get("/api/v1/inventory/stock/{s}/{p}", branch, brake).header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+        mvc.perform(get("/api/v1/inventory/movements?storeId={id}", branch).header(HttpHeaders.AUTHORIZATION, token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+    }
+
+    @Test
+    void parentCategoryFilterIncludesItsChildren() throws Exception {
+        long parent = jdbc.queryForObject("INSERT INTO part_category (category_name, vehicle_type) "
+                + "VALUES ('Hệ thống dừng', 'MOTORCYCLE') RETURNING id", Long.class);
+        jdbc.update("UPDATE part_category SET parent_id = ? WHERE category_name = 'Phanh'", parent);
+        mvc.perform(get("/api/v1/inventory/stock?categoryId={id}", parent)
+                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(jsonPath("$.totalItems").value(3));
+    }
+
+    @Test
     void filtersBySearchTextAndLowStock() throws Exception {
         String token = signIn("owner");
         mvc.perform(get("/api/v1/inventory/stock?q=xích").header(HttpHeaders.AUTHORIZATION, token))
