@@ -44,4 +44,14 @@ public class ReplenishmentRequest {
 
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
+
+    public static ReplenishmentRequest create(Long requestingStoreId, String note, Long createdBy, LocalDateTime now) {
+        ReplenishmentRequest request = new ReplenishmentRequest();
+        request.requestingStoreId = requestingStoreId;
+        request.status = ReplenishmentRequestStatus.AWAITING_COORDINATION;
+        request.note = note;
+        request.createdBy = createdBy;
+        request.createdAt = now;
+        return request;
+    }
 }

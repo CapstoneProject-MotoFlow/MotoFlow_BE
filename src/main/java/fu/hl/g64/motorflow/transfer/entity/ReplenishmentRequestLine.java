@@ -32,4 +32,12 @@ public class ReplenishmentRequestLine {
 
     @Column(name = "to_purchase_qty", nullable = false)
     private int toPurchaseQty;
+
+    public static ReplenishmentRequestLine create(Long replenishmentRequestId, Long productId, int requestedQty) {
+        ReplenishmentRequestLine line = new ReplenishmentRequestLine();
+        line.replenishmentRequestId = replenishmentRequestId;
+        line.productId = productId;
+        line.requestedQty = requestedQty;
+        return line;
+    }
 }
