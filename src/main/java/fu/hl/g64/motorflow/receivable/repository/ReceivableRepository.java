@@ -63,6 +63,12 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
             order by r.recognizedAt, r.id""")
     List<Object[]> findWithRemaining(long customerId, Long storeId);
 
+    /** [receivable, remaining amount in VND] of the receivable an order completed on credit created, if any. */
+    @Query("select r, " + REMAINING + """
+            from Receivable r
+            where r.salesOrderId = :salesOrderId""")
+    List<Object[]> findWithRemainingBySalesOrderId(long salesOrderId);
+
     /** [receivable id, sum of applied corrections of its amount] of the receivables that have any. */
     @Query("""
             select l.receivableId, sum(l.amountChange) from AdjustmentAmountLine l

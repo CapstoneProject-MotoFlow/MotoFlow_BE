@@ -86,4 +86,66 @@ public class Payment {
         payment.verifiedAt = now;
         return payment;
     }
+
+    /**
+     * UC-60 steps 3-6: money the customer paid for an order, verified at once when the seller has seen it arrive
+     * (BR-46), or left UNVERIFIED until then. {@code amount} is what goes to the order; the cash handed over is
+     * {@code tenderedAmount}, the difference being change returned (BR-47).
+     */
+    public static Payment orderPayment(long orderId, long amount, Long tenderedAmount, PaymentMethod method,
+                                       String transactionReference, boolean verified, long seller,
+                                       LocalDateTime now) {
+        Payment payment = forOrder(PaymentType.ORDER_PAYMENT, orderId, amount, method, transactionReference,
+                verified, seller, now);
+        payment.tenderedAmount = tenderedAmount;
+        return payment;
+    }
+
+    /** UC-56, UC-60 Step 7_Net collection exceeds the total: money given back to the customer before completion. */
+    public static Payment refund(long orderId, long amount, PaymentMethod method, String transactionReference,
+                                 boolean verified, long seller, LocalDateTime now) {
+        return forOrder(PaymentType.REFUND, orderId, amount, method, transactionReference, verified, seller, now);
+    }
+
+    private static Payment forOrder(PaymentType type, long orderId, long amount, PaymentMethod method,
+                                    String transactionReference, boolean verified, long seller, LocalDateTime now) {
+        Payment payment = new Payment();
+        payment.paymentType = type;
+        payment.salesOrderId = orderId;
+        payment.amount = amount;
+        payment.paymentMethod = method;
+        payment.transactionReference = transactionReference;
+        payment.status = PaymentStatus.UNVERIFIED;
+        payment.recordedBy = seller;
+        payment.recordedAt = now;
+        if (verified) {
+            payment.verify(seller, now);
+        }
+        return payment;
+    }
+
+    /** BR-46: the seller has checked that the money arrived (or left); from now on it counts. */
+    public void verify(long verifier, LocalDateTime now) {
+        requireUnverified();
+        status = PaymentStatus.VERIFIED;
+        verifiedBy = verifier;
+        verifiedAt = now;
+    }
+
+    /** UC-56 Step 4_Unverified transaction: the money never arrived or was recorded by mistake; it never counts. */
+    public void reject(String reason, LocalDateTime now) {
+        requireUnverified();
+        status = PaymentStatus.REJECTED;
+        rejectionReason = reason;
+    }
+
+    public boolean isUnverified() {
+        return status == PaymentStatus.UNVERIFIED;
+    }
+
+    private void requireUnverified() {
+        if (status != PaymentStatus.UNVERIFIED) {
+            throw new IllegalStateException("payment " + id + " is " + status);
+        }
+    }
 }
