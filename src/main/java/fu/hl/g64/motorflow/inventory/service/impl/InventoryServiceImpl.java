@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
+import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse;
@@ -94,6 +95,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final LotRepository lots;
     private final StockMovementRepository movements;
     private final ProductRepository products;
+    private final PartCategoryService categories;
     private final StoreRepository stores;
     private final SupplierRepository suppliers;
     private final UserAccountRepository users;
@@ -107,6 +109,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
         Long storeId = scopeStoreId(user, filter.storeId());
+        List<Long> categoryIds = filter.categoryId() == null ? null : categories.withDescendants(filter.categoryId());
         Specification<StockBalance> spec = (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             if (storeId != null) {
@@ -122,7 +125,7 @@ public class InventoryServiceImpl implements InventoryService {
                             cb.like(cb.lower(product.get("partName")), like)));
                 }
                 if (filter.categoryId() != null) {
-                    on.add(cb.equal(product.get("categoryId"), filter.categoryId()));
+                    on.add(product.get("categoryId").in(categoryIds));
                 }
                 matching.select(product.get("id")).where(on.toArray(Predicate[]::new));
                 where.add(root.get("productId").in(matching));
@@ -253,7 +256,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public LotListResponse listLots(AuthenticatedUser user, LotSearch filter, int page, int size) {
-        Long storeId = lotStoreScope(user, filter.storeId());
+        Long storeId = scopeStoreId(user, filter.storeId());
         LocalDate today = LocalDate.now(clock);
         Integer warnDays = expiryWarningDays();
         // Without a configured warning period the near-expiry window is empty.
@@ -277,7 +280,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public LotDetailResponse lotDetail(AuthenticatedUser user, long lotId, Long storeId) {
-        Long scoped = lotStoreScope(user, storeId);
+        Long scoped = scopeStoreId(user, storeId);
         Lot lot = lots.findById(lotId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG90"));
         long viewStoreId = scoped != null ? scoped : lot.getStoreId();
         boolean owner = user.role() == Role.OWNER;
@@ -310,30 +313,18 @@ public class InventoryServiceImpl implements InventoryService {
 
     // ------------------------------------------------------------------------------------------------------------
 
-    /** The warehouse a user may read: null means every warehouse (Owner without a filter). */
-    private Long scopeStoreId(AuthenticatedUser user, Long requested) {
-        if (requested == null && user.role() == Role.OWNER) {
-            return null;
-        }
-        Store store = storeScope.viewableStore(user, requested);
-        if (store == null) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
-        }
-        return store.getId();
-    }
-
     /**
-     * The warehouse whose lots a user may read: null means every warehouse (Owner without a filter). Not
-     * {@link #scopeStoreId}: UC-97 and UC-98 keep a central warehouse Branch Manager to their own warehouse too.
+     * The warehouse a user may read: null means every warehouse (Owner without a filter). A central warehouse Branch
+     * Manager is kept to their own too: only UC-48, while creating a transfer order, shows them others (BR-03).
      */
-    private Long lotStoreScope(AuthenticatedUser user, Long requested) {
+    private Long scopeStoreId(AuthenticatedUser user, Long requested) {
         if (user.role() == Role.OWNER) {
             if (requested != null && !stores.existsById(requested)) {
                 throw new BusinessException(HttpStatus.NOT_FOUND, "MSG52");
             }
             return requested;
         }
-        if (requested != null && !requested.equals(user.storeId())) {
+        if (user.storeId() == null || (requested != null && !requested.equals(user.storeId()))) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         return user.storeId();

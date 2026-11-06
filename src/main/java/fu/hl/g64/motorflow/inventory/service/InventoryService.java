@@ -24,7 +24,7 @@ import java.util.List;
  */
 public interface InventoryService {
 
-    /** UC-47: stock by part with low-stock and near-expiry warnings, ordered by store then SKU. */
+    /** UC-47: stock by part with low-stock and near-expiry warnings, ordered by store then part. */
     PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size);
 
     /** UC-47: one part in one warehouse, split by lot and status. */
@@ -39,7 +39,7 @@ public interface InventoryService {
     /** UC-50: shelf and bin of a part in a warehouse. */
     StockRowResponse updateLocation(AuthenticatedUser user, long storeId, long productId, StorageLocationRequest request);
 
-    /** UC-51: minimum sellable stock before the low-stock warning. */
+    /** UC-51: minimum available stock before the low-stock warning. */
     StockRowResponse updateLowStockThreshold(AuthenticatedUser user, long storeId, long productId,
                                              LowStockThresholdRequest request);
 

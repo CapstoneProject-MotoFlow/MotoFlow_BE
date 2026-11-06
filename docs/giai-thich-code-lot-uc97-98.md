@@ -33,7 +33,7 @@ Staff và Admin bị `@PreAuthorize` ở controller chặn (403).
 |---|---|
 | `controller/InventoryController.java` | Thêm 2 endpoint `/lots` và `/lots/{lotId}` |
 | `service/InventoryService.java` | Thêm `listLots`, `lotDetail` |
-| `service/impl/InventoryServiceImpl.java` | Thêm `listLots`, `lotDetail`, `lotStoreScope`, `daysToExpiry`, `sourceDocument`. Tách `movementRows` khỏi `movements` để UC-49 và UC-98 dùng chung |
+| `service/impl/InventoryServiceImpl.java` | Thêm `listLots`, `lotDetail`, `daysToExpiry`, `sourceDocument`. Tách `movementRows` khỏi `movements` để UC-49 và UC-98 dùng chung |
 | `repository/LotBalanceRepository.java` | Thêm `findByLotIdAndStoreIdOrderByStockStatusAsc` |
 | `repository/StockMovementRepository.java` | Thêm `existsByLotIdAndStoreId`, `findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc`, `sumIncoming` |
 | `src/main/resources/messages.properties` | Thêm `MSG90=Không tìm thấy lô.` |
@@ -104,7 +104,7 @@ Query cũng lấy luôn lô, phụ tùng, tên kho và tên nhà cung cấp tron
 
 ## 4. Vì sao BM kho tổng chỉ xem kho mình
 
-UC-97 ghi "their warehouse", tức kho của chính họ. Hàm `lotStoreScope` thể hiện quy tắc này:
+UC-97 ghi "their warehouse", tức kho của chính họ. Hàm `scopeStoreId`, dùng chung với UC-47 và UC-49, thể hiện quy tắc này:
 
 | Người dùng | `storeId` | Kết quả |
 |---|---|---|
@@ -114,8 +114,9 @@ UC-97 ghi "their warehouse", tức kho của chính họ. Hàm `lotStoreScope` t
 | BM | Không truyền | Kho của mình |
 | BM | Bằng kho của mình | Kho của mình |
 | BM | Kho khác | 403 `MSG05` |
+| BM chưa gán kho | Bất kỳ | 403 `MSG05` |
 
-Không dùng `storeScope.viewableStore` hay `scopeStoreId`, vì hai hàm này cho BM kho tổng xem mọi kho, là đúng với các màn hình khác nhưng sai với UC-97. Nhóm chưa quyết BM kho tổng được xem gì ở Iteration 2, nên hai hàm dùng chung đó được giữ nguyên, và lô có hàm riêng.
+Không dùng `storeScope.viewableStore`, vì hàm này cho BM kho tổng xem mọi kho. BM kho tổng chỉ được xem kho khác ở UC-48 khi tạo lệnh chuyển (BR-03, chú thích ⁵ của ma trận phân quyền).
 
 Ở UC-98 có thêm một lớp kiểm tra: BM mà kho mình chưa từng có lô đó (không có dòng `lot_balance`, không có `stock_movement`) sẽ nhận `MSG05`. Với Owner, không truyền `storeId` thì "kho đang xem" là `lot.storeId`, kho nhận lô lần đầu.
 
