@@ -117,7 +117,7 @@ public class StockBalance {
         updatedAt = now;
     }
 
-    /** Sellable stock is below the threshold (UC-51, JOB-02). */
+    /** Available stock is below the threshold (UC-51, JOB-02). */
     public boolean isLowStock() {
         return lowStockThreshold != null && availableQty < lowStockThreshold;
     }

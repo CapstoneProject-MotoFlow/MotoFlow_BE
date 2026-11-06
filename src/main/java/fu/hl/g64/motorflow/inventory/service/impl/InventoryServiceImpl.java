@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
+import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
@@ -74,6 +75,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final LotRepository lots;
     private final StockMovementRepository movements;
     private final ProductRepository products;
+    private final PartCategoryService categories;
     private final StoreRepository stores;
     private final SupplierRepository suppliers;
     private final UserAccountRepository users;
@@ -86,6 +88,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
         Long storeId = scopeStoreId(user, filter.storeId());
+        List<Long> categoryIds = filter.categoryId() == null ? null : categories.withDescendants(filter.categoryId());
         Specification<StockBalance> spec = (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             if (storeId != null) {
@@ -101,7 +104,7 @@ public class InventoryServiceImpl implements InventoryService {
                             cb.like(cb.lower(product.get("partName")), like)));
                 }
                 if (filter.categoryId() != null) {
-                    on.add(cb.equal(product.get("categoryId"), filter.categoryId()));
+                    on.add(product.get("categoryId").in(categoryIds));
                 }
                 matching.select(product.get("id")).where(on.toArray(Predicate[]::new));
                 where.add(root.get("productId").in(matching));
@@ -240,16 +243,21 @@ public class InventoryServiceImpl implements InventoryService {
 
     // ------------------------------------------------------------------------------------------------------------
 
-    /** The warehouse a user may read: null means every warehouse (Owner without a filter). */
+    /**
+     * The warehouse a user may read: null means every warehouse (Owner without a filter). A central warehouse Branch
+     * Manager is kept to their own too: only UC-48, while creating a transfer order, shows them others (BR-03).
+     */
     private Long scopeStoreId(AuthenticatedUser user, Long requested) {
-        if (requested == null && user.role() == Role.OWNER) {
-            return null;
+        if (user.role() == Role.OWNER) {
+            if (requested != null && !stores.existsById(requested)) {
+                throw new BusinessException(HttpStatus.NOT_FOUND, "MSG52");
+            }
+            return requested;
         }
-        Store store = storeScope.viewableStore(user, requested);
-        if (store == null) {
+        if (user.storeId() == null || (requested != null && !requested.equals(user.storeId()))) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
-        return store.getId();
+        return user.storeId();
     }
 
     /** UC-50, UC-51: a Branch Manager changes their own warehouse, the Owner any warehouse. */
