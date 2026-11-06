@@ -13,6 +13,7 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
+import fu.hl.g64.motorflow.transfer.dto.LowStockSuggestionResponse;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentDetailResponse;
 import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequest;
@@ -59,6 +60,13 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                 ReplenishmentRequestLine.create(request.getId(), line.productId(), line.requestedQty())).toList());
         notifyCoordinators(user, store, request, saved.size());
         return detail(user, request, store, parts, saved);
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public List<LowStockSuggestionResponse> lowStockSuggestions(AuthenticatedUser user, Long storeId) {
+        return lines.findLowStockParts(requestingStore(user, storeId).getId()).stream()
+                .map(row -> LowStockSuggestionResponse.from(row.getBalance(), row.getProduct())).toList();
     }
 
     /** UC-68: a Branch Manager's own store, or the store the Owner chose; only the Owner may stock a planned store. */
