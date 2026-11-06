@@ -348,7 +348,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         Map<Long, Integer> toStockByProduct = new HashMap<>();
         for (GoodsReceiptNoteLine line : lines) {
             // BR-67: passed goods above what is still expected are excess and wait for Owner.
-            int toStock = Math.min(line.getPassedQty(), expected.getOrDefault(line.getProductId(), 0));
+            int stillExpected = expected.getOrDefault(line.getProductId(), 0);
+            int toStock = Math.min(line.getPassedQty(), stillExpected);
             line.settleExcess(line.getPassedQty() - toStock);
             anyExcess |= line.getExcessQty() > 0;
             toStockByProduct.merge(line.getProductId(), toStock, Integer::sum);
@@ -365,12 +366,15 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                         line.getExpiryDate(), quantities, MovementType.RECEIPT_CONFIRMED,
                         SourceRef.goodsReceiptNote(id), manager.id(), null));
             }
-            // What a replacement delivery fails to bring stays owed on the original case, so its own case only
-            // tracks the goods to send back.
-            int shortQty = replacement ? 0 : line.shortQty();
+            // BR-27, BR-67: the supplier owes no more than the PO still lacks once this receipt is stocked. Units the
+            // document lists beyond the PO are only recorded on the line. What a replacement delivery fails to
+            // bring stays owed on the original case, so its own case only tracks the goods to send back.
+            int lacking = replacement ? 0 : Math.max(stillExpected - toStock, 0);
+            int shortQty = Math.min(line.shortQty(), lacking);
+            int limit = Math.min(shortQty + line.getWrongItemQty() + line.getDamagedQty(), lacking);
             if (shortQty + line.getWrongItemQty() + line.getDamagedQty() > 0) {
                 opened.add(DiscrepancyCase.supplier(id, line.getProductId(), shortQty, line.getWrongItemQty(),
-                        line.getDamagedQty(), now));
+                        line.getDamagedQty(), limit, now));
             }
         }
         discrepancies.saveAll(opened);
@@ -489,7 +493,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             line.decideExcess(accepted ? ExcessDecision.ACCEPTED : ExcessDecision.REJECTED);
             if (!accepted) {
                 DiscrepancyCase found = caseByProduct.computeIfAbsent(line.getProductId(), productId ->
-                        discrepancies.save(DiscrepancyCase.supplier(id, productId, 0, 0, 0, now)));
+                        discrepancies.save(DiscrepancyCase.supplier(id, productId, 0, 0, 0, 0, now)));
                 found.addRejectedExcess(line.getExcessQty());
             }
         }

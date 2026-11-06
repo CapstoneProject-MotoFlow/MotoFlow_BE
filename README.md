@@ -146,6 +146,7 @@ Các migration nằm trong `src/main/resources/db/migration/`:
 | File | Nội dung |
 |---|---|
 | `V1__init_schema.sql` | Toàn bộ 44 bảng, FK và index theo Report 4 mục 3 |
+| `V2__discrepancy_replacement_limit.sql` | `discrepancy_case`: thêm cột `replacement_limit_qty` (trần giao bù), số giao bù không còn phụ thuộc số trả lại (UC-46, BR-27, BR-67) |
 
 **Quy tắc:**
 - **Không sửa migration đã có** (Flyway sẽ báo checksum sai trên mọi máy đã chạy nó).

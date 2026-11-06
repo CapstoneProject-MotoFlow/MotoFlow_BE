@@ -24,9 +24,11 @@ public interface DiscrepancyService {
     DiscrepancyCaseResponse get(AuthenticatedUser user, long id);
 
     /**
-     * UC-46 steps 3-7: saves the quantities to return for cases of one receipt and moves those goods to awaiting
-     * return to supplier, wrong items first, then damaged goods. MSG136 for a case of another receipt, MSG35 above
-     * the held quantity, MSG134 below what was already moved.
+     * UC-46 steps 3-7: saves the quantities to return and, apart from them, to replace for cases of one receipt, and
+     * moves the goods to return to awaiting return to supplier, wrong items first, then damaged goods. MSG136 for a
+     * case of another receipt or named twice, MSG35 for a return above the held quantity or a replacement above the
+     * replacement limit, MSG134 for a return below what was already moved, MSG193 for a replacement below the short
+     * quantity or what was already replaced, waived or is on its way.
      *
      * @return every case of the receipt
      */

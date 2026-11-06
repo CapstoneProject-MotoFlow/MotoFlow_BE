@@ -108,8 +108,9 @@ public class GoodsReceiptController {
     }
 
     @Operation(summary = "Save the handling agreed with the supplier for the delivery's discrepancies (UC-46)",
-            description = "Sets the quantity to return for each case; those goods move to awaiting return to "
-                    + "supplier. Returns every case of the delivery.")
+            description = "Sets the quantity to return and, optionally, the quantity to replace for each case; the "
+                    + "goods to return move to awaiting return to supplier. Left empty, the replacement grows by the "
+                    + "units newly sent back, within replacementLimitQty. Returns every case of the delivery.")
     @PutMapping("/{id}/discrepancies")
     @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
     public List<DiscrepancyCaseResponse> saveHandling(@AuthenticationPrincipal AuthenticatedUser handler,

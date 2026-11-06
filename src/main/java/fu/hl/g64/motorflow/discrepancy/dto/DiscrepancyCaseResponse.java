@@ -14,21 +14,24 @@ import java.util.List;
  *     <li>What the case holds: {@code shortQty}, {@code wrongItemQty}, {@code damagedQty} and
  *     {@code rejectedExcessQty}; the last three are goods kept at the store.</li>
  *     <li>What it requires: {@code returnRequiredQty} to hand back to the supplier, {@code replacementRequiredQty}
- *     to receive again (short + returned - rejected excess; 0 for a case opened on a replacement delivery).</li>
+ *     to receive again, agreed apart from the return (BR-27). {@code replacementLimitQty} is the most that may be
+ *     agreed to replace: short, wrong and damaged goods, never rejected excess, never more than the PO still lacked
+ *     after the receipt (BR-67), and 0 for a case opened on a replacement delivery.</li>
  *     <li>What was done: returned, written off, replaced (accepted when a replacement GRN was confirmed), waived by
  *     agreement, and pending (on a replacement GRN not confirmed yet).</li>
  *     <li>What is left: {@code outstandingReturnQty}, {@code outstandingReplacementQty}; {@code openReplacementQty}
  *     is the part no replacement delivery is bringing yet, which a new replacement GRN or a waiver may take;
  *     {@code heldUndecidedQty} is held goods that are neither to be returned nor written off.</li>
  * </ul>
- * The {@code can...} flags tell what the signed-in user may do now; {@code events} is filled on the detail only.
+ * The {@code can...} flags tell what the signed-in user may do now: {@code canHandle} while more goods may go back
+ * or the replacement may still change; {@code events} is filled on the detail only.
  */
 public record DiscrepancyCaseResponse(
         long id, long goodsReceiptNoteId, boolean replacementDelivery, long purchaseOrderId,
         long supplierId, String supplierName, long storeId, String storeName,
         long productId, String sku, String partName, String baseUnit,
         int shortQty, int wrongItemQty, int damagedQty, int rejectedExcessQty,
-        int returnRequiredQty, int replacementRequiredQty,
+        int returnRequiredQty, int replacementRequiredQty, int replacementLimitQty,
         int returnedQty, int writtenOffQty, int replacedQty, int waivedQty, int pendingReplacementQty,
         int outstandingReturnQty, int outstandingReplacementQty, int openReplacementQty, int heldUndecidedQty,
         boolean excessAwaitingDecision,

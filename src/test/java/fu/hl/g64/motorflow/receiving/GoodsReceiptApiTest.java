@@ -319,6 +319,17 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"))
                 .andExpect(jsonPath("$.fieldErrors.deliveryDocumentNo").value("Vui lòng nhập số chứng từ giao hàng."));
+        // UC-106 step 3: the photo of the delivery document comes with it.
+        Map<String, Object> noPhoto = deliveryNote("PX-001");
+        noPhoto.remove("documents");
+        createReceipt(managerToken, order, noPhoto)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"))
+                .andExpect(jsonPath("$.fieldErrors.documents").value("Vui lòng đính kèm ảnh chứng từ giao hàng."));
+        noPhoto.put("documents", List.of());
+        createReceipt(managerToken, order, noPhoto)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.documents").value("Vui lòng đính kèm ảnh chứng từ giao hàng."));
 
         long first = receive("PX-001");
         // UC-106 Step 5_Delivery document already recorded, whatever the letter case.

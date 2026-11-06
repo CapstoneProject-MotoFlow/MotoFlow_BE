@@ -143,12 +143,13 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         // Lock order: cases, then stock.
         List<DiscrepancyCase> cases = discrepancies.findByReceiptForUpdate(receiptId);
         Map<Long, DiscrepancyCase> caseById = byId(cases, DiscrepancyCase::getId);
-        Map<Long, Integer> wanted = new LinkedHashMap<>();
+        Map<Long, Progress> progress = settlement.progress(caseById.keySet());
+        Map<Long, Agreed> wanted = new LinkedHashMap<>();
         for (int i = 0; i < request.lines().size(); i++) {
             DiscrepancyHandlingRequest.Line line = request.lines().get(i);
             int n = i + 1;
             DiscrepancyCase found = caseById.get(line.caseId());
-            if (found == null || wanted.putIfAbsent(found.getId(), line.returnRequiredQty()) != null) {
+            if (found == null || wanted.containsKey(found.getId())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG136", n);
             }
             if (!found.isOpen()) {
@@ -161,17 +162,29 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             if (line.returnRequiredQty() < found.getReturnRequiredQty()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, found.getReturnRequiredQty());
             }
+            // UC-46 step 3, BR-27: the replacement is agreed apart from the return, never above the case's limit
+            // (BR-67); left empty, it grows by the wrong or damaged units newly agreed to go back.
+            Integer asked = line.replacementRequiredQty();
+            if (asked != null && asked > found.replacementLimit()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
+            }
+            int replacement = asked != null ? asked : found.defaultReplacement(line.returnRequiredQty());
+            int floor = replacementFloor(found, progress.get(found.getId()));
+            if (replacement < floor) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG193", n, floor);
+            }
+            wanted.put(found.getId(), new Agreed(line.returnRequiredQty(), replacement));
         }
 
-        boolean replacementDelivery = ledger.replacementReceiptIds(List.of(receiptId)).contains(receiptId);
         String note = text(request.note());
         LocalDateTime now = LocalDateTime.now(clock);
         List<DiscrepancyCase> handled = cases.stream().filter(found -> wanted.containsKey(found.getId()))
                 .sorted(Comparator.comparing(DiscrepancyCase::getProductId)).toList();
         for (DiscrepancyCase found : handled) {
             int before = found.getReturnRequiredQty();
-            int after = wanted.get(found.getId());
-            if (after == before) {
+            Agreed agreed = wanted.get(found.getId());
+            int after = agreed.returnQty();
+            if (after == before && agreed.replacementQty() == found.getReplacementRequiredQty()) {
                 continue;
             }
             // Rejected excess is already awaiting return (UC-45); the rest comes from the wrong items first, then
@@ -186,7 +199,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             hold(found, StockStatus.DAMAGED, (movedAfter - wrongAfter) - (movedBefore - wrongBefore), lotId,
                     order.getStoreId(), handler.id(), note, now);
             Map<String, Object> old = obligations(found);
-            found.agreeReturn(after, !replacementDelivery);
+            found.agree(after, agreed.replacementQty());
             auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), HANDLING_SAVED, handler.id(), note, old,
                     obligations(found), now));
         }
@@ -357,17 +370,31 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                     storeNames.get(order.getStoreId()), part.getId(), part.getSku(), part.getPartName(),
                     part.getBaseUnit(), found.getShortQty(), found.getWrongItemQty(), found.getDamagedQty(),
                     found.getRejectedExcessQty(), found.getReturnRequiredQty(), found.getReplacementRequiredQty(),
+                    found.replacementLimit(),
                     done.returned(), done.writtenOff(), done.replaced(), done.waived(), done.pendingReplacement(),
                     standing.outstandingReturn(), standing.outstandingReplacement(), standing.openReplacement(),
                     standing.heldUndecided(), excessAwaiting.contains(receipt.getId() + ":" + found.getProductId()),
                     found.getStatus(), found.getOpenedAt(), found.getClosureType(), found.getClosureReason(),
                     found.getClosedBy(), names.get(found.getClosedBy()), found.getClosedAt(),
-                    open && (owner || manager) && found.heldQty() > found.getReturnRequiredQty(),
+                    open && (owner || manager) && (found.heldQty() > found.getReturnRequiredQty()
+                            || found.replacementLimit() > replacementFloor(found, done)),
                     open && manager && standing.outstandingReturn() > 0,
                     open && owner && standing.openReplacement() > 0,
                     open && manager && standing.openReplacement() > 0, history));
         }
         return rows;
+    }
+
+    /**
+     * The least the agreed replacement may be: the short quantity, which only Owner settles without replacement (UC-46
+     * Step 3_Shortage settled without replacement), and what was already replaced, waived or is on its way.
+     */
+    private static int replacementFloor(DiscrepancyCase found, Progress done) {
+        return Math.max(found.getShortQty(), done.replaced() + done.waived() + done.pendingReplacement());
+    }
+
+    /** The return and the replacement one line of a handling asks for. */
+    private record Agreed(int returnQty, int replacementQty) {
     }
 
     private static Map<String, Object> obligations(DiscrepancyCase found) {

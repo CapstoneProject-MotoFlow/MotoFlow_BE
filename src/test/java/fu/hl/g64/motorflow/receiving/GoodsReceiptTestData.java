@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -36,7 +37,10 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
         order = created(order(honda, giaLam, TODAY, null, line(pad, 10, 120_000), line(oil, 24, 85_000)));
     }
 
-    /** The body of UC-106: a delivery document dated today, for the PO's outstanding lines or for the cases. */
+    /**
+     * The body of UC-106: a delivery document dated today with one photo of it, for the PO's outstanding lines or for
+     * the cases.
+     */
     protected static Map<String, Object> deliveryNote(String documentNo, Long... replacementForCaseIds) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("deliveryDocumentNo", documentNo);
@@ -46,7 +50,14 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
         if (replacementForCaseIds.length > 0) {
             body.put("replacementForCaseIds", Arrays.asList(replacementForCaseIds));
         }
+        body.put("documents", List.of(uploaded("chung-tu.jpg")));
         return body;
+    }
+
+    /** A JPG uploaded with an ATTACHMENT signature, under a key no other test file uses. */
+    protected static Map<String, Object> uploaded(String fileName) {
+        return Map.of("storageKey", "motoflow/attachments/" + UUID.randomUUID(), "fileName", fileName,
+                "contentType", "image/jpeg", "fileSize", 100_000);
     }
 
     protected ResultActions createReceipt(String token, long purchaseOrder, Map<String, Object> body) throws Exception {
@@ -133,12 +144,28 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
         return mvc.perform(request);
     }
 
-    /** UC-46 handling with case id, quantity to return, case id, quantity... */
+    /** UC-46 handling with case id, quantity to return, case id, quantity...; the replacement left empty. */
     protected ResultActions handle(String token, long receipt, Object... caseAndReturn) throws Exception {
         List<Map<String, Object>> lines = new ArrayList<>();
         for (int i = 0; i < caseAndReturn.length; i += 2) {
-            lines.add(Map.of("caseId", caseAndReturn[i], "returnRequiredQty", caseAndReturn[i + 1]));
+            lines.add(handling(caseAndReturn[i], caseAndReturn[i + 1], null));
         }
+        return handle(token, receipt, lines);
+    }
+
+    /** One line of UC-46 handling; a null quantity is sent as null. */
+    protected static Map<String, Object> handling(Object caseId, Object returnQty, Object replacementQty) {
+        Map<String, Object> line = new LinkedHashMap<>();
+        line.put("caseId", caseId);
+        line.put("returnRequiredQty", returnQty);
+        if (replacementQty != null) {
+            line.put("replacementRequiredQty", replacementQty);
+        }
+        return line;
+    }
+
+    /** UC-46 handling with the given lines. */
+    protected ResultActions handle(String token, long receipt, List<Map<String, Object>> lines) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("lines", lines);
         body.put("note", "Đã thống nhất với NCC");
@@ -146,8 +173,11 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
                 .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
 
+    /** UC-46 Step 1_Actual supplier return; a body with no {@code evidence} key gets one photo of the handover. */
     protected ResultActions supplierReturn(String token, long discrepancy, Map<String, Object> body)
             throws Exception {
+        body = new LinkedHashMap<>(body);
+        body.putIfAbsent("evidence", List.of(uploaded("bien-ban.jpg")));
         return mvc.perform(post("/api/v1/discrepancy-cases/" + discrepancy + "/supplier-returns")
                 .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
