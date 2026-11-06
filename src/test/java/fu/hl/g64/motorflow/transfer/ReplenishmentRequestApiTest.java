@@ -125,6 +125,11 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"lines\":[null]}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"));
+        mvc.perform(post(REQUESTS).header(HttpHeaders.AUTHORIZATION, signIn("bm"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[{\"productId\":" + brake + ",\"requestedQty\":1.5}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
         create("bm", null, "x".repeat(501), line(brake, 1)).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"));
         create("bm", null, null, line(9999, 1)).andExpect(status().isNotFound())
