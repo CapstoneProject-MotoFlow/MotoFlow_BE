@@ -7,6 +7,9 @@ import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
+import fu.hl.g64.motorflow.inventory.dto.LotRowResponse;
+import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
@@ -23,6 +26,8 @@ import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotStatus;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
+import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository;
+import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.LotStock;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockMovementRepository;
@@ -53,6 +58,7 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -71,6 +77,7 @@ public class InventoryServiceImpl implements InventoryService {
 
     private final StockBalanceRepository balances;
     private final LotBalanceRepository lotBalances;
+    private final LotQueryRepository lotQueries;
     private final LotRepository lots;
     private final StockMovementRepository movements;
     private final ProductRepository products;
@@ -238,6 +245,30 @@ public class InventoryServiceImpl implements InventoryService {
         return rows(user, List.of(balance)).getFirst();
     }
 
+    // UC-97
+    @Transactional(readOnly = true)
+    @Override
+    public LotListResponse listLots(AuthenticatedUser user, LotSearch filter, int page, int size) {
+        Long storeId = lotStoreScope(user, filter.storeId());
+        LocalDate today = LocalDate.now(clock);
+        Integer warnDays = expiryWarningDays();
+        // Without a configured warning period the near-expiry window is empty.
+        LocalDate warnUntil = warnDays == null ? today.minusDays(1) : today.plusDays(warnDays);
+        String q = StringUtils.hasText(filter.q()) ? filter.q().strip() : null;
+        String like = q == null ? null : "%" + q.toLowerCase(Locale.ROOT) + "%";
+        Page<LotStock> found = lotQueries.searchLots(filter.tab().name(), storeId, filter.supplierId(), filter.source(),
+                filter.receivedFrom(), filter.receivedTo(), q, like, today, warnUntil,
+                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
+        return new LotListResponse(warnDays, PageResponse.of(found, found.getContent().stream().map(row -> {
+            Lot lot = row.getLot();
+            Product p = row.getProduct();
+            return new LotRowResponse(lot.getId(), row.getStoreId(), row.getStoreName(), p.getId(), p.getSku(),
+                    p.getPartName(), p.getBaseUnit(), lot.getSourceType(), lot.getSupplierId(), row.getSupplierName(),
+                    lot.getManufacturerLotNo(), lot.getManufactureDate(), lot.getExpiryDate(), daysToExpiry(lot, today),
+                    row.getRemaining(), lot.getReceivedDate());
+        }).toList()));
+    }
+
     // ------------------------------------------------------------------------------------------------------------
 
     /** The warehouse a user may read: null means every warehouse (Owner without a filter). */
@@ -250,6 +281,23 @@ public class InventoryServiceImpl implements InventoryService {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         return store.getId();
+    }
+
+    /**
+     * The warehouse whose lots a user may read: null means every warehouse (Owner without a filter). Not
+     * {@link #scopeStoreId}: UC-97 and UC-98 keep a central warehouse Branch Manager to their own warehouse too.
+     */
+    private Long lotStoreScope(AuthenticatedUser user, Long requested) {
+        if (user.role() == Role.OWNER) {
+            if (requested != null && !stores.existsById(requested)) {
+                throw new BusinessException(HttpStatus.NOT_FOUND, "MSG52");
+            }
+            return requested;
+        }
+        if (requested != null && !requested.equals(user.storeId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        return user.storeId();
     }
 
     /** UC-50, UC-51: a Branch Manager changes their own warehouse, the Owner any warehouse. */
@@ -324,6 +372,10 @@ public class InventoryServiceImpl implements InventoryService {
         }
         return warnDays != null && !lot.getExpiryDate().isAfter(today.plusDays(warnDays))
                 ? ExpiryState.NEAR_EXPIRY : ExpiryState.OK;
+    }
+
+    private static Integer daysToExpiry(Lot lot, LocalDate today) {
+        return lot.getExpiryDate() == null ? null : Math.toIntExact(ChronoUnit.DAYS.between(today, lot.getExpiryDate()));
     }
 
     private static String key(Long storeId, Long productId) {

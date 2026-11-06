@@ -1,6 +1,9 @@
 package fu.hl.g64.motorflow.inventory.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
+import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
+import fu.hl.g64.motorflow.inventory.dto.LotSearch;
+import fu.hl.g64.motorflow.inventory.dto.LotTab;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
@@ -9,6 +12,7 @@ import fu.hl.g64.motorflow.inventory.dto.StockMovementResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockRowResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockSearch;
 import fu.hl.g64.motorflow.inventory.dto.StorageLocationRequest;
+import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
@@ -30,7 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-@Tag(name = "Inventory", description = "UC-47 to UC-51 (Owner, Branch Manager)")
+@Tag(name = "Inventory", description = "UC-47 to UC-51, UC-97 (Owner, Branch Manager)")
 @RestController
 @RequestMapping("/api/v1/inventory")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
@@ -79,6 +83,24 @@ public class InventoryController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return inventoryService.movements(user, new MovementSearch(storeId, productId, lotId, movementType, from, to),
+                page, size);
+    }
+
+    @Operation(summary = "Lots of a warehouse by tab, without prices (UC-97). Without storeId: own warehouse, or every "
+            + "warehouse for the Owner. A Branch Manager, central warehouse included, sees their own warehouse only")
+    @GetMapping("/lots")
+    public LotListResponse listLots(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @RequestParam(defaultValue = "NEAR_EXPIRY") LotTab tab,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Long supplierId,
+            @RequestParam(required = false) LotSourceType source,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receivedFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate receivedTo,
+            @RequestParam(required = false) Long storeId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return inventoryService.listLots(user, new LotSearch(tab, q, supplierId, source, receivedFrom, receivedTo, storeId),
                 page, size);
     }
 
