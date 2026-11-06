@@ -57,7 +57,7 @@ Tab được định nghĩa như sau:
 
 | Tab | Điều kiện |
 |---|---|
-| `NEAR_EXPIRY` | Còn hàng và hạn trong [hôm nay, hôm nay + N] |
+| `NEAR_EXPIRY` | Còn hàng, hạn trong [hôm nay, hôm nay + N] và `lot.status` khác `EXPIRED` |
 | `EXPIRED` | Còn hàng và (hạn trước hôm nay hoặc `lot.status = EXPIRED`) |
 | `IN_STOCK` | Còn hàng, gồm cả lô sắp hết và đã hết hạn |
 | `DEPLETED` | Có dòng ở kho đó nhưng còn lại bằng 0 |
@@ -131,7 +131,6 @@ BR-72 giới hạn thông tin giá vốn, và màn hình danh sách lô không c
 - **`issueOrder` tối đa 20 dòng:** nếu lô đang xem đứng sau vị trí 20 thì không có dòng `current = true`.
 - **`byStatus` có thể có `IN_TRANSIT`:** tổng `byStatus` có thể lớn hơn `remainingQty`.
 - **Lô đang chuyển tới kho đích:** không hiện ở tab `DEPLETED` của kho đích vì chưa tới nơi, nhưng BM kho đích vẫn mở được chi tiết vì đã có dòng `lot_balance`.
-- **`NEAR_EXPIRY` không loại `status = EXPIRED`:** lô có trạng thái này mà hạn còn trong tương lai sẽ hiện ở cả hai tab. Hiện chưa có job nào đặt trạng thái này, cần xem lại khi làm JOB-03.
 - **Trạng thái hạn tính lúc đọc:** các API này không cập nhật `lot.status`.
 
 ## 7. Cách chạy Postman

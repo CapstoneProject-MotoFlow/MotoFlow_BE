@@ -116,6 +116,13 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void lotMarkedExpiredLeavesTheNearExpiryTab() throws Exception {
+        jdbc.update("UPDATE lot SET status = 'EXPIRED' WHERE id = ?", a);
+        lots("bm", "?tab=NEAR_EXPIRY").andExpect(jsonPath("$.page.items", empty()));
+        lots("bm", "?tab=EXPIRED").andExpect(jsonPath("$.page.items[*].lotId", contains((int) b, (int) a)));
+    }
+
+    @Test
     void remainingIgnoresStockInTransit() throws Exception {
         jdbc.update("INSERT INTO lot_balance (lot_id, store_id, stock_status, quantity) VALUES (?, ?, 'DAMAGED', 2), "
                 + "(?, ?, 'IN_TRANSIT', 7)", a, branch, a, branch);

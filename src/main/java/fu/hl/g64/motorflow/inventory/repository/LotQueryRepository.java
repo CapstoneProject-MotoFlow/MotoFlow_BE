@@ -49,7 +49,8 @@ public interface LotQueryRepository extends Repository<Lot, Long> {
               and (:q is null or cast(l.id as String) = :q or lower(p.sku) like :like or lower(p.partName) like :like
                    or lower(l.manufacturerLotNo) like :like)
               and (:tab in ('IN_STOCK', 'DEPLETED')
-                   or (:tab = 'NEAR_EXPIRY' and l.expiryDate between :today and :warnUntil)
+                   or (:tab = 'NEAR_EXPIRY' and l.expiryDate between :today and :warnUntil
+                       and l.status <> fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED)
                    or (:tab = 'EXPIRED' and (l.expiryDate < :today
                        or l.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED)))
             group by l.id, p.id, s.id, su.id
