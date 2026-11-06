@@ -11,6 +11,8 @@ import java.util.List;
 
 public interface ReplenishmentRequestLineRepository extends JpaRepository<ReplenishmentRequestLine, Long> {
 
+    List<ReplenishmentRequestLine> findByReplenishmentRequestIdOrderById(Long replenishmentRequestId);
+
     interface LowStockPart {
         StockBalance getBalance();
 

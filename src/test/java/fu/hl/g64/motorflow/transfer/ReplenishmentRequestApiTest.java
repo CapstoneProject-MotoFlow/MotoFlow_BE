@@ -15,6 +15,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.empty;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -200,6 +201,137 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
         suggestions("admin", branch).andExpect(status().isForbidden());
     }
 
+    @Test
+    void aBranchManagerListsTheirStoreAndCoordinatorsListEveryStore() throws Exception {
+        long own = created("bm", null);
+        long other = created("owner", central);
+
+        list("bm").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id", contains((int) own)))
+                .andExpect(jsonPath("$.totalItems").value(1));
+        list("bmkt").andExpect(jsonPath("$.items[*].id", containsInAnyOrder((int) own, (int) other)));
+        list("owner").andExpect(jsonPath("$.items[*].id", containsInAnyOrder((int) own, (int) other)));
+
+        list("bm", "storeId", String.valueOf(central)).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+        list("bm", "storeId", String.valueOf(branch)).andExpect(jsonPath("$.items[*].id", contains((int) own)));
+        list("staff").andExpect(status().isForbidden());
+        list("admin").andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aRowCarriesTheTotalsOfItsLines() throws Exception {
+        create("bm", null, null, line(brake, 5), line(chain, 2)).andExpect(status().isCreated());
+
+        list("owner").andExpect(jsonPath("$.items[0].requestingStoreId").value(branch))
+                .andExpect(jsonPath("$.items[0].storeName").value("Long Biên"))
+                .andExpect(jsonPath("$.items[0].status").value("AWAITING_COORDINATION"))
+                .andExpect(jsonPath("$.items[0].lineCount").value(2))
+                .andExpect(jsonPath("$.items[0].totalRequestedQty").value(7))
+                .andExpect(jsonPath("$.items[0].createdBy").value(branchManager.getId()))
+                .andExpect(jsonPath("$.items[0].createdByName").value(branchManager.getFullName()))
+                .andExpect(jsonPath("$.items[0].closedAt").isEmpty());
+    }
+
+    @Test
+    void requestsAwaitingCoordinationComeFirstThenTheNewest() throws Exception {
+        long oldOpen = created("bm", null);
+        long closed = created("bm", null);
+        long newOpen = created("bm", null);
+        long progressing = created("bm", null);
+        at(oldOpen, "2026-10-01 09:00:00");
+        at(closed, "2026-10-05 09:00:00");
+        at(newOpen, "2026-10-03 09:00:00");
+        at(progressing, "2026-10-04 09:00:00");
+        jdbc.update("UPDATE replenishment_request SET status = 'CLOSED', closed_at = now() WHERE id = ?", closed);
+        jdbc.update("UPDATE replenishment_request SET status = 'IN_PROGRESS' WHERE id = ?", progressing);
+
+        list("owner").andExpect(jsonPath("$.items[*].id",
+                contains((int) newOpen, (int) oldOpen, (int) closed, (int) progressing)));
+    }
+
+    @Test
+    void theListIsFilteredByStatusStoreAndCreatedDate() throws Exception {
+        long first = created("bm", null);
+        long second = created("owner", central);
+        long third = created("bm", null);
+        at(first, "2026-10-01 23:30:00");
+        at(second, "2026-10-02 00:00:00");
+        at(third, "2026-10-03 08:00:00");
+        jdbc.update("UPDATE replenishment_request SET status = 'IN_PROGRESS' WHERE id = ?", third);
+
+        list("owner", "status", "IN_PROGRESS").andExpect(jsonPath("$.items[*].id", contains((int) third)));
+        list("owner", "storeId", String.valueOf(central)).andExpect(jsonPath("$.items[*].id", contains((int) second)));
+        list("owner", "from", "2026-10-02").andExpect(jsonPath("$.totalItems").value(2));
+        list("owner", "to", "2026-10-01").andExpect(jsonPath("$.items[*].id", contains((int) first)));
+        list("owner", "from", "2026-10-01", "to", "2026-10-02")
+                .andExpect(jsonPath("$.items[*].id", contains((int) second, (int) first)));
+    }
+
+    @Test
+    void theDetailAddsUpTransfersAndConfirmedReceipts() throws Exception {
+        long id = created("bm", null, line(brake, 10), line(chain, 2));
+        jdbc.update("UPDATE replenishment_request_line SET to_purchase_qty = 3 WHERE product_id = ?", brake);
+        long other = createStore("Cầu Giấy");
+        long first = transfer(central, branch, id, line(brake, 4), line(chain, 2));
+        long second = transfer(other, branch, id, line(brake, 2));
+        transfer(central, branch, null, line(brake, 50));
+
+        long stray = transfer(central, branch, null, line(brake, 7));
+        receipt(stray, "TRANSFER_IN", "CONFIRMED", brake, 7);
+        receipt(first, "TRANSFER_IN", "CONFIRMED", brake, 3);
+        receipt(first, "TRANSFER_IN", "CONFIRMED", chain, 5);
+        receipt(second, "TRANSFER_IN", "AWAITING_CONFIRMATION", brake, 2);
+        receipt(first, "RETURN_TO_SOURCE", "CONFIRMED", brake, 1);
+
+        detail("bm", id).andExpect(status().isOk())
+                .andExpect(jsonPath("$.note").value("Cần gấp"))
+                .andExpect(jsonPath("$.createdByName").value(branchManager.getFullName()))
+                .andExpect(jsonPath("$.lines[0].sku").value("MA-PHANH"))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(10))
+                .andExpect(jsonPath("$.lines[0].plannedQty").value(6))
+                .andExpect(jsonPath("$.lines[0].fulfilledQty").value(3))
+                .andExpect(jsonPath("$.lines[0].toPurchaseQty").value(3))
+                .andExpect(jsonPath("$.lines[0].remainingQty").value(4))
+                .andExpect(jsonPath("$.lines[1].plannedQty").value(2))
+                .andExpect(jsonPath("$.lines[1].fulfilledQty").value(5))
+                .andExpect(jsonPath("$.lines[1].remainingQty").value(0))
+                .andExpect(jsonPath("$.transferOrders[*].id", contains((int) first, (int) second)))
+                .andExpect(jsonPath("$.transferOrders[1].sourceStoreId").value(other))
+                .andExpect(jsonPath("$.transferOrders[1].sourceStoreName").value("Cầu Giấy"))
+                .andExpect(jsonPath("$.transferOrders[1].destStoreId").value(branch))
+                .andExpect(jsonPath("$.transferOrders[1].status").value("AWAITING_DISPATCH"));
+    }
+
+    @Test
+    void purchaseOrdersOfTheRequestAreShownToWhoeverMayOpenIt() throws Exception {
+        long id = created("bm", null);
+        long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) "
+                + "VALUES ('NCC001', 'Minh Phát') RETURNING id", Long.class);
+        long order = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, replenishment_request_id, "
+                + "created_by) VALUES (?, ?, ?, ?) RETURNING id", Long.class, supplier, branch, id, owner.getId());
+        jdbc.update("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?)",
+                supplier, branch, owner.getId());
+
+        for (String reader : List.of("owner", "bmkt", "bm")) {
+            detail(reader, id).andExpect(jsonPath("$.purchaseOrders[*].id", contains((int) order)))
+                    .andExpect(jsonPath("$.purchaseOrders[0].supplierId").value(supplier))
+                    .andExpect(jsonPath("$.purchaseOrders[0].supplierName").value("Minh Phát"))
+                    .andExpect(jsonPath("$.purchaseOrders[0].status").value("AWAITING_DELIVERY"));
+        }
+    }
+
+    @Test
+    void theDetailIsRefusedOutsideTheStoreAndMissingRequestsAreNotFound() throws Exception {
+        long id = created("owner", central);
+
+        detail("bm", id).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        detail("bmkt", id).andExpect(status().isOk());
+        detail("owner", 9999).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG95"));
+        detail("staff", id).andExpect(status().isForbidden());
+        detail("admin", id).andExpect(status().isForbidden());
+    }
+
     // ------------------------------------------------------------------------------------------------------------
 
     @SafeVarargs
@@ -210,6 +342,50 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
         body.put("lines", List.of(lines));
         return mvc.perform(post(REQUESTS).header(HttpHeaders.AUTHORIZATION, signIn(username))
                 .contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    @SafeVarargs
+    private long created(String username, Long storeId, Map<String, Object>... lines) throws Exception {
+        create(username, storeId, "Cần gấp", lines.length == 0 ? new Map[] {line(brake, 1)} : lines)
+                .andExpect(status().isCreated());
+        return jdbc.queryForObject("SELECT max(id) FROM replenishment_request", Long.class);
+    }
+
+    private void at(long requestId, String createdAt) {
+        jdbc.update("UPDATE replenishment_request SET created_at = ?::timestamp WHERE id = ?", createdAt, requestId);
+    }
+
+    private ResultActions list(String username, String... params) throws Exception {
+        var request = get(REQUESTS).header(HttpHeaders.AUTHORIZATION, signIn(username));
+        for (int i = 0; i < params.length; i += 2) {
+            request.param(params[i], params[i + 1]);
+        }
+        return mvc.perform(request);
+    }
+
+    private ResultActions detail(String username, long id) throws Exception {
+        return mvc.perform(get(REQUESTS + "/" + id).header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
+    @SafeVarargs
+    private long transfer(long source, long destination, Long requestId, Map<String, Object>... lines) {
+        long id = jdbc.queryForObject("INSERT INTO transfer_order (replenishment_request_id, source_store_id, "
+                + "dest_store_id, created_by) VALUES (?, ?, ?, ?) RETURNING id", Long.class, requestId, source,
+                destination, owner.getId());
+        for (Map<String, Object> line : lines) {
+            jdbc.update("INSERT INTO transfer_order_line (transfer_order_id, product_id, planned_qty) VALUES (?, ?, ?)",
+                    id, line.get("productId"), line.get("requestedQty"));
+        }
+        return id;
+    }
+
+    private void receipt(long transferId, String type, String receiptStatus, long productId, int passed) {
+        long receipt = jdbc.queryForObject("INSERT INTO goods_receipt_note (receipt_type, transfer_order_id, arrived_at, "
+                + "status, recorded_by, submitted_at, confirmed_by, confirmed_at) VALUES (?, ?, now(), ?, ?, now(), ?, "
+                + "now()) RETURNING id", Long.class, type, transferId, receiptStatus, owner.getId(),
+                branchManager.getId());
+        jdbc.update("INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, delivered_qty, "
+                + "passed_qty) VALUES (?, ?, ?, ?, ?)", receipt, productId, passed, passed, passed);
     }
 
     private ResultActions suggestions(String username, Long storeId) throws Exception {

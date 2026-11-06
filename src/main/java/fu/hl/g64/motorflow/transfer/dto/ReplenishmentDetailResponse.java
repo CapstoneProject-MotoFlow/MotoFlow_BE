@@ -7,7 +7,7 @@ import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** UC-70: one replenishment request. {@code purchaseOrders} is empty for a Branch Manager: POs belong to the Owner. */
+/** UC-70: one replenishment request, with the transfer orders and POs created for it. */
 public record ReplenishmentDetailResponse(long id, long requestingStoreId, String storeName,
                                           ReplenishmentRequestStatus status, String note, long createdBy,
                                           String createdByName, LocalDateTime createdAt, LocalDateTime closedAt,
