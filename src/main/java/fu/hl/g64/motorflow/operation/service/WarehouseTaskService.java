@@ -43,6 +43,12 @@ public interface WarehouseTaskService {
     void submitResult(AuthenticatedUser user, TaskType type, long documentId);
 
     /**
+     * UC-57 "Correct an unconfirmed result": the assignee takes back the result they sent while nobody has confirmed
+     * it, then records and sends it again. MSG05 unless the user sent the result that waits.
+     */
+    void reopenOwnResult(AuthenticatedUser user, TaskType type, long documentId);
+
+    /**
      * The result was sent back for a recount, also after it was confirmed (an Owner asking for a recount of a
      * confirmed stock count): the person who recorded it records again and can again be replaced.
      *
@@ -53,7 +59,9 @@ public interface WarehouseTaskService {
     /**
      * The result was confirmed: the task is done. BR-26: the confirmer must not be the person who recorded the
      * result, which matters when a Branch Manager took the task themself (MSG32 for a goods receipt note, MSG124
-     * for the other documents).
+     * for the other documents). A result already confirmed can be confirmed again when the document changed without
+     * a new result (a sales order whose price or delivered quantities were revised, UC-55, UC-58): the same check
+     * applies and the task stays done.
      */
     void confirmResult(AuthenticatedUser confirmer, TaskType type, long documentId);
 

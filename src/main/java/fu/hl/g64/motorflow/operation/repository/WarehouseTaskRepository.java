@@ -76,4 +76,13 @@ public interface WarehouseTaskRepository extends JpaRepository<WarehouseTask, Lo
               and t.status in (fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.ASSIGNED,
                                fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.RESULT_SUBMITTED)""")
     List<WarehouseTask> findOpenInspections(Collection<Long> receiptIds);
+
+    /** The open picking task (ASSIGNED or RESULT_SUBMITTED) of each of the given sales orders that has one. */
+    @Query("""
+            select t from WarehouseTask t
+            where t.taskType = fu.hl.g64.motorflow.operation.entity.enums.TaskType.PICKING
+              and t.salesOrderId in :orderIds
+              and t.status in (fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.ASSIGNED,
+                               fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.RESULT_SUBMITTED)""")
+    List<WarehouseTask> findOpenPickings(Collection<Long> orderIds);
 }
