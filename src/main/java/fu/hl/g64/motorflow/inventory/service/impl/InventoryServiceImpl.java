@@ -81,7 +81,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final StoreScope storeScope;
     private final Clock clock;
 
-    // UC-48
+    // UC-47
     @Transactional(readOnly = true)
     @Override
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
@@ -117,7 +117,7 @@ public class InventoryServiceImpl implements InventoryService {
         return PageResponse.of(found, rows(user, found.getContent()));
     }
 
-    // UC-48
+    // UC-47
     @Transactional(readOnly = true)
     @Override
     public StockDetailResponse stockDetail(AuthenticatedUser user, long storeId, long productId) {
@@ -145,7 +145,7 @@ public class InventoryServiceImpl implements InventoryService {
                 owner ? product.getMovingAvgCost() : null, warnDays, lines);
     }
 
-    // UC-49
+    // UC-48
     @Transactional(readOnly = true)
     @Override
     public List<StockAvailabilityResponse> availability(AuthenticatedUser user, Collection<Long> productIds) {
@@ -175,7 +175,7 @@ public class InventoryServiceImpl implements InventoryService {
                 .toList();
     }
 
-    // UC-50
+    // UC-49
     @Transactional(readOnly = true)
     @Override
     public PageResponse<StockMovementResponse> movements(AuthenticatedUser user, MovementSearch filter, int page,
@@ -218,7 +218,7 @@ public class InventoryServiceImpl implements InventoryService {
                 owner ? m.getValue() : null)).toList());
     }
 
-    // UC-51
+    // UC-50
     @Transactional
     @Override
     public StockRowResponse updateLocation(AuthenticatedUser user, long storeId, long productId,
@@ -228,7 +228,7 @@ public class InventoryServiceImpl implements InventoryService {
         return rows(user, List.of(balance)).getFirst();
     }
 
-    // UC-52
+    // UC-51
     @Transactional
     @Override
     public StockRowResponse updateLowStockThreshold(AuthenticatedUser user, long storeId, long productId,
@@ -252,7 +252,7 @@ public class InventoryServiceImpl implements InventoryService {
         return store.getId();
     }
 
-    /** UC-51, UC-52: a Branch Manager changes their own warehouse, the Owner any warehouse. */
+    /** UC-50, UC-51: a Branch Manager changes their own warehouse, the Owner any warehouse. */
     private StockBalance editableBalance(AuthenticatedUser user, long storeId, long productId) {
         if (user.role() != Role.OWNER && !Long.valueOf(storeId).equals(user.storeId())) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");

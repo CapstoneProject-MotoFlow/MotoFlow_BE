@@ -8,7 +8,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * UC-50: one stock movement with its lot and source document. {@code unitCost} and {@code value} are filled for the
+ * UC-49: one stock movement with its lot and source document. {@code unitCost} and {@code value} are filled for the
  * Owner only (BR-72).
  */
 public record StockMovementResponse(long id, LocalDateTime occurredAt, long storeId, long productId, String sku,

@@ -104,20 +104,20 @@ public class StockBalance {
         updatedAt = now;
     }
 
-    /** UC-51: where Staff find the part in this warehouse. */
+    /** UC-50: where Staff find the part in this warehouse. */
     public void moveTo(String newStorageArea, String newBinLocation, LocalDateTime now) {
         storageArea = newStorageArea;
         binLocation = newBinLocation;
         updatedAt = now;
     }
 
-    /** UC-52: null removes the threshold. */
+    /** UC-51: null removes the threshold. */
     public void setLowStockThreshold(Integer threshold, LocalDateTime now) {
         lowStockThreshold = threshold;
         updatedAt = now;
     }
 
-    /** Sellable stock is below the threshold (UC-52, JOB-02). */
+    /** Sellable stock is below the threshold (UC-51, JOB-02). */
     public boolean isLowStock() {
         return lowStockThreshold != null && availableQty < lowStockThreshold;
     }

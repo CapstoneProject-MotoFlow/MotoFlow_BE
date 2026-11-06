@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 /**
- * UC-48: one part in one warehouse, split by lot and stock status. Cost fields are filled for the Owner only (BR-72).
+ * UC-47: one part in one warehouse, split by lot and stock status. Cost fields are filled for the Owner only (BR-72).
  */
 public record StockDetailResponse(StockRowResponse stock, BigDecimal movingAvgCost, Integer expiryWarningDays,
                                   List<LotLine> lots) {

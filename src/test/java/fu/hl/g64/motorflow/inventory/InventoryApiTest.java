@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** UC-48 to UC-52. */
+/** UC-47 to UC-51. */
 class InventoryApiTest extends ApiTestUsers {
 
     @Autowired

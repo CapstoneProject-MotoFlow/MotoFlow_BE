@@ -30,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-@Tag(name = "Inventory", description = "UC-48 to UC-52 (Owner, Branch Manager)")
+@Tag(name = "Inventory", description = "UC-47 to UC-51 (Owner, Branch Manager)")
 @RestController
 @RequestMapping("/api/v1/inventory")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
@@ -40,7 +40,7 @@ public class InventoryController {
     private final InventoryService inventoryService;
 
     @Operation(summary = "Stock by part and status with low-stock and near-expiry warnings; stock value for the Owner "
-            + "only (UC-48). Without storeId: own warehouse, or every warehouse for the Owner")
+            + "only (UC-47). Without storeId: own warehouse, or every warehouse for the Owner")
     @GetMapping("/stock")
     public PageResponse<StockRowResponse> listStock(@AuthenticationPrincipal AuthenticatedUser user,
                                                     @RequestParam(required = false) Long storeId,
@@ -52,21 +52,21 @@ public class InventoryController {
         return inventoryService.listStock(user, new StockSearch(storeId, q, categoryId, lowStockOnly), page, size);
     }
 
-    @Operation(summary = "One part in one warehouse split by lot and status (UC-48)")
+    @Operation(summary = "One part in one warehouse split by lot and status (UC-47)")
     @GetMapping("/stock/{storeId}/{productId}")
     public StockDetailResponse stockDetail(@AuthenticationPrincipal AuthenticatedUser user,
                                            @PathVariable long storeId, @PathVariable long productId) {
         return inventoryService.stockDetail(user, storeId, productId);
     }
 
-    @Operation(summary = "Sellable stock of the parts in every active warehouse (UC-49, Owner or central warehouse BM)")
+    @Operation(summary = "Sellable stock of the parts in every active warehouse (UC-48, Owner or central warehouse BM)")
     @GetMapping("/availability")
     public List<StockAvailabilityResponse> availability(@AuthenticationPrincipal AuthenticatedUser user,
                                                         @RequestParam List<Long> productIds) {
         return inventoryService.availability(user, productIds);
     }
 
-    @Operation(summary = "Stock movements, newest first, with lot and source document (UC-50)")
+    @Operation(summary = "Stock movements, newest first, with lot and source document (UC-49)")
     @GetMapping("/movements")
     public PageResponse<StockMovementResponse> movements(
             @AuthenticationPrincipal AuthenticatedUser user,
@@ -82,7 +82,7 @@ public class InventoryController {
                 page, size);
     }
 
-    @Operation(summary = "Update the shelf and bin of a part in a warehouse (UC-51)")
+    @Operation(summary = "Update the shelf and bin of a part in a warehouse (UC-50)")
     @PutMapping("/stock/{storeId}/{productId}/location")
     public StockRowResponse updateLocation(@AuthenticationPrincipal AuthenticatedUser user,
                                            @PathVariable long storeId, @PathVariable long productId,
@@ -90,7 +90,7 @@ public class InventoryController {
         return inventoryService.updateLocation(user, storeId, productId, request);
     }
 
-    @Operation(summary = "Set or clear the low-stock threshold of a part in a warehouse (UC-52)")
+    @Operation(summary = "Set or clear the low-stock threshold of a part in a warehouse (UC-51)")
     @PutMapping("/stock/{storeId}/{productId}/low-stock-threshold")
     public StockRowResponse updateLowStockThreshold(@AuthenticationPrincipal AuthenticatedUser user,
                                                     @PathVariable long storeId, @PathVariable long productId,

@@ -15,28 +15,28 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * UC-48 to UC-52: looking at stock and its settings. A Branch Manager sees their own warehouse, the Owner every
+ * UC-47 to UC-51: looking at stock and its settings. A Branch Manager sees their own warehouse, the Owner every
  * warehouse (BR-03); purchase and cost values are shown to the Owner only (BR-72). Stock quantities change only
  * through {@link InventoryPostingService}.
  */
 public interface InventoryService {
 
-    /** UC-48: stock by part with low-stock and near-expiry warnings, ordered by store then SKU. */
+    /** UC-47: stock by part with low-stock and near-expiry warnings, ordered by store then SKU. */
     PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size);
 
-    /** UC-48: one part in one warehouse, split by lot and status. */
+    /** UC-47: one part in one warehouse, split by lot and status. */
     StockDetailResponse stockDetail(AuthenticatedUser user, long storeId, long productId);
 
-    /** UC-49: sellable stock of the parts in every active warehouse, to choose a transfer source. */
+    /** UC-48: sellable stock of the parts in every active warehouse, to choose a transfer source. */
     List<StockAvailabilityResponse> availability(AuthenticatedUser user, Collection<Long> productIds);
 
-    /** UC-50: movements newest first, each traceable to its lot and source document. */
+    /** UC-49: movements newest first, each traceable to its lot and source document. */
     PageResponse<StockMovementResponse> movements(AuthenticatedUser user, MovementSearch filter, int page, int size);
 
-    /** UC-51: shelf and bin of a part in a warehouse. */
+    /** UC-50: shelf and bin of a part in a warehouse. */
     StockRowResponse updateLocation(AuthenticatedUser user, long storeId, long productId, StorageLocationRequest request);
 
-    /** UC-52: minimum sellable stock before the low-stock warning. */
+    /** UC-51: minimum sellable stock before the low-stock warning. */
     StockRowResponse updateLowStockThreshold(AuthenticatedUser user, long storeId, long productId,
                                              LowStockThresholdRequest request);
 }
