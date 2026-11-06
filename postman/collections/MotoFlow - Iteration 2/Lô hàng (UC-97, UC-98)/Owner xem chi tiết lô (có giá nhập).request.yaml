@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}?storeId={{bmStoreId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có giá nhập', () => pm.expect(b.purchaseUnitPrice).to.be.a('number'));
+      pm.test('Đang xem kho đã chọn', () =>
+          pm.expect(b.viewStoreId).to.eql(Number(pm.collectionVariables.get('bmStoreId'))));
+      pm.test('Có chứng từ tạo lô', () => pm.expect(b.sourceDocument.type).to.be.oneOf(['GOODS_RECEIPT_NOTE', 'STOCK_COUNT']));
+      pm.test('Tối đa 10 biến động, 20 dòng thứ tự xuất', () => {
+          pm.expect(b.movements.length).to.be.at.most(10);
+          pm.expect(b.issueOrder.length).to.be.at.most(20);
+      });
+    language: text/javascript
+order: 5000

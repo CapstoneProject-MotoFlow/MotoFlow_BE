@@ -1,0 +1,19 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Không có giá nhập', () => pm.expect(b.purchaseUnitPrice).to.eql(null));
+      pm.test('Biến động không có giá vốn', () => b.movements.forEach(m => {
+          pm.expect(m.unitCost).to.eql(null);
+          pm.expect(m.value).to.eql(null);
+      }));
+    language: text/javascript
+order: 6000

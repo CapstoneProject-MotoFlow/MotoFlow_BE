@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/lots/999999999"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 404', () => pm.response.to.have.status(404));
+      pm.test('Mã lỗi MSG90', () => pm.expect(pm.response.json().code).to.eql('MSG90'));
+    language: text/javascript
+order: 7000

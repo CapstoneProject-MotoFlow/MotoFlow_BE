@@ -1,0 +1,13 @@
+$kind: collection
+description: |-
+  Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.
+
+  - Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).
+  - Collection chỉ đọc dữ liệu, chạy lại nhiều lần được.
+  - bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.
+variables:
+  baseUrl: http://localhost:8080
+  ownerUsername: owner
+  bmUsername: bm.kho
+  staffUsername: nv.kho1
+  password: Demo@2026

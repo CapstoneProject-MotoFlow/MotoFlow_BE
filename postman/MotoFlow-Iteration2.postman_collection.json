@@ -1,0 +1,430 @@
+{
+  "info": {
+    "name": "MotoFlow - Iteration 2",
+    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Collection chỉ đọc dữ liệu, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "ownerUsername",
+      "value": "owner",
+      "type": "string"
+    },
+    {
+      "key": "bmUsername",
+      "value": "bm.kho",
+      "type": "string"
+    },
+    {
+      "key": "staffUsername",
+      "value": "nv.kho1",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Demo@2026",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Đăng nhập",
+      "item": [
+        {
+          "name": "Owner đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{ownerUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('ownerToken', b.accessToken);",
+                  "pm.test('Vai trò OWNER', () => pm.expect(b.user.role).to.eql('OWNER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{bmUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('bmToken', b.accessToken);",
+                  "pm.collectionVariables.set('bmStoreId', b.user.storeId);",
+                  "// Any other id is refused with MSG05, whether or not that store exists.",
+                  "pm.collectionVariables.set('otherStoreId', b.user.storeId + 1);",
+                  "pm.test('Vai trò BRANCH_MANAGER', () => pm.expect(b.user.role).to.eql('BRANCH_MANAGER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{staffUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('staffToken', b.accessToken);",
+                  "pm.test('Vai trò STAFF', () => pm.expect(b.user.role).to.eql('STAFF'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Lô hàng (UC-97, UC-98)",
+      "item": [
+        {
+          "name": "Owner xem lô mọi kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "const inBmStore = b.page.items.find(row => row.storeId === bmStore);",
+                  "pm.test('Có lô tại kho của Branch Manager', () => pm.expect(inBmStore).to.be.an('object'));",
+                  "pm.collectionVariables.set('lotId', inBmStore.lotId);",
+                  "pm.test('Thấy lô của nhiều kho', () => pm.expect(new Set(b.page.items.map(row => row.storeId)).size).to.be.above(1));",
+                  "pm.test('Danh sách không có giá', () => pm.expect(pm.response.text().toLowerCase()).to.not.match(/price|cost/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem lô sắp hết hạn (tab mặc định)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "pm.test('Chỉ có lô của kho mình', () => b.page.items.forEach(row => pm.expect(row.storeId).to.eql(bmStore)));",
+                  "pm.test('Hạn nằm trong N ngày tới', () => b.page.items.forEach(row =>",
+                  "    pm.expect(row.daysToExpiry).to.be.within(0, b.expiryWarningDays)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem tab Đã hết hàng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots?tab=DEPLETED",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Các lô đều còn lại 0', () => pm.response.json().page.items.forEach(row =>",
+                  "    pm.expect(row.remainingQty).to.eql(0)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM truyền kho khác bị MSG05",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots?storeId={{otherStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem chi tiết lô (có giá nhập)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}?storeId={{bmStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có giá nhập', () => pm.expect(b.purchaseUnitPrice).to.be.a('number'));",
+                  "pm.test('Đang xem kho đã chọn', () =>",
+                  "    pm.expect(b.viewStoreId).to.eql(Number(pm.collectionVariables.get('bmStoreId'))));",
+                  "pm.test('Có chứng từ tạo lô', () => pm.expect(b.sourceDocument.type).to.be.oneOf(['GOODS_RECEIPT_NOTE', 'STOCK_COUNT']));",
+                  "pm.test('Tối đa 10 biến động, 20 dòng thứ tự xuất', () => {",
+                  "    pm.expect(b.movements.length).to.be.at.most(10);",
+                  "    pm.expect(b.issueOrder.length).to.be.at.most(20);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem chi tiết lô (không có giá)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Không có giá nhập', () => pm.expect(b.purchaseUnitPrice).to.eql(null));",
+                  "pm.test('Biến động không có giá vốn', () => b.movements.forEach(m => {",
+                  "    pm.expect(m.unitCost).to.eql(null);",
+                  "    pm.expect(m.value).to.eql(null);",
+                  "}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Lô không tồn tại trả MSG90",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/999999999",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG90', () => pm.expect(pm.response.json().code).to.eql('MSG90'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff bị 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
