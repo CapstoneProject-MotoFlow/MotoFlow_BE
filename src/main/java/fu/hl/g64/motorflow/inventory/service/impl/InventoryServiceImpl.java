@@ -256,7 +256,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public LotListResponse listLots(AuthenticatedUser user, LotSearch filter, int page, int size) {
-        Long storeId = lotStoreScope(user, filter.storeId());
+        Long storeId = scopeStoreId(user, filter.storeId());
         LocalDate today = LocalDate.now(clock);
         Integer warnDays = expiryWarningDays();
         // Without a configured warning period the near-expiry window is empty.
@@ -280,7 +280,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public LotDetailResponse lotDetail(AuthenticatedUser user, long lotId, Long storeId) {
-        Long scoped = lotStoreScope(user, storeId);
+        Long scoped = scopeStoreId(user, storeId);
         Lot lot = lots.findById(lotId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG90"));
         long viewStoreId = scoped != null ? scoped : lot.getStoreId();
         boolean owner = user.role() == Role.OWNER;
@@ -325,23 +325,6 @@ public class InventoryServiceImpl implements InventoryService {
             return requested;
         }
         if (user.storeId() == null || (requested != null && !requested.equals(user.storeId()))) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
-        }
-        return user.storeId();
-    }
-
-    /**
-     * The warehouse whose lots a user may read: null means every warehouse (Owner without a filter). Not
-     * {@link #scopeStoreId}: UC-97 and UC-98 keep a central warehouse Branch Manager to their own warehouse too.
-     */
-    private Long lotStoreScope(AuthenticatedUser user, Long requested) {
-        if (user.role() == Role.OWNER) {
-            if (requested != null && !stores.existsById(requested)) {
-                throw new BusinessException(HttpStatus.NOT_FOUND, "MSG52");
-            }
-            return requested;
-        }
-        if (requested != null && !requested.equals(user.storeId())) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         return user.storeId();
