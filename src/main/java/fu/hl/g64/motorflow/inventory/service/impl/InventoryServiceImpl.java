@@ -413,7 +413,7 @@ public class InventoryServiceImpl implements InventoryService {
         return totals;
     }
 
-    /** UC-107 setting in effect, or null if the Owner has not set one. */
+    /** UC-104 setting in effect, or null if the Owner has not set one. */
     private Integer expiryWarningDays() {
         return policies.findExpiryWarningsInEffect(LocalDateTime.now(clock)).stream()
                 .findFirst().map(PricingPolicy::getExpiryWarningDays).orElse(null);
