@@ -352,6 +352,15 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void ownerGetsNotFoundForAWarehouseTheLotNeverReached() throws Exception {
+        lot("owner", a, "?storeId=" + central)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("MSG90"));
+        lot("owner", a, "?storeId=" + branch).andExpect(status().isOk());
+        lot("owner", a, "").andExpect(status().isOk());
+    }
+
+    @Test
     void unknownLotIsNotFound() throws Exception {
         lot("owner", 9999, "").andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG90"));
         lot("bm", 9999, "").andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG90"));

@@ -118,7 +118,7 @@ UC-97 ghi "their warehouse", tức kho của chính họ. Hàm `scopeStoreId`, d
 
 Không dùng `storeScope.viewableStore`, vì hàm này cho BM kho tổng xem mọi kho. BM kho tổng chỉ được xem kho khác ở UC-48 khi tạo lệnh chuyển (BR-03, chú thích ⁵ của ma trận phân quyền).
 
-Ở UC-98 có thêm một lớp kiểm tra: BM mà kho mình chưa từng có lô đó (không có dòng `lot_balance`, không có `stock_movement`) sẽ nhận `MSG05`. Với Owner, không truyền `storeId` thì "kho đang xem" là `lot.storeId`, kho nhận lô lần đầu.
+Ở UC-98 có thêm một lớp kiểm tra: BM mà kho mình chưa từng có lô đó (không có dòng `lot_balance`, không có `stock_movement`) sẽ nhận `MSG05`. Owner mở lô ở kho lô chưa từng tới nhận 404 `MSG90`. Với Owner, không truyền `storeId` thì "kho đang xem" là `lot.storeId`, kho nhận lô lần đầu.
 
 ## 5. Vì sao danh sách không trả giá
 

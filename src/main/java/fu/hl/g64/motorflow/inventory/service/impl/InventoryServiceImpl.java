@@ -285,8 +285,9 @@ public class InventoryServiceImpl implements InventoryService {
         long viewStoreId = scoped != null ? scoped : lot.getStoreId();
         boolean owner = user.role() == Role.OWNER;
         List<LotBalance> held = lotBalances.findByLotIdAndStoreIdOrderByStockStatusAsc(lotId, viewStoreId);
-        if (!owner && held.isEmpty() && !movements.existsByLotIdAndStoreId(lotId, viewStoreId)) {
-            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        if (held.isEmpty() && !movements.existsByLotIdAndStoreId(lotId, viewStoreId)) {
+            throw owner ? new BusinessException(HttpStatus.NOT_FOUND, "MSG90")
+                    : new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         LocalDate today = LocalDate.now(clock);
         int remaining = held.stream().filter(b -> b.getStockStatus() != StockStatus.IN_TRANSIT)
