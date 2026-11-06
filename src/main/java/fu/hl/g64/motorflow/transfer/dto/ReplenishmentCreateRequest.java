@@ -16,7 +16,7 @@ public record ReplenishmentCreateRequest(
         String note,
 
         @NotEmpty(message = "Vui lòng thêm ít nhất một phụ tùng.")
-        List<@Valid Line> lines) {
+        List<@NotNull @Valid Line> lines) {
 
     public record Line(
             @NotNull(message = "Vui lòng chọn phụ tùng.")
