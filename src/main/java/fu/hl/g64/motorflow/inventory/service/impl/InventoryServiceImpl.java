@@ -303,7 +303,7 @@ public class InventoryServiceImpl implements InventoryService {
                 held.stream().filter(b -> b.getQuantity() > 0)
                         .map(b -> new StatusQty(b.getStockStatus(), b.getQuantity())).toList(),
                 movementRows(user, movements.findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc(lotId, viewStoreId)),
-                lotQueries.issueOrder(lot.getProductId(), viewStoreId, Limit.of(ISSUE_ORDER_LINES)).stream()
+                lotQueries.issueOrder(lot.getProductId(), viewStoreId, lotId, Limit.of(ISSUE_ORDER_LINES)).stream()
                         .map(line -> new IssueOrderLine(line.getLot().getId(), line.getLot().getExpiryDate(),
                                 line.getLot().getReceivedDate(), line.getAvailable(), line.getLot().getId().equals(lotId),
                                 line.getLot().isExpiredOn(today) || line.getAvailable() == 0))

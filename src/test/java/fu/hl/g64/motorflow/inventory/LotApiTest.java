@@ -312,6 +312,27 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void lotsSoldOutDoNotPushTheLotInViewOutOfTheIssueOrder() throws Exception {
+        long part = product("LOC-GIO", "Lọc gió", jdbc.queryForObject("SELECT category_id FROM product WHERE id = ?",
+                Long.class, brake));
+        long oldest = receive(branch, part, honda, today.minusDays(60), today.plusDays(1), null);
+        for (int i = 2; i <= 22; i++) {
+            receive(branch, part, honda, today.minusDays(60), today.plusDays(i), null);
+        }
+        sellAll(branch, part, 66);
+        long inStock = receive(branch, part, honda, today.minusDays(1), today.plusDays(200), null);
+
+        lot("bm", inStock, "")
+                .andExpect(jsonPath("$.issueOrder[*].lotId", contains((int) inStock)))
+                .andExpect(jsonPath("$.issueOrder[0].current").value(true))
+                .andExpect(jsonPath("$.issueOrder[0].skipped").value(false));
+        lot("bm", oldest, "")
+                .andExpect(jsonPath("$.issueOrder[*].lotId", contains((int) oldest, (int) inStock)))
+                .andExpect(jsonPath("$.issueOrder[0].current").value(true))
+                .andExpect(jsonPath("$.issueOrder[0].skipped").value(true));
+    }
+
+    @Test
     void pricesAreForTheOwnerOnly() throws Exception {
         lot("bm", a, "")
                 .andExpect(jsonPath("$.purchaseUnitPrice").value(nullValue()))
