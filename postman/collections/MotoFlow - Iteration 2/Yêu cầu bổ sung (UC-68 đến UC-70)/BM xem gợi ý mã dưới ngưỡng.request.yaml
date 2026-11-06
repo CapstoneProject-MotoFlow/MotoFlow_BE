@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests/low-stock-suggestions"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const rows = pm.response.json();
+      pm.test('Số gợi ý là phần còn thiếu so với ngưỡng', () => rows.forEach(row => {
+          pm.expect(row.availableQty).to.be.below(row.lowStockThreshold);
+          pm.expect(row.suggestedQty).to.eql(row.lowStockThreshold - row.availableQty);
+      }));
+      pm.test('Bỏ qua mã đang chờ trong yêu cầu chưa đóng', () => {
+          const waiting = [pm.collectionVariables.get('partId'), pm.collectionVariables.get('secondPartId')].map(Number);
+          rows.forEach(row => pm.expect(waiting).to.not.include(row.productId));
+      });
+    language: text/javascript
+order: 6000

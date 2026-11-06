@@ -20,4 +20,4 @@ scripts:
       pm.collectionVariables.set('staffToken', b.accessToken);
       pm.test('Vai trò STAFF', () => pm.expect(b.user.role).to.eql('STAFF'));
     language: text/javascript
-order: 3000
+order: 4000

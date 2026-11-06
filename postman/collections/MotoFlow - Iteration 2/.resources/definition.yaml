@@ -3,11 +3,13 @@ description: |-
   Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.
 
   - Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).
-  - Collection chỉ đọc dữ liệu, chạy lại nhiều lần được.
+  - Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.
   - bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.
+  - bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.
 variables:
   baseUrl: http://localhost:8080
   ownerUsername: owner
   bmUsername: bm.kho
+  branchBmUsername: bm.cg
   staffUsername: nv.kho1
   password: Demo@2026

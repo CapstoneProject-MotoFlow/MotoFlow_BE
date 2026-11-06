@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "MotoFlow - Iteration 2",
-    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Collection chỉ đọc dữ liệu, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.",
+    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.\n- bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -18,6 +18,11 @@
     {
       "key": "bmUsername",
       "value": "bm.kho",
+      "type": "string"
+    },
+    {
+      "key": "branchBmUsername",
+      "value": "bm.cg",
       "type": "string"
     },
     {
@@ -110,6 +115,46 @@
                   "pm.collectionVariables.set('bmStoreId', b.user.storeId);",
                   "// Any other id is refused with MSG05, whether or not that store exists.",
                   "pm.collectionVariables.set('otherStoreId', b.user.storeId + 1);",
+                  "pm.test('Vai trò BRANCH_MANAGER', () => pm.expect(b.user.role).to.eql('BRANCH_MANAGER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM cửa hàng thường đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{branchBmUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('branchBmToken', b.accessToken);",
+                  "pm.collectionVariables.set('branchStoreId', b.user.storeId);",
                   "pm.test('Vai trò BRANCH_MANAGER', () => pm.expect(b.user.role).to.eql('BRANCH_MANAGER'));"
                 ]
               }
@@ -400,6 +445,451 @@
             "method": "GET",
             "header": [],
             "url": "{{baseUrl}}/api/v1/inventory/lots",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Yêu cầu bổ sung (UC-68 đến UC-70)",
+      "item": [
+        {
+          "name": "Chuẩn bị - lấy phụ tùng đang kinh doanh",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products?status=ACTIVE&size=2",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "pm.test('Có đủ 2 phụ tùng', () => pm.expect(items.length).to.eql(2));",
+                  "pm.collectionVariables.set('partId', items[0].id);",
+                  "pm.collectionVariables.set('secondPartId', items[1].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chuẩn bị - Owner tạo cửa hàng PLANNED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeName\": \"Cửa hàng mới {{$timestamp}}\",\n  \"address\": \"Số 1 Thử Nghiệm, Hà Nội\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('Cửa hàng mới ở trạng thái PLANNED', () => pm.expect(b.status).to.eql('PLANNED'));",
+                  "pm.collectionVariables.set('plannedStoreId', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tạo yêu cầu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Sắp hết hàng\",\n  \"lines\": [\n    { \"productId\": {{partId}}, \"requestedQty\": 5 },\n    { \"productId\": {{secondPartId}}, \"requestedQty\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('requestId', b.id);",
+                  "pm.test('Chờ điều phối, đúng cửa hàng của BM', () => {",
+                  "    pm.expect(b.status).to.eql('AWAITING_COORDINATION');",
+                  "    pm.expect(b.requestingStoreId).to.eql(Number(pm.collectionVariables.get('branchStoreId')));",
+                  "});",
+                  "pm.test('Có 2 dòng, chưa điều phối gì', () => {",
+                  "    pm.expect(b.lines.length).to.eql(2);",
+                  "    pm.expect(b.lines[0].requestedQty).to.eql(5);",
+                  "    pm.expect(b.lines[0].plannedQty).to.eql(0);",
+                  "    pm.expect(b.lines[0].remainingQty).to.eql(5);",
+                  "    pm.expect(b.transferOrders).to.eql([]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tạo yêu cầu có dòng trùng bị MSG93",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{partId}}, \"requestedQty\": 1 },\n    { \"productId\": {{partId}}, \"requestedQty\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG93', () => pm.expect(pm.response.json().code).to.eql('MSG93'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner tạo yêu cầu cho cửa hàng PLANNED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeId\": {{plannedStoreId}},\n  \"note\": \"Nhập hàng ban đầu\",\n  \"lines\": [\n    { \"productId\": {{partId}}, \"requestedQty\": 10 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('plannedRequestId', b.id);",
+                  "pm.test('Đúng cửa hàng đã chọn', () =>",
+                  "    pm.expect(b.requestingStoreId).to.eql(Number(pm.collectionVariables.get('plannedStoreId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem gợi ý mã dưới ngưỡng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/low-stock-suggestions",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const rows = pm.response.json();",
+                  "pm.test('Số gợi ý là phần còn thiếu so với ngưỡng', () => rows.forEach(row => {",
+                  "    pm.expect(row.availableQty).to.be.below(row.lowStockThreshold);",
+                  "    pm.expect(row.suggestedQty).to.eql(row.lowStockThreshold - row.availableQty);",
+                  "}));",
+                  "pm.test('Bỏ qua mã đang chờ trong yêu cầu chưa đóng', () => {",
+                  "    const waiting = [pm.collectionVariables.get('partId'), pm.collectionVariables.get('secondPartId')].map(Number);",
+                  "    rows.forEach(row => pm.expect(waiting).to.not.include(row.productId));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem danh sách",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests?size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "const store = Number(pm.collectionVariables.get('branchStoreId'));",
+                  "pm.test('Chỉ có yêu cầu của cửa hàng mình', () => items.forEach(row => pm.expect(row.requestingStoreId).to.eql(store)));",
+                  "const mine = items.find(row => row.id === Number(pm.collectionVariables.get('requestId')));",
+                  "pm.test('Có yêu cầu vừa tạo với đúng tổng', () => {",
+                  "    pm.expect(mine.lineCount).to.eql(2);",
+                  "    pm.expect(mine.totalRequestedQty).to.eql(7);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho tổng xem danh sách",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests?size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "pm.test('Thấy yêu cầu của nhiều cửa hàng', () =>",
+                  "    pm.expect(new Set(items.map(row => row.requestingStoreId)).size).to.be.above(1));",
+                  "pm.test('Yêu cầu chờ điều phối đứng trước', () => {",
+                  "    const waiting = items.map(row => row.status === 'AWAITING_COORDINATION');",
+                  "    pm.expect(waiting.lastIndexOf(true)).to.be.below(waiting.indexOf(false) === -1 ? items.length : waiting.indexOf(false));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem chi tiết",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/{{requestId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có ghi chú và người tạo', () => {",
+                  "    pm.expect(b.note).to.eql('Sắp hết hàng');",
+                  "    pm.expect(b.createdByName).to.be.a('string');",
+                  "});",
+                  "pm.test('Số còn thiếu bằng số yêu cầu', () => {",
+                  "    pm.expect(b.lines[0].fulfilledQty).to.eql(0);",
+                  "    pm.expect(b.lines[0].toPurchaseQty).to.eql(0);",
+                  "    pm.expect(b.lines[0].remainingQty).to.eql(b.lines[0].requestedQty);",
+                  "});",
+                  "pm.test('Có danh sách lệnh và PO', () => {",
+                  "    pm.expect(b.transferOrders).to.be.an('array');",
+                  "    pm.expect(b.purchaseOrders).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem yêu cầu của cửa hàng khác bị MSG05",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/{{plannedRequestId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff bị 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests",
             "auth": {
               "type": "bearer",
               "bearer": [
