@@ -256,7 +256,51 @@ class WarehouseTaskApiTest extends ApiTestUsers {
     }
 
     @Test
+    void aManagerTakesAnInspectionDispatchOrCountOnlyWhileAnotherManagerCanConfirmIt() throws Exception {
+        String msg177 = "Cửa hàng không còn Branch Manager nào khác để xác nhận kết quả nên bạn không thể tự nhận "
+                + "việc này. Vui lòng giao cho Staff.";
+        long receipt = supplierReceipt(store, "AWAITING_INSPECTION");
+        long outgoing = transfer(store, otherStore, "AWAITING_DISPATCH");
+        long count = stockCount("DRAFT");
+        long order = order("AWAITING_PICKING");
+        // A locked manager of the store, and the active one of Long Biên, cannot confirm Gia Lâm's results.
+        UserAccount lockedPeer = createUser("bm3", Role.BRANCH_MANAGER, store);
+        jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", lockedPeer.getId());
+
+        assignment(token, TaskType.INSPECTION, receipt)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.eligibleAssignees[*].fullName", contains("Test staff1", "Test staff2")));
+        for (TaskType type : List.of(TaskType.INSPECTION, TaskType.DISPATCH_PREPARATION, TaskType.COUNTING)) {
+            long document = switch (type) {
+                case INSPECTION -> receipt;
+                case DISPATCH_PREPARATION -> outgoing;
+                default -> count;
+            };
+            assign(token, type, document, manager.getId())
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("MSG177"))
+                    .andExpect(jsonPath("$.message").value(msg177));
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM warehouse_task", Long.class)).isZero();
+        // The Owner may confirm a sales order, so picking stays open to the manager.
+        assignment(token, TaskType.PICKING, order)
+                .andExpect(jsonPath("$.eligibleAssignees[*].self", contains(false, false, true)));
+        assign(token, TaskType.PICKING, order, manager.getId()).andExpect(status().isOk());
+
+        createUser("bm4", Role.BRANCH_MANAGER, store);
+        assignment(token, TaskType.INSPECTION, receipt)
+                .andExpect(jsonPath("$.eligibleAssignees[*].fullName", contains("Test staff1", "Test staff2", "Test bm")))
+                .andExpect(jsonPath("$.eligibleAssignees[2].self").value(true));
+        assign(token, TaskType.INSPECTION, receipt, manager.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.noticeCode").value("MSG40"));
+        assign(token, TaskType.DISPATCH_PREPARATION, outgoing, manager.getId()).andExpect(status().isOk());
+        assign(token, TaskType.COUNTING, count, manager.getId()).andExpect(status().isOk());
+    }
+
+    @Test
     void aManagerCanHandTheirOwnTaskToAStaffMemberBeforeTheResult() throws Exception {
+        createUser("bm3", Role.BRANCH_MANAGER, store);
         long count = stockCount("DRAFT");
         assign(token, TaskType.COUNTING, count, manager.getId()).andExpect(status().isOk());
         clock.advance(Duration.ofMinutes(5));

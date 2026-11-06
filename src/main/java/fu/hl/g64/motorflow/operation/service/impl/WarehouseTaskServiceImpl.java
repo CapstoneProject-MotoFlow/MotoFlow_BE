@@ -96,7 +96,7 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         if (blocked != null) {
             throw new BusinessException(HttpStatus.CONFLICT, blocked);
         }
-        UserAccount assignee = requireEligibleAssignee(manager, request.assigneeId(), document.storeId());
+        UserAccount assignee = requireEligibleAssignee(manager, type, request.assigneeId(), document.storeId());
         if (open.isPresent() && open.get().getAssignedTo().equals(assignee.getId())) {
             return view(manager, type, documentId, document);
         }
@@ -231,12 +231,16 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
 
     /**
      * UC-86 step 4: an active Staff account of the document's store, or the Branch Manager themself (MSG40; they
-     * already passed {@link #requireManagedDocument}).
+     * already passed {@link #requireManagedDocument}) when someone else can confirm the result (MSG177 otherwise).
      */
-    private UserAccount requireEligibleAssignee(AuthenticatedUser manager, long assigneeId, long storeId) {
+    private UserAccount requireEligibleAssignee(AuthenticatedUser manager, TaskType type, long assigneeId,
+                                                long storeId) {
         UserAccount assignee = users.findById(assigneeId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG48"));
         if (assignee.getId() == manager.id()) {
+            if (!canTakeThemself(manager, type, storeId)) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG177");
+            }
             return assignee;
         }
         if (assignee.getRole() != Role.STAFF) {
@@ -246,6 +250,17 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG41");
         }
         return assignee;
+    }
+
+    /**
+     * BR-26 and the permission matrix: only a Branch Manager of the store confirms an inspection, a dispatch or a
+     * stock count, never the Owner in their place, so a Branch Manager takes such a task only while another active
+     * Branch Manager of the store can confirm it (review R-01). Owner may confirm a sales order, so picking is
+     * always open to them.
+     */
+    private boolean canTakeThemself(AuthenticatedUser manager, TaskType type, long storeId) {
+        return type == TaskType.PICKING || users.findByRoleAndStoreIdAndStatus(Role.BRANCH_MANAGER, storeId,
+                AccountStatus.ACTIVE).stream().anyMatch(other -> other.getId() != manager.id());
     }
 
     /** BR-32: the open task, if the user holds it and has not sent the result yet (MSG05 otherwise). */
@@ -278,8 +293,10 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         List<AssigneeOption> eligible = new ArrayList<>();
         staff.forEach(u -> eligible.add(new AssigneeOption(u.getId(), u.getUsername(), u.getFullName(), false,
                 openTasks.getOrDefault(u.getId(), 0L))));
-        eligible.add(new AssigneeOption(manager.id(), manager.username(), manager.fullName(), true,
-                openTasks.getOrDefault(manager.id(), 0L)));
+        if (canTakeThemself(manager, type, document.storeId())) {
+            eligible.add(new AssigneeOption(manager.id(), manager.username(), manager.fullName(), true,
+                    openTasks.getOrDefault(manager.id(), 0L)));
+        }
 
         Set<Long> people = new HashSet<>();
         history.forEach(task -> {

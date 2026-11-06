@@ -8,7 +8,8 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 /**
  * UC-86 Assign Warehouse Staff and BR-32: only the person a Branch Manager gave the task to records its result.
  * That person is a Staff member of the store, or the Branch Manager themself (MSG40); either way someone else
- * confirms the result (BR-26). A task belongs to a sales order (PICKING), a goods receipt note (INSPECTION),
+ * confirms the result (BR-26). A Branch Manager takes an inspection, a dispatch preparation or a count themself only
+ * while the store has another active Branch Manager to confirm it. A task belongs to a sales order (PICKING), a goods receipt note (INSPECTION),
  * a transfer order (DISPATCH_PREPARATION) or a stock count (COUNTING).
  *
  * <p>The features that record and confirm those results call the last five methods inside their own transaction:
@@ -26,7 +27,8 @@ public interface WarehouseTaskService {
 
     /**
      * UC-86 steps 3-6: gives the task to an active Staff member of the document's store and notifies them, or lets
-     * the Branch Manager take it themself (MSG40 is then in the response). Giving it to someone else before the
+     * the Branch Manager take it themself (MSG40 is then in the response; MSG177 when the task is not picking and the
+     * store has no other active Branch Manager, who alone could confirm the result). Giving it to someone else before the
      * result is in cancels the open task, keeps it in the history and notifies both people, except the Branch
      * Manager doing it. MSG39 once the result is in, MSG121 for a finished or cancelled document, MSG41 for a locked
      * Staff account or one at another store, MSG122 for any other account that is not Staff, MSG48 for an unknown

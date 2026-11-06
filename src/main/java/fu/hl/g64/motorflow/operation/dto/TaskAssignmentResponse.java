@@ -14,6 +14,7 @@ import java.util.List;
  *
  * @param current           the open task (ASSIGNED or RESULT_SUBMITTED), or null when nobody holds it
  * @param eligibleAssignees active Staff of the document's store by name, then the Branch Manager themself
+ *                          when they may take the task (see {@code WarehouseTaskService})
  * @param history           every assignment of the document, newest first, including the current one
  */
 public record TaskAssignmentResponse(TaskType taskType, long documentId, long storeId, boolean canAssign,
