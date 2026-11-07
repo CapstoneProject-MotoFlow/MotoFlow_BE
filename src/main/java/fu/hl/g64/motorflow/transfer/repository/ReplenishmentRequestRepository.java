@@ -3,18 +3,26 @@ package fu.hl.g64.motorflow.transfer.repository;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequest;
 import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 public interface ReplenishmentRequestRepository extends JpaRepository<ReplenishmentRequest, Long> {
 
     long countByStatus(ReplenishmentRequestStatus status);
+
+    /** UC-71: orders for one request and its purchase hand-over are planned one after the other. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from ReplenishmentRequest r where r.id = :id")
+    Optional<ReplenishmentRequest> findByIdForUpdate(@Param("id") long id);
 
     /** UC-69: one request with the totals of its lines. */
     interface RequestRow {

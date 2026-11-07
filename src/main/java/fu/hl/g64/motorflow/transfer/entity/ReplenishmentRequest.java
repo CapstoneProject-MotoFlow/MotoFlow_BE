@@ -54,4 +54,11 @@ public class ReplenishmentRequest {
         request.createdAt = now;
         return request;
     }
+
+    /** UC-71: the first transfer order or purchase hand-over starts the coordination. */
+    public void startCoordination() {
+        if (status == ReplenishmentRequestStatus.AWAITING_COORDINATION) {
+            status = ReplenishmentRequestStatus.IN_PROGRESS;
+        }
+    }
 }

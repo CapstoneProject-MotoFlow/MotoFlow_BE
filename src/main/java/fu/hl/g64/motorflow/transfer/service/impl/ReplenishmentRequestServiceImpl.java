@@ -5,8 +5,9 @@ import fu.hl.g64.motorflow.account.entity.enums.AccountStatus;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
-import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
+import fu.hl.g64.motorflow.common.audit.AuditLog;
+import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
@@ -21,9 +22,12 @@ import fu.hl.g64.motorflow.transfer.dto.ReplenishmentCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentRowResponse;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentSearch;
+import fu.hl.g64.motorflow.transfer.dto.ToPurchaseRequest;
 import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequest;
 import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequestLine;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
+import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
+import fu.hl.g64.motorflow.transfer.helper.RequestedParts;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
@@ -58,6 +62,8 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     private final StoreScope storeScope;
     private final UserAccountRepository users;
     private final NotificationService notifications;
+    private final RequestedParts requestedParts;
+    private final AuditLogRepository auditLog;
     private final Clock clock;
 
     // UC-68
@@ -65,7 +71,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     @Override
     public ReplenishmentDetailResponse create(AuthenticatedUser user, ReplenishmentCreateRequest body) {
         Store store = requestingStore(user, body.storeId());
-        checkRequestedParts(body.lines());
+        requestedParts.requireActive(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
         LocalDateTime now = LocalDateTime.now(clock);
         ReplenishmentRequest request = requests.save(ReplenishmentRequest.create(store.getId(),
                 StringUtils.hasText(body.note()) ? body.note().strip() : null, user.id(), now));
@@ -111,6 +117,58 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         return detail(request);
     }
 
+    // BR-55
+    @Transactional
+    @Override
+    public ReplenishmentDetailResponse toPurchase(AuthenticatedUser user, long id, ToPurchaseRequest body) {
+        if (!storeScope.seesEveryStore(user)) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        ReplenishmentRequest request = requests.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG95"));
+        if (request.getStatus() == ReplenishmentRequestStatus.CLOSED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        List<Long> ids = body.lines().stream().map(ToPurchaseRequest.Line::productId).toList();
+        if (ids.stream().distinct().count() != ids.size()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG93");
+        }
+        List<ReplenishmentRequestLine> requested = lines.findByReplenishmentRequestIdOrderById(id);
+        Map<Long, ReplenishmentRequestLine> byProduct = requested.stream()
+                .collect(Collectors.toMap(ReplenishmentRequestLine::getProductId, Function.identity()));
+        Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
+        Map<Long, Product> parts = products.findAllById(ids).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        List<Map<String, Object>> changes = new ArrayList<>();
+        for (int i = 0; i < body.lines().size(); i++) {
+            ToPurchaseRequest.Line line = body.lines().get(i);
+            ReplenishmentRequestLine target = byProduct.get(line.productId());
+            if (target == null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG204", i + 1);
+            }
+            long limit = target.getRequestedQty() - planned.getOrDefault(line.productId(), 0L);
+            if (line.toPurchaseQty() > limit) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG205", parts.get(line.productId()).getSku(),
+                        Math.max(limit, 0));
+            }
+            changes.add(Map.of("product_id", line.productId(), "from", target.getToPurchaseQty(), "to",
+                    line.toPurchaseQty()));
+            target.passToPurchase(line.toPurchaseQty());
+        }
+        request.startCoordination();
+        auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", id, "REPLENISHMENT_TO_PURCHASE_SET", user.id(), null,
+                null, Map.of("lines", changes), LocalDateTime.now(clock)));
+        long partCount = requested.stream().filter(line -> line.getToPurchaseQty() > 0).count();
+        if (partCount > 0) {
+            String message = "Yêu cầu bổ sung #%d có %d phụ tùng cần mua từ nhà cung cấp".formatted(id, partCount);
+            users.findByRoleAndStatus(Role.OWNER, AccountStatus.ACTIVE).stream()
+                    .filter(owner -> owner.getId() != user.id())
+                    .forEach(owner -> notifications.notify(owner.getId(), "REPLENISHMENT_TO_PURCHASE", message,
+                            "REPLENISHMENT_REQUEST", id));
+        }
+        return detail(request);
+    }
+
     /** UC-68: a Branch Manager's own store, or the store the Owner chose; only the Owner may stock a planned store. */
     private Store requestingStore(AuthenticatedUser user, Long requested) {
         boolean owner = user.role() == Role.OWNER;
@@ -123,24 +181,6 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         return stores.findById(owner ? requested : user.storeId())
                 .filter(s -> s.getStatus() == StoreStatus.ACTIVE || (owner && s.getStatus() == StoreStatus.PLANNED))
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG46"));
-    }
-
-    private void checkRequestedParts(List<ReplenishmentCreateRequest.Line> requested) {
-        List<Long> ids = requested.stream().map(ReplenishmentCreateRequest.Line::productId).toList();
-        if (ids.stream().distinct().count() != ids.size()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG93");
-        }
-        Map<Long, Product> found = products.findAllById(ids).stream()
-                .collect(Collectors.toMap(Product::getId, Function.identity()));
-        for (Long id : ids) {
-            Product part = found.get(id);
-            if (part == null) {
-                throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
-            }
-            if (part.getStatus() != ProductStatus.ACTIVE) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG94", part.getSku());
-            }
-        }
     }
 
     /** BR-56: the central warehouse Branch Manager and the Owner coordinate; the creator already knows. */

@@ -15,12 +15,16 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
         long getQty();
     }
 
-    /** UC-70: planned per part on the transfer orders of a request. The schema has no cancelled status, so all count. */
+    /**
+     * UC-70: planned per part on the transfer orders of a request. The schema has no cancelled status, so all count,
+     * except make-up lines, which stand in for goods already planned (BR-62).
+     */
     @Query("""
             select l.productId as productId, sum(l.plannedQty) as qty
             from TransferOrderLine l
             join TransferOrder o on o.id = l.transferOrderId
             where o.replenishmentRequestId = :requestId
+              and l.makeupForCaseId is null
             group by l.productId
             """)
     List<ProductQty> plannedByProduct(@Param("requestId") long requestId);

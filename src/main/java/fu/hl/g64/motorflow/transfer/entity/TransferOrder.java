@@ -62,4 +62,17 @@ public class TransferOrder {
 
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
+
+    /** UC-71: waits for the source warehouse to prepare and dispatch the goods. */
+    public static TransferOrder create(Long replenishmentRequestId, Long sourceStoreId, Long destStoreId, Long createdBy,
+                                       LocalDateTime now) {
+        TransferOrder order = new TransferOrder();
+        order.replenishmentRequestId = replenishmentRequestId;
+        order.sourceStoreId = sourceStoreId;
+        order.destStoreId = destStoreId;
+        order.status = TransferOrderStatus.AWAITING_DISPATCH;
+        order.createdBy = createdBy;
+        order.createdAt = now;
+        return order;
+    }
 }
