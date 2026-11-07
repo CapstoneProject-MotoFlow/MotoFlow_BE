@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.inventory.repository;
 
+import fu.hl.g64.motorflow.inventory.dto.LowStockRow;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -81,4 +82,15 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
     List<String> findStorageAreas(Long storeId);
 
     List<StockBalance> findByProductIdIn(Collection<Long> productIds);
+
+    /** JOB-02: parts still on sale, in active stores, whose available stock is below the threshold set in UC-51. */
+    @Query("""
+            select new fu.hl.g64.motorflow.inventory.dto.LowStockRow(b.storeId, b.productId, p.sku, p.partName,
+                   b.availableQty, b.lowStockThreshold)
+            from StockBalance b join Product p on p.id = b.productId join Store s on s.id = b.storeId
+            where b.lowStockThreshold is not null and b.availableQty < b.lowStockThreshold
+              and p.status = fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus.ACTIVE
+              and s.status = fu.hl.g64.motorflow.store.entity.enums.StoreStatus.ACTIVE
+            order by b.storeId, p.sku""")
+    List<LowStockRow> findBelowThreshold();
 }
