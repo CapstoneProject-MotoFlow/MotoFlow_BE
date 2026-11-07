@@ -73,6 +73,24 @@ public class Receivable {
         return debt;
     }
 
+    /**
+     * UC-61 step 8: the unpaid balance of an order completed on credit, with the due date agreed with the customer
+     * (BR-50, BR-53). One per order.
+     */
+    public static Receivable creditSale(long customerId, long storeId, long orderId, long amount, LocalDate dueDate,
+                                        long recognizedBy, LocalDateTime now) {
+        Receivable debt = new Receivable();
+        debt.originType = OriginType.CREDIT_SALE;
+        debt.customerId = customerId;
+        debt.storeId = storeId;
+        debt.salesOrderId = orderId;
+        debt.originalAmount = amount;
+        debt.dueDate = dueDate;
+        debt.recognizedBy = recognizedBy;
+        debt.recognizedAt = now;
+        return debt;
+    }
+
     /** UC-66 step 7: nothing is owed on it any more. Settled receivables are kept. */
     public void settle(LocalDateTime now) {
         if (settledAt == null) {
