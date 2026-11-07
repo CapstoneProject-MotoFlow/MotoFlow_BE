@@ -98,4 +98,14 @@ public class TransferOrder {
             status = TransferOrderStatus.RECONCILING;
         }
     }
+
+    /** UC-77: every dispatched unit has a final result. */
+    public void close(Long by, LocalDateTime now) {
+        if (status != TransferOrderStatus.RECONCILING) {
+            throw new IllegalStateException("transfer order " + id + " is " + status);
+        }
+        status = TransferOrderStatus.CLOSED;
+        closedBy = by;
+        closedAt = now;
+    }
 }

@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.transfer.service;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.transfer.dto.ClosingPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
@@ -39,4 +40,15 @@ public interface TransferOrderService {
      * of both warehouses changes when the order is closed (BR-68).
      */
     TransferOrderDetailResponse confirmExtraDispatch(AuthenticatedUser user, long id, ExtraDispatchRequest request);
+
+    /** UC-77: the Owner and the central warehouse Branch Manager. Changes nothing. */
+    ClosingPreviewResponse closingPreview(AuthenticatedUser user, long id);
+
+    /**
+     * UC-77: the Owner or the central warehouse Branch Manager closes an order whose every dispatched unit has a final
+     * result, posting the confirmed excess from the source to the destination, and closes the replenishment request
+     * once all its orders are closed and every part was received or passed to purchasing. Closing an order already
+     * closed returns it unchanged.
+     */
+    TransferOrderDetailResponse close(AuthenticatedUser user, long id);
 }

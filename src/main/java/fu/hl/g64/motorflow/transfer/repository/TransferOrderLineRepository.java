@@ -31,19 +31,6 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             """)
     List<ProductQty> plannedByProduct(@Param("requestId") long requestId);
 
-    /** UC-70: passed at the destination per part. Goods returned to the source also carry the transfer order id. */
-    @Query("""
-            select l.productId as productId, sum(l.passedQty) as qty
-            from GoodsReceiptNoteLine l
-            join GoodsReceiptNote g on g.id = l.goodsReceiptNoteId
-            join TransferOrder o on o.id = g.transferOrderId
-            where o.replenishmentRequestId = :requestId
-              and g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
-              and g.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.CONFIRMED
-            group by l.productId
-            """)
-    List<ProductQty> fulfilledByProduct(@Param("requestId") long requestId);
-
     /** BR-60: passed plus damaged per part on the order's confirmed receipts, at the destination and back at the source. */
     interface ReceiptTotals {
         long getProductId();

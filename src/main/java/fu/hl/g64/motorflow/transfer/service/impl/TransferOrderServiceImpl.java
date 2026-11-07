@@ -35,6 +35,7 @@ import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
+import fu.hl.g64.motorflow.transfer.dto.ClosingPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
@@ -314,6 +315,125 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                             .formatted(id), ENTITY, id);
         }
         return detail(user, order);
+    }
+
+    // UC-77
+    @Transactional(readOnly = true)
+    @Override
+    public ClosingPreviewResponse closingPreview(AuthenticatedUser user, long id) {
+        requireCoordinator(user);
+        TransferOrder order = orders.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+        List<ClosingPreviewResponse.Line> rows = closingLines(order);
+        Map<String, String> blocked = order.getStatus() == TransferOrderStatus.RECONCILING ? blockers(rows) : Map.of();
+        return new ClosingPreviewResponse(id, order.getStatus(),
+                order.getStatus() == TransferOrderStatus.RECONCILING && blocked.isEmpty(),
+                List.copyOf(blocked.keySet()), rows);
+    }
+
+    // UC-77
+    @Transactional
+    @Override
+    public TransferOrderDetailResponse close(AuthenticatedUser user, long id) {
+        requireCoordinator(user);
+        TransferOrder order = orders.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+        if (order.getStatus() == TransferOrderStatus.CLOSED) {
+            return detail(user, order);
+        }
+        if (order.getStatus() != TransferOrderStatus.RECONCILING) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        List<ClosingPreviewResponse.Line> rows = closingLines(order);
+        Map<String, String> blocked = blockers(rows);
+        if (!blocked.isEmpty()) {
+            Map.Entry<String, String> first = blocked.entrySet().iterator().next();
+            throw new BusinessException(HttpStatus.CONFLICT, first.getKey(), first.getValue());
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<Map<String, Object>> posted = new ArrayList<>();
+        // BR-68: the confirmed excess leaves the source's available stock for the destination's, FEFO then FIFO.
+        for (ClosingPreviewResponse.Line row : rows) {
+            if (row.extraDispatchedQty() > 0) {
+                posting.move(new MovePosting(row.productId(), order.getSourceStoreId(), StockStatus.AVAILABLE,
+                        order.getDestStoreId(), StockStatus.AVAILABLE, row.extraDispatchedQty(), null,
+                        MovementType.TRANSFER_EXTRA_DISPATCH, SourceRef.transferOrder(id), user.id(), null));
+                posted.add(Map.of("product_id", row.productId(), "extra_qty", row.extraDispatchedQty()));
+            }
+        }
+        order.close(user.id(), now);
+        auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_CLOSED", user.id(), null, null,
+                Map.of("extra_dispatch", posted), now));
+        String message = "Phiếu chuyển kho #%d đã đóng".formatted(id);
+        notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_CLOSED", message, ENTITY, id);
+        notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_CLOSED", message, ENTITY, id);
+        if (order.getReplenishmentRequestId() != null) {
+            closeRequestIfDone(user, order.getReplenishmentRequestId(), now);
+        }
+        return detail(user, order);
+    }
+
+    private List<ClosingPreviewResponse.Line> closingLines(TransferOrder order) {
+        List<TransferOrderLine> orderLines = lines.findByTransferOrderIdOrderByProductId(order.getId());
+        Map<Long, Product> parts = products.findAllById(orderLines.stream().map(TransferOrderLine::getProductId)
+                .toList()).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<Long, TransferReconciliation.Part> figures = reconciliation.byProduct(order.getId(), orderLines);
+        Map<Long, PickingGuide.Part> source = guide.parts(order.getSourceStoreId(), parts.keySet(),
+                LocalDate.now(clock));
+        return orderLines.stream().map(line -> {
+            Product part = parts.get(line.getProductId());
+            TransferReconciliation.Part figure = figures.get(line.getProductId());
+            PickingGuide.Part held = source.get(line.getProductId());
+            return new ClosingPreviewResponse.Line(part.getId(), part.getSku(), part.getPartName(), part.getBaseUnit(),
+                    figure.dispatched(), figure.received(), figure.returned(), figure.loss(), figure.unresolved(),
+                    figure.extraReceived(), line.getExtraDispatchedQty(), held == null ? 0 : held.sellableQty());
+        }).toList();
+    }
+
+    /** UC-77 step 2: each reason the order cannot close, with the parts it concerns, in the order checked. */
+    private static Map<String, String> blockers(List<ClosingPreviewResponse.Line> rows) {
+        Map<String, String> blocked = new LinkedHashMap<>();
+        String unresolved = rows.stream().filter(row -> row.unresolvedQty() > 0)
+                .map(row -> row.sku() + " x" + row.unresolvedQty()).collect(Collectors.joining(", "));
+        if (!unresolved.isEmpty()) {
+            blocked.put("MSG221", unresolved);
+        }
+        String unconfirmed = rows.stream().filter(row -> row.extraReceivedQty() > row.extraDispatchedQty())
+                .map(row -> row.sku() + " x" + (row.extraReceivedQty() - row.extraDispatchedQty()))
+                .collect(Collectors.joining(", "));
+        if (!unconfirmed.isEmpty()) {
+            blocked.put("MSG222", unconfirmed);
+        }
+        String shortAtSource = rows.stream().filter(row -> row.extraDispatchedQty() > row.sourceSellableQty())
+                .map(row -> row.sku() + " cần " + row.extraDispatchedQty() + ", còn " + row.sourceSellableQty())
+                .collect(Collectors.joining(", "));
+        if (!shortAtSource.isEmpty()) {
+            blocked.put("MSG223", shortAtSource);
+        }
+        return blocked;
+    }
+
+    /** UC-77 step 6: all the request's orders are closed and each part was received or passed to purchasing. */
+    private void closeRequestIfDone(AuthenticatedUser user, long requestId, LocalDateTime now) {
+        ReplenishmentRequest request = requests.findByIdForUpdate(requestId).orElseThrow();
+        if (request.getStatus() == ReplenishmentRequestStatus.CLOSED
+                || orders.findLinkedOrders(requestId).stream()
+                .anyMatch(row -> row.getTransferOrder().getStatus() != TransferOrderStatus.CLOSED)) {
+            return;
+        }
+        Map<Long, Long> fulfilled = reconciliation.fulfilled(requestId);
+        boolean done = requestLines.findByReplenishmentRequestIdOrderById(requestId).stream().allMatch(line ->
+                fulfilled.getOrDefault(line.getProductId(), 0L) + line.getToPurchaseQty() >= line.getRequestedQty());
+        if (!done) {
+            return;
+        }
+        request.close(now);
+        auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", requestId, "REPLENISHMENT_REQUEST_CLOSED", user.id(),
+                null, null, Map.of("transfer_order_closed", true), now));
+        if (request.getCreatedBy() != user.id()) {
+            notifications.notify(request.getCreatedBy(), "REPLENISHMENT_CLOSED",
+                    "Yêu cầu bổ sung #%d đã hoàn tất".formatted(requestId), "REPLENISHMENT_REQUEST", requestId);
+        }
     }
 
     /** UC-74 step 3: one line per part of the order, each equal to what was prepared, not all zero. */

@@ -309,7 +309,8 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.lines[0].toPurchaseQty").value(3))
                 .andExpect(jsonPath("$.lines[0].remainingQty").value(4))
                 .andExpect(jsonPath("$.lines[1].plannedQty").value(2))
-                .andExpect(jsonPath("$.lines[1].fulfilledQty").value(5))
+                // 5 received against 2 dispatched: the 3 above are excess, not fulfilment.
+                .andExpect(jsonPath("$.lines[1].fulfilledQty").value(2))
                 .andExpect(jsonPath("$.lines[1].remainingQty").value(0))
                 .andExpect(jsonPath("$.transferOrders[*].id", contains((int) first, (int) second)))
                 .andExpect(jsonPath("$.transferOrders[1].sourceStoreId").value(other))
@@ -388,8 +389,8 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
                 + "dest_store_id, created_by) VALUES (?, ?, ?, ?) RETURNING id", Long.class, requestId, source,
                 destination, owner.getId());
         for (Map<String, Object> line : lines) {
-            jdbc.update("INSERT INTO transfer_order_line (transfer_order_id, product_id, planned_qty) VALUES (?, ?, ?)",
-                    id, line.get("productId"), line.get("requestedQty"));
+            jdbc.update("INSERT INTO transfer_order_line (transfer_order_id, product_id, planned_qty, dispatched_qty) "
+                    + "VALUES (?, ?, ?, ?)", id, line.get("productId"), line.get("requestedQty"), line.get("requestedQty"));
         }
         return id;
     }

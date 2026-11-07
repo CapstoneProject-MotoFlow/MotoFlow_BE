@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.transfer.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.transfer.dto.ClosingPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
@@ -102,5 +103,22 @@ public class TransferOrderController {
                                                             @PathVariable long id,
                                                             @Valid @RequestBody ExtraDispatchRequest request) {
         return service.confirmExtraDispatch(user, id, request);
+    }
+
+    @Operation(summary = "Closing preview (UC-77): the final figures of each part and the message codes that would stop "
+            + "the order from closing. Owner or central warehouse Branch Manager")
+    @GetMapping("/{id}/closing-preview")
+    @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
+    public ClosingPreviewResponse closingPreview(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id) {
+        return service.closingPreview(user, id);
+    }
+
+    @Operation(summary = "Close the transfer order (UC-77). Owner or central warehouse Branch Manager. Every dispatched "
+            + "unit needs a final result and any excess received must be confirmed by the source; the confirmed excess "
+            + "then moves from the source's available stock to the destination's, once")
+    @PostMapping("/{id}/close")
+    @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
+    public TransferOrderDetailResponse close(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id) {
+        return service.close(user, id);
     }
 }

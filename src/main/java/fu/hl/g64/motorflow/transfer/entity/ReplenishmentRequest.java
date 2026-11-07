@@ -61,4 +61,10 @@ public class ReplenishmentRequest {
             status = ReplenishmentRequestStatus.IN_PROGRESS;
         }
     }
+
+    /** UC-77: every transfer order of the request is closed and each part was received or passed to purchasing. */
+    public void close(LocalDateTime now) {
+        status = ReplenishmentRequestStatus.CLOSED;
+        closedAt = now;
+    }
 }

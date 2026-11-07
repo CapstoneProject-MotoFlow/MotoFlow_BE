@@ -2,9 +2,11 @@ package fu.hl.g64.motorflow.transfer.helper;
 
 import fu.hl.g64.motorflow.transfer.entity.TransferOrderLine;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
+import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -19,6 +21,7 @@ import java.util.stream.Collectors;
 public class TransferReconciliation {
 
     private final TransferOrderLineRepository lines;
+    private final TransferOrderRepository orders;
 
     /**
      * @param received      passed plus damaged on confirmed receipts at the destination, at most the dispatched quantity
@@ -48,12 +51,23 @@ public class TransferReconciliation {
         }));
     }
 
+    /** UC-70, UC-77: what the request's transfer orders delivered per part, each order at most what it dispatched. */
+    public Map<Long, Long> fulfilled(long replenishmentRequestId) {
+        Map<Long, Long> total = new HashMap<>();
+        for (TransferOrderRepository.LinkedOrder row : orders.findLinkedOrders(replenishmentRequestId)) {
+            long id = row.getTransferOrder().getId();
+            byProduct(id, lines.findByTransferOrderIdOrderByProductId(id))
+                    .forEach((productId, part) -> total.merge(productId, (long) part.received(), Long::sum));
+        }
+        return total;
+    }
+
     /**
      * Unresolved per part less what open receipts already expect and what losses awaiting their adjustment already
      * claim: the most a new receipt, return or loss may still cover, so two of them never settle the same unit.
      */
     public Map<Long, Integer> uncovered(long transferOrderId, List<TransferOrderLine> orderLines) {
-        Map<Long, Long> claimed = new java.util.HashMap<>();
+        Map<Long, Long> claimed = new HashMap<>();
         lines.openReceiptQty(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
         lines.pendingLoss(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
         return byProduct(transferOrderId, orderLines).entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,

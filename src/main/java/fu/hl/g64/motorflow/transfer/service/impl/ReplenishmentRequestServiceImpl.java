@@ -28,6 +28,7 @@ import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequestLine;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
 import fu.hl.g64.motorflow.transfer.helper.RequestedParts;
+import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
@@ -63,6 +64,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     private final UserAccountRepository users;
     private final NotificationService notifications;
     private final RequestedParts requestedParts;
+    private final TransferReconciliation reconciliation;
     private final AuditLogRepository auditLog;
     private final Clock clock;
 
@@ -204,7 +206,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                         .map(ReplenishmentRequestLine::getProductId).toList()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
         Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
-        Map<Long, Long> fulfilled = byProduct(transferLines.fulfilledByProduct(id));
+        Map<Long, Long> fulfilled = reconciliation.fulfilled(id);
         return new ReplenishmentDetailResponse(id, store.getId(), store.getStoreName(), request.getStatus(),
                 request.getNote(), request.getCreatedBy(), createdByName, request.getCreatedAt(), request.getClosedAt(),
                 requestLines.stream().map(line -> {
