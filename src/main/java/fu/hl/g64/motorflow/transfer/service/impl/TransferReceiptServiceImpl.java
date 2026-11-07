@@ -56,6 +56,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -175,7 +176,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
     @Override
     public TransferReceiptResponse recordResult(AuthenticatedUser user, long transferOrderId, long receiptId,
                                                 TransferReceiptResultRequest body) {
-        lockOrder(transferOrderId);
+        requireNotClosed(lockOrder(transferOrderId));
         GoodsReceiptNote receipt = lockReceipt(transferOrderId, receiptId);
         warehouseTasks.requireAssignee(user, TaskType.INSPECTION, receiptId);
         if (!receipt.awaitsResult()) {
@@ -197,6 +198,14 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         if (!missing.isEmpty()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG167", missing);
         }
+        // An open return or a pending loss already claims what is still missing: a late receipt may not count more.
+        Map<Long, Long> claimed = new HashMap<>();
+        if (receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
+            orderLines.openReturnQty(transferOrderId)
+                    .forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
+            orderLines.pendingLoss(transferOrderId)
+                    .forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
+        }
         for (GoodsReceiptNoteLine line : lines) {
             TransferReceiptResultRequest.Line result = sent.get(line.getProductId());
             // Damaged goods fill what is expected first, so excess is always goods that passed (excess <= passed).
@@ -208,6 +217,10 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             // Goods coming back can only be goods that left (BR-61): nothing above what is expected.
             if (receipt.getReceiptType() == ReceiptType.RETURN_TO_SOURCE && delivered > line.getDocumentQty()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG220", parts.get(line.getProductId()).getSku(),
+                        line.getDocumentQty());
+            }
+            if (claimed.getOrDefault(line.getProductId(), 0L) > 0 && delivered > line.getDocumentQty()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG224", parts.get(line.getProductId()).getSku(),
                         line.getDocumentQty());
             }
             line.record(line.getDocumentQty(), delivered, 0, result.damagedQty(), null, null, null);
@@ -224,7 +237,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
     @Override
     public TransferReceiptResponse returnForRecount(AuthenticatedUser user, long transferOrderId, long receiptId,
                                                     RecountRequest body) {
-        TransferOrder order = lockOrder(transferOrderId);
+        TransferOrder order = requireNotClosed(lockOrder(transferOrderId));
         GoodsReceiptNote receipt = lockReceipt(transferOrderId, receiptId);
         requireManager(user, receivingStore(order, receipt));
         if (receipt.getStatus() != GoodsReceiptNoteStatus.AWAITING_CONFIRMATION) {
@@ -242,7 +255,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
     @Transactional
     @Override
     public TransferReceiptResponse confirm(AuthenticatedUser user, long transferOrderId, long receiptId) {
-        TransferOrder order = lockOrder(transferOrderId);
+        TransferOrder order = requireNotClosed(lockOrder(transferOrderId));
         GoodsReceiptNote receipt = lockReceipt(transferOrderId, receiptId);
         long receivingStore = receivingStore(order, receipt);
         requireManager(user, receivingStore);
@@ -366,6 +379,13 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
 
     private TransferOrder lockOrder(long id) {
         return orders.findByIdForUpdate(id).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+    }
+
+    private static TransferOrder requireNotClosed(TransferOrder order) {
+        if (order.getStatus() == TransferOrderStatus.CLOSED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        return order;
     }
 
     private GoodsReceiptNote lockReceipt(long transferOrderId, long receiptId) {

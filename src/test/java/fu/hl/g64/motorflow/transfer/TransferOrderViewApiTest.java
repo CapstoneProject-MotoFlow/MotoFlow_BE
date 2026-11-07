@@ -116,6 +116,9 @@ class TransferOrderViewApiTest extends ApiTestUsers {
         long arrived = receipt(dispatched, "TRANSFER_IN", "CONFIRMED");
         receiptLine(arrived, brake, 6, 1);
         receiptLine(arrived, chain, 4, 0);
+        // 3 of the chains were dispatched: the receipt expected 3 and the 4th is excess, as recordResult stores it.
+        jdbc.update("UPDATE goods_receipt_note_line SET document_qty = 3, excess_qty = 1 "
+                + "WHERE goods_receipt_note_id = ? AND product_id = ?", arrived, chain);
         receiptLine(receipt(dispatched, "RETURN_TO_SOURCE", "CONFIRMED"), brake, 1, 0);
         receiptLine(receipt(dispatched, "TRANSFER_IN", "AWAITING_INSPECTION"), brake, 2, 0);
         long shortage = jdbc.queryForObject("INSERT INTO discrepancy_case (source_type, transfer_order_id, product_id, "

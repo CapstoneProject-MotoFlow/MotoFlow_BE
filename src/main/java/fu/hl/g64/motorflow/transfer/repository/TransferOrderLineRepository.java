@@ -31,13 +31,18 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             """)
     List<ProductQty> plannedByProduct(@Param("requestId") long requestId);
 
-    /** BR-60: passed plus damaged per part on the order's confirmed receipts, at the destination and back at the source. */
+    /**
+     * BR-60: passed plus damaged per part on the order's confirmed receipts, at the destination and back at the source.
+     * {@code excess} is the part of {@code received} above what those receipts expected (BR-68); it never was in transit.
+     */
     interface ReceiptTotals {
         long getProductId();
 
         long getReceived();
 
         long getReturned();
+
+        long getExcess();
     }
 
     @Query("""
@@ -45,7 +50,9 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
                    sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
                             then l.passedQty + l.damagedQty else 0 end) as received,
                    sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.RETURN_TO_SOURCE
-                            then l.passedQty + l.damagedQty else 0 end) as returned
+                            then l.passedQty + l.damagedQty else 0 end) as returned,
+                   sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
+                            then l.excessQty else 0 end) as excess
             from GoodsReceiptNoteLine l
             join GoodsReceiptNote g on g.id = l.goodsReceiptNoteId
             where g.transferOrderId = :id
@@ -64,6 +71,18 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             group by l.productId
             """)
     List<ProductQty> openReceiptQty(@Param("id") long transferOrderId);
+
+    /** What open returns to the source still expect per part. */
+    @Query("""
+            select l.productId as productId, sum(l.documentQty) as qty
+            from GoodsReceiptNoteLine l
+            join GoodsReceiptNote g on g.id = l.goodsReceiptNoteId
+            where g.transferOrderId = :id
+              and g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.RETURN_TO_SOURCE
+              and g.status <> fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.CONFIRMED
+            group by l.productId
+            """)
+    List<ProductQty> openReturnQty(@Param("id") long transferOrderId);
 
     /** Losses linked to an adjustment that may still be applied: they settle nothing yet but are spoken for. */
     @Query("""

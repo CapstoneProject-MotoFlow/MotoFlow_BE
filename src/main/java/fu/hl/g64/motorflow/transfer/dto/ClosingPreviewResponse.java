@@ -9,7 +9,7 @@ import java.util.List;
  *
  * @param blockedBy the message codes closing would fail with, in the order they are checked: MSG221 parts without a
  *                  final result (BR-63), MSG222 excess the source has not confirmed, MSG223 source stock short of the
- *                  confirmed excess
+ *                  confirmed excess, MSG225 receipts or returns not yet confirmed
  */
 public record ClosingPreviewResponse(long id, TransferOrderStatus status, boolean canClose, List<String> blockedBy,
                                      List<Line> lines) {

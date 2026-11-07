@@ -325,7 +325,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         TransferOrder order = orders.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
         List<ClosingPreviewResponse.Line> rows = closingLines(order);
-        Map<String, String> blocked = order.getStatus() == TransferOrderStatus.RECONCILING ? blockers(rows) : Map.of();
+        Map<String, String> blocked = order.getStatus() == TransferOrderStatus.RECONCILING
+                ? blockers(rows, lines.openReceiptQty(id)) : Map.of();
         return new ClosingPreviewResponse(id, order.getStatus(),
                 order.getStatus() == TransferOrderStatus.RECONCILING && blocked.isEmpty(),
                 List.copyOf(blocked.keySet()), rows);
@@ -345,7 +346,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
         List<ClosingPreviewResponse.Line> rows = closingLines(order);
-        Map<String, String> blocked = blockers(rows);
+        Map<String, String> blocked = blockers(rows, lines.openReceiptQty(id));
         if (!blocked.isEmpty()) {
             Map.Entry<String, String> first = blocked.entrySet().iterator().next();
             throw new BusinessException(HttpStatus.CONFLICT, first.getKey(), first.getValue());
@@ -391,7 +392,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
     }
 
     /** UC-77 step 2: each reason the order cannot close, with the parts it concerns, in the order checked. */
-    private static Map<String, String> blockers(List<ClosingPreviewResponse.Line> rows) {
+    private static Map<String, String> blockers(List<ClosingPreviewResponse.Line> rows,
+                                                List<TransferOrderLineRepository.ProductQty> open) {
         Map<String, String> blocked = new LinkedHashMap<>();
         String unresolved = rows.stream().filter(row -> row.unresolvedQty() > 0)
                 .map(row -> row.sku() + " x" + row.unresolvedQty()).collect(Collectors.joining(", "));
@@ -409,6 +411,14 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .collect(Collectors.joining(", "));
         if (!shortAtSource.isEmpty()) {
             blocked.put("MSG223", shortAtSource);
+        }
+        // A receipt is only ever opened with lines expecting at least one unit, so any open receipt shows up here.
+        Map<Long, Long> expected = open.stream().collect(Collectors.toMap(
+                TransferOrderLineRepository.ProductQty::getProductId, TransferOrderLineRepository.ProductQty::getQty));
+        String opened = rows.stream().filter(row -> expected.getOrDefault(row.productId(), 0L) > 0)
+                .map(row -> row.sku() + " x" + expected.get(row.productId())).collect(Collectors.joining(", "));
+        if (!opened.isEmpty()) {
+            blocked.put("MSG225", opened);
         }
         return blocked;
     }

@@ -24,11 +24,13 @@ public class TransferReconciliation {
     private final TransferOrderRepository orders;
 
     /**
-     * @param received      passed plus damaged on confirmed receipts at the destination, at most the dispatched quantity
-     * @param extraReceived what those receipts brought above the dispatched quantity (BR-68)
+     * @param received      passed plus damaged on confirmed receipts at the destination, less their excess: exactly
+     *                      what left IN_TRANSIT there
+     * @param extraReceived the excess of those receipts, goods above what they expected, never in transit (BR-68)
      * @param returned      passed plus damaged on confirmed receipts back at the source (BR-61)
      * @param loss          approved loss whose adjustment was applied (BR-66)
      * @param unresolved    dispatched minus every final result (BR-60)
+     *                      <p>Invariant: destination IN_TRANSIT of the order = dispatched - received - returned - loss.
      */
     public record Part(int dispatched, int received, int extraReceived, int returned, int loss, int unresolved) {
     }
@@ -42,11 +44,11 @@ public class TransferReconciliation {
         return orderLines.stream().collect(Collectors.toMap(TransferOrderLine::getProductId, line -> {
             int dispatched = line.getDispatchedQty() == null ? 0 : line.getDispatchedQty();
             TransferOrderLineRepository.ReceiptTotals receipt = receipts.get(line.getProductId());
-            int arrived = receipt == null ? 0 : (int) receipt.getReceived();
+            int extra = receipt == null ? 0 : (int) receipt.getExcess();
+            int received = receipt == null ? 0 : (int) receipt.getReceived() - extra;
             int returned = receipt == null ? 0 : (int) receipt.getReturned();
-            int received = Math.min(arrived, dispatched);
             int loss = losses.getOrDefault(line.getProductId(), 0L).intValue();
-            return new Part(dispatched, received, arrived - received, returned, loss,
+            return new Part(dispatched, received, extra, returned, loss,
                     Math.max(dispatched - received - returned - loss, 0));
         }));
     }

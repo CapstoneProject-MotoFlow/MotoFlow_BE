@@ -296,6 +296,9 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
         receipt(stray, "TRANSFER_IN", "CONFIRMED", brake, 7);
         receipt(first, "TRANSFER_IN", "CONFIRMED", brake, 3);
         receipt(first, "TRANSFER_IN", "CONFIRMED", chain, 5);
+        // The receipt expected the 2 dispatched, so the other 3 are stored as excess, as recordResult does.
+        jdbc.update("UPDATE goods_receipt_note_line SET document_qty = 2, excess_qty = 3 WHERE product_id = ? "
+                + "AND goods_receipt_note_id = (SELECT max(id) FROM goods_receipt_note)", chain);
         receipt(second, "TRANSFER_IN", "AWAITING_CONFIRMATION", brake, 2);
         receipt(first, "RETURN_TO_SOURCE", "CONFIRMED", brake, 1);
 
