@@ -81,4 +81,8 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
     List<String> findStorageAreas(Long storeId);
 
     List<StockBalance> findByProductIdIn(Collection<Long> productIds);
+
+    /** UC-91: the parts shelved in one storage area of a warehouse, by id. */
+    @Query("select b.productId from StockBalance b where b.storeId = :storeId and b.storageArea = :area order by b.productId")
+    List<Long> findProductIdsByStorageArea(Long storeId, String area);
 }

@@ -97,4 +97,12 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
               and b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE and b.quantity > 0
             order by l.productId, l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
     List<CountableLot> findCountableLots(Long storeId, Collection<Long> productIds);
+
+    /** UC-91: the parts with AVAILABLE stock in a lot of the warehouse, by id. */
+    @Query("""
+            select distinct l.productId from LotBalance b, Lot l
+            where l.id = b.lotId and b.storeId = :storeId and b.quantity > 0
+              and b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE
+            order by l.productId""")
+    List<Long> findProductIdsWithAvailableStock(Long storeId);
 }

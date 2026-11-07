@@ -1,6 +1,14 @@
 package fu.hl.g64.motorflow.stockcount.service.impl;
 
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
+import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
+import fu.hl.g64.motorflow.inventory.entity.StockCount;
+import fu.hl.g64.motorflow.inventory.entity.StockCountRequest;
+import fu.hl.g64.motorflow.inventory.entity.StockCountRequestProduct;
+import fu.hl.g64.motorflow.inventory.entity.enums.CountType;
+import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -31,9 +39,18 @@ import fu.hl.g64.motorflow.stockcount.service.StockCountService;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * UC-90 to UC-95. Each method region names the worker that owns it; a worker adds private helpers inside its own
@@ -63,15 +80,86 @@ public class StockCountServiceImpl implements StockCountService {
 
     // region getPrefill (owner: Y)
     @Override
+    @Transactional(readOnly = true)
     public CountRequestResponse getPrefill(AuthenticatedUser user, long requestId) {
-        throw new UnsupportedOperationException("UC-91");
+        StockCountRequest request = access.loadRequest(requestId);
+        access.requireManagerOf(user, request.getStoreId());
+        if (!request.isPending()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG233");
+        }
+        return mapper.toRequest(request);
     }
     // endregion
 
     // region create (owner: Y)
     @Override
+    @Transactional
     public StockCountDetailResponse create(AuthenticatedUser user, StockCountCreateRequest request) {
-        throw new UnsupportedOperationException("UC-91");
+        if (request.countType() == CountType.OPENING) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG244");
+        }
+        if (user.storeId() == null) { // the Owner has no warehouse
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        access.requireManagerOf(user, user.storeId());
+        long storeId = user.storeId();
+        if (counts.existsByStoreIdAndStatusIn(storeId,
+                List.of(StockCountStatus.DRAFT, StockCountStatus.COUNTING, StockCountStatus.AWAITING_APPROVAL))) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG230");
+        }
+        LocalDate today = LocalDate.now(clock);
+        if (request.countDate().isAfter(today.withDayOfMonth(today.lengthOfMonth()))) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG232");
+        }
+        if (request.countDate().withDayOfMonth(1).equals(today.withDayOfMonth(1))) {
+            inventoryPeriods.openIfMissing(request.countDate());
+        }
+        Long periodId = inventoryPeriods.findFor(request.countDate()).filter(InventoryPeriod::isOpen)
+                .map(InventoryPeriod::getId).orElseThrow(() -> new BusinessException(HttpStatus.CONFLICT, "MSG232"));
+
+        List<Long> productIds = request.productIds() == null ? List.of() : request.productIds();
+        String scopeNote = request.scopeNote() == null || request.scopeNote().isBlank() ? null
+                : request.scopeNote().strip();
+        StockCountRequest answered = null;
+        if (request.stockCountRequestId() != null) {
+            answered = access.lockRequest(request.stockCountRequestId());
+            access.requireManagerOf(user, answered.getStoreId());
+            if (!answered.isPending()) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG233");
+            }
+            Set<Long> requested = requestProducts.findByStockCountRequestIdOrderByProductId(answered.getId()).stream()
+                    .map(StockCountRequestProduct::getProductId).collect(Collectors.toSet());
+            if (request.countType() != CountType.CYCLE || request.scopeType() != answered.getScopeType()
+                    || !Objects.equals(scopeNote, answered.getScopeNote()) || !requested.equals(new HashSet<>(productIds))) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG234");
+            }
+        }
+        validateScope(storeId, request.scopeType(), scopeNote, productIds);
+
+        LocalDateTime now = LocalDateTime.now(clock);
+        StockCount count = counts.save(StockCount.create(storeId, periodId, answered == null ? null : answered.getId(),
+                request.countType(), request.countDate(), request.scopeType(), scopeNote, user.id(), now));
+        countSheets.buildLines(count, productIds);
+        if (answered != null) {
+            answered.markDone();
+        }
+        return mapper.toDetail(count, StockCountAccess.Viewer.MANAGER);
+    }
+
+    /** MSG02 for a scope that does not fit its type, MSG242 for a part that does not exist. */
+    private void validateScope(long storeId, ScopeType scopeType, String scopeNote, List<Long> productIds) {
+        boolean bad = switch (scopeType) {
+            case WHOLE -> !productIds.isEmpty();
+            case AREA -> !productIds.isEmpty() || scopeNote == null
+                    || !stockBalances.findStorageAreas(storeId).contains(scopeNote);
+            case PRODUCTS -> productIds.isEmpty() || new HashSet<>(productIds).size() != productIds.size();
+        };
+        if (bad) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        if (products.findAllById(productIds).size() != productIds.size()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG242");
+        }
     }
     // endregion
 

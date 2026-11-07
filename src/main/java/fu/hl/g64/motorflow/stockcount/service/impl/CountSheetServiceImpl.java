@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.stockcount.service.impl;
 
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
 import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
+import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountLineRepository;
@@ -9,7 +10,10 @@ import fu.hl.g64.motorflow.stockcount.service.CountSheetService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -22,7 +26,31 @@ public class CountSheetServiceImpl implements CountSheetService {
     // region buildLines (owner: Y)
     @Override
     public List<StockCountLine> buildLines(StockCount count, List<Long> productIds) {
-        throw new UnsupportedOperationException("UC-91");
+        List<Long> parts = switch (count.getScopeType()) {
+            case WHOLE -> lotBalances.findProductIdsWithAvailableStock(count.getStoreId());
+            case AREA -> stockBalances.findProductIdsByStorageArea(count.getStoreId(), count.getScopeNote());
+            case PRODUCTS -> productIds;
+        };
+        Map<Long, List<LotBalanceRepository.CountableLot>> lotsByPart = parts.isEmpty() ? Map.of()
+                : lotBalances.findCountableLots(count.getStoreId(), parts).stream()
+                .collect(Collectors.groupingBy(LotBalanceRepository.CountableLot::getProductId));
+        List<StockCountLine> built = new ArrayList<>();
+        for (Long part : parts) {
+            List<LotBalanceRepository.CountableLot> lots = lotsByPart.getOrDefault(part, List.of());
+            boolean anyWithoutExpiry = false;
+            for (LotBalanceRepository.CountableLot lot : lots) {
+                if (lot.getExpiryDate() == null) {
+                    anyWithoutExpiry = true;
+                } else {
+                    built.add(StockCountLine.create(count.getId(), part, lot.getLotId(), lot.getExpiryDate()));
+                }
+            }
+            // The lots without expiry share one line; a listed part with no lot at all still gets it.
+            if (anyWithoutExpiry || (lots.isEmpty() && count.getScopeType() == ScopeType.PRODUCTS)) {
+                built.add(StockCountLine.create(count.getId(), part, null, null));
+            }
+        }
+        return lines.saveAll(built);
     }
     // endregion
 
