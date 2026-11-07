@@ -22,7 +22,12 @@ public final class SalesOrderHistory {
     public static final String VERSIONED = "SALES_ORDER_VERSIONED";
     public static final String PICKED = "SALES_ORDER_PICKED";
     public static final String CONFIRMED = "SALES_ORDER_CONFIRMED";
-    public static final List<String> ACTIONS = List.of(CREATED, VERSIONED, PICKED, CONFIRMED);
+    /** A payment or refund that did not count; the payment row keeps no record of who rejected it. */
+    public static final String PAYMENT_REJECTED = "SALES_ORDER_PAYMENT_REJECTED";
+    public static final String COMPLETED = "SALES_ORDER_COMPLETED";
+    public static final String CANCELLED = "SALES_ORDER_CANCELLED";
+    public static final List<String> ACTIONS = List.of(CREATED, VERSIONED, PICKED, CONFIRMED, PAYMENT_REJECTED,
+            COMPLETED, CANCELLED);
     public static final List<String> VERSION_ACTIONS = List.of(CREATED, VERSIONED);
 
     /** Why a new version was saved: the seller changed the order (UC-55), or delivered less than requested (UC-58). */

@@ -164,6 +164,45 @@ public class SalesOrder {
         updatedAt = now;
     }
 
+    /**
+     * UC-61 step 4: the seller allows the unpaid balance of the confirmed version on credit (BR-41, BR-42). A later
+     * change of the order drops the decision with the confirmation (BR-36).
+     */
+    public void approveCredit(long amount, long decidedBy, LocalDateTime now) {
+        requireConfirmed();
+        creditDecision = CreditDecision.APPROVED;
+        approvedCreditAmount = amount;
+        creditDecidedBy = decidedBy;
+        creditDecidedAt = now;
+        updatedAt = now;
+    }
+
+    /**
+     * UC-60 step 8, UC-61 step 8: the confirmed version is handed over, paid in full or on the approved credit
+     * (BR-38, BR-51). A completed order is never reopened (BR-35).
+     */
+    public void complete(CompletionType type, long completedBy, LocalDateTime now) {
+        requireConfirmed();
+        if (type == CompletionType.CREDIT && creditDecision != CreditDecision.APPROVED) {
+            throw new IllegalStateException("order " + id + " has no credit approved");
+        }
+        status = SalesOrderStatus.COMPLETED;
+        completionType = type;
+        this.completedBy = completedBy;
+        completedAt = now;
+        updatedAt = now;
+    }
+
+    /** UC-56 step 6: the unfinished order is cancelled with its reason; its history stays (BR-39). */
+    public void cancel(long cancelledBy, String reason, LocalDateTime now) {
+        requireUnfinished();
+        status = SalesOrderStatus.CANCELLED;
+        this.cancelledBy = cancelledBy;
+        cancelledAt = now;
+        cancellationReason = reason;
+        updatedAt = now;
+    }
+
     /** Neither completed nor cancelled. */
     public boolean isUnfinished() {
         return status != SalesOrderStatus.COMPLETED && status != SalesOrderStatus.CANCELLED;
@@ -193,6 +232,12 @@ public class SalesOrder {
     private void requireUnfinished() {
         if (!isUnfinished()) {
             throw new IllegalStateException("order " + id + " is " + status);
+        }
+    }
+
+    private void requireConfirmed() {
+        if (status != SalesOrderStatus.CONFIRMED) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not confirmed");
         }
     }
 
