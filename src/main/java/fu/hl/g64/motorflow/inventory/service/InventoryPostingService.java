@@ -29,7 +29,9 @@ public interface InventoryPostingService {
 
     /**
      * Stock in as a new lot (GRN line confirmed, opening count approved, count surplus without a lot). Recalculates
-     * the chain-wide moving average from the AVAILABLE quantity at the lot's purchase unit price (BR-74).
+     * the chain-wide moving average from the AVAILABLE quantity at the lot's purchase unit price (BR-74). A
+     * COUNT_SURPLUS lot comes in at the average and leaves it unchanged. {@code periodId} and {@code occurredAt}
+     * follow the rule of {@link #adjustLot}.
      *
      * @return the new lot
      */
@@ -51,7 +53,12 @@ public interface InventoryPostingService {
      */
     List<LotQuantity> move(MovePosting posting);
 
-    /** Plus or minus on one known lot; never below zero (MSG84). */
+    /**
+     * Plus or minus on one known lot; never below zero (MSG84). A COUNT_ADJUSTMENT may name {@code periodId} and
+     * {@code occurredAt} to land in the count's own period and at the end of the count day (BR-83): that period must
+     * be OPEN (MSG85). Naming them for any other movement type, or only one of them, is an
+     * {@link IllegalArgumentException}; naming neither posts into the current month as always.
+     */
     void adjustLot(LotAdjustPosting posting);
 
     /**

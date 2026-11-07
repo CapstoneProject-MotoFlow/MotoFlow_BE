@@ -1,19 +1,27 @@
 package fu.hl.g64.motorflow.stockcount.service.impl;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.inventory.dto.LotAdjustPosting;
+import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
 import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequest;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequestProduct;
+import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.CountType;
+import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
+import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountRequestStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
+import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountableLot;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountLineRepository;
@@ -52,9 +60,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -407,8 +420,99 @@ public class StockCountServiceImpl implements StockCountService {
 
     // region approve (owner: Z)
     @Override
+    @Transactional
     public StockCountDetailResponse approve(AuthenticatedUser user, long id, StockCountApproveRequest request) {
-        throw new UnsupportedOperationException("UC-95");
+        StockCount count = access.lockCount(id);
+        access.requireOwner(user);
+        if (count.getStatus() != StockCountStatus.AWAITING_APPROVAL) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
+        }
+        access.requireOpenPeriod(count.getInventoryPeriodId());
+
+        List<ApprovalStep> steps = planAdjustments(count);
+        LocalDateTime now = LocalDateTime.now(clock);
+        // BR-83: the differences belong to the period and the end of the count day, even if approved a month later.
+        LocalDateTime occurredAt = count.getCountDate().atTime(23, 59, 59);
+        for (ApprovalStep step : steps) {
+            if (step.lotId() != null) {
+                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.AVAILABLE,
+                        step.quantity(), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(),
+                        step.reason(), count.getInventoryPeriodId(), occurredAt));
+            } else {
+                // Surplus with no lot: a new lot at the moving average, so the average does not move (BR-74, BR-81).
+                BigDecimal average = products.findById(step.productId()).map(Product::getMovingAvgCost).orElse(null);
+                long price = average == null ? 0 : average.setScale(0, RoundingMode.HALF_UP).longValueExact();
+                posting.receiveNewLot(new NewLotPosting(count.getStoreId(), step.productId(),
+                        LotSourceType.COUNT_SURPLUS, null, null, count.getCountDate(), price, null, null, null,
+                        Map.of(StockStatus.AVAILABLE, step.quantity()), MovementType.COUNT_ADJUSTMENT,
+                        SourceRef.stockCount(id), user.id(), step.reason(), count.getInventoryPeriodId(),
+                        occurredAt));
+            }
+        }
+
+        String decision = request == null || request.decisionReason() == null || request.decisionReason().isBlank()
+                ? null : request.decisionReason().strip();
+        count.approve(user.id(), decision, now);
+        notifications.notifyStoreManagers(count.getStoreId(), "STOCK_COUNT_APPROVED",
+                "Owner đã duyệt chênh lệch của phiếu kiểm kê #%d.".formatted(id), "STOCK_COUNT", id);
+        return mapper.toDetail(count, Viewer.OWNER);
+    }
+
+    /** One posting of an approval: a lot (null = new surplus lot of the part) and the quantity to add or take. */
+    private record ApprovalStep(long productId, Long lotId, int quantity, String reason) {
+    }
+
+    /**
+     * Turns every line with a difference into lot postings, in part order, and checks first that no lot would go
+     * below zero (SC-12), so nothing is written when one would. A line with a lot moves that lot; a missing quantity
+     * with no lot is taken from the lots without expiry, oldest received first; a surplus with no lot is a new lot.
+     */
+    private List<ApprovalStep> planAdjustments(StockCount count) {
+        List<StockCountLine> withDifference = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId())
+                .stream().filter(l -> l.isCounted() && l.difference() != 0)
+                .sorted(Comparator.comparing(StockCountLine::getProductId)).toList();
+        if (withDifference.isEmpty()) {
+            return List.of();
+        }
+        List<Long> productIds = withDifference.stream().map(StockCountLine::getProductId).distinct().toList();
+        Map<Long, String> skus = products.findAllById(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Product::getSku));
+        Map<Long, Integer> held = new HashMap<>();
+        Map<Long, List<CountableLot>> withoutExpiry = new HashMap<>();
+        for (CountableLot lot : lotBalances.findCountableLots(count.getStoreId(), productIds)) {
+            held.put(lot.getLotId(), lot.getQuantity());
+            if (lot.getExpiryDate() == null) {
+                withoutExpiry.computeIfAbsent(lot.getProductId(), k -> new ArrayList<>()).add(lot);
+            }
+        }
+
+        List<ApprovalStep> steps = new ArrayList<>();
+        for (StockCountLine line : withDifference) {
+            long product = line.getProductId();
+            int difference = line.difference();
+            if (line.getLotId() != null) {
+                if (held.getOrDefault(line.getLotId(), 0) + difference < 0) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
+                }
+                steps.add(new ApprovalStep(product, line.getLotId(), difference, line.getReason()));
+            } else if (difference > 0) {
+                steps.add(new ApprovalStep(product, null, difference, line.getReason()));
+            } else {
+                int left = -difference;
+                for (CountableLot lot : withoutExpiry.getOrDefault(product, List.of())) {
+                    if (left == 0) {
+                        break;
+                    }
+                    int take = Math.min(left, lot.getQuantity());
+                    steps.add(new ApprovalStep(product, lot.getLotId(), -take, line.getReason()));
+                    left -= take;
+                }
+                if (left > 0) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), "không lô");
+                }
+            }
+        }
+        return steps;
     }
     // endregion
 }
