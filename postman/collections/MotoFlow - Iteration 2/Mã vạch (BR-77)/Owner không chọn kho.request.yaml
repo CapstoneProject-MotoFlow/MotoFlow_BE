@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/products/barcode/8936012340011"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Không có kho và tồn', () => {
+          pm.expect(b.storeId).to.eql(null);
+          pm.expect(b.availableQty).to.eql(null);
+      });
+    language: text/javascript
+order: 4000

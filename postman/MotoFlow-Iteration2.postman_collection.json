@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "MotoFlow - Iteration 2",
-    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.\n- bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.\n- Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.",
+    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.\n- bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.\n- Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.\n- Thư mục Mã vạch chỉ đọc dữ liệu: quét mã 8936012340011 (BUG-NGK-CPR8) của dữ liệu demo; Admin dùng tài khoản admin2.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -28,6 +28,11 @@
     {
       "key": "staffUsername",
       "value": "nv.kho1",
+      "type": "string"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin2",
       "type": "string"
     },
     {
@@ -1153,6 +1158,209 @@
                 {
                   "key": "token",
                   "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mã vạch (BR-77)",
+      "item": [
+        {
+          "name": "BM quét mã đúng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/8936012340011",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Đúng phụ tùng', () => pm.expect(b.sku).to.eql('BUG-NGK-CPR8'));",
+                  "pm.test('Tồn của kho mình', () => {",
+                  "    pm.expect(b.storeId).to.eql(Number(pm.collectionVariables.get('bmStoreId')));",
+                  "    pm.expect(b.availableQty).to.be.a('number');",
+                  "});",
+                  "pm.test('Không có giá', () => pm.expect(b).to.not.have.any.keys('retailPrice', 'movingAvgCost'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quét mã có khoảng trắng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/%20%208936012340011%20",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Khoảng trắng bị bỏ', () => pm.expect(pm.response.json().barcode).to.eql('8936012340011'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mã không tồn tại trả MSG91",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/0000000000000",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG91', () => pm.expect(pm.response.json().code).to.eql('MSG91'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner không chọn kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/8936012340011",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Không có kho và tồn', () => {",
+                  "    pm.expect(b.storeId).to.eql(null);",
+                  "    pm.expect(b.availableQty).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('adminToken', b.accessToken);",
+                  "pm.test('Vai trò ADMIN', () => pm.expect(b.user.role).to.eql('ADMIN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin bị 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/8936012340011",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
                   "type": "string"
                 }
               ]

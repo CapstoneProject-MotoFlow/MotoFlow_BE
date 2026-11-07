@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/products/barcode/%20%208936012340011%20"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('Khoảng trắng bị bỏ', () => pm.expect(pm.response.json().barcode).to.eql('8936012340011'));
+    language: text/javascript
+order: 2000

@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/products/barcode/0000000000000"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 404', () => pm.response.to.have.status(404));
+      pm.test('Mã lỗi MSG91', () => pm.expect(pm.response.json().code).to.eql('MSG91'));
+    language: text/javascript
+order: 3000

@@ -1,0 +1,13 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/products/barcode/8936012340011"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{adminToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 403', () => pm.response.to.have.status(403));
+    language: text/javascript
+order: 6000
