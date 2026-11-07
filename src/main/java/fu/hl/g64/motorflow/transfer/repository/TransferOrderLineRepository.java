@@ -18,11 +18,13 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
     }
 
     /**
-     * UC-70: planned per part on the transfer orders of a request. The schema has no cancelled status, so all count,
-     * except make-up lines, which stand in for goods already planned (BR-62).
+     * UC-70: planned per part on the transfer orders of a request. Orders already dispatched count what they actually
+     * dispatched, the others count their plan, so a short dispatch frees the unsent remainder for a new order or
+     * purchasing. The schema has no cancelled status, so all orders count, except make-up lines, which stand in for
+     * goods already planned (BR-62).
      */
     @Query("""
-            select l.productId as productId, sum(l.plannedQty) as qty
+            select l.productId as productId, sum(coalesce(l.dispatchedQty, l.plannedQty)) as qty
             from TransferOrderLine l
             join TransferOrder o on o.id = l.transferOrderId
             where o.replenishmentRequestId = :requestId

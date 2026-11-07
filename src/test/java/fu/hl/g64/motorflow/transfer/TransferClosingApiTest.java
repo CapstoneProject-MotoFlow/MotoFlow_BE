@@ -13,6 +13,7 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -149,6 +150,40 @@ class TransferClosingApiTest extends TransferFlowTestData {
         close("bmkt", 999_999).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG175"));
     }
 
+    @Test
+    void whatWasNeverDispatchedCanBeSentInAnotherOrderAndTheRequestStillCloses() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long request = shortRequest();
+        long first = shortDispatched(request, 5, 3);
+        confirm("bmlb", first, inspected(first, brake, 3, 0)).andExpect(status().isOk());
+        close("owner", first).andExpect(status().isOk());
+        assertThat(requestStatus(request)).isEqualTo("IN_PROGRESS");
+
+        long second = linkedOrder(request, 2);
+        close("owner", second).andExpect(status().isOk());
+        assertThat(requestStatus(request)).isEqualTo("CLOSED");
+    }
+
+    @Test
+    void whatWasNeverDispatchedCanBePassedToPurchasing() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long request = shortRequest();
+        shortDispatched(request, 5, 3);
+
+        toPurchase(request, 3).andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG205"));
+        toPurchase(request, 2).andExpect(status().isOk());
+    }
+
+    @Test
+    void theRequestDetailCountsTheDispatchedQuantityOfAShortOrder() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long request = shortRequest();
+        shortDispatched(request, 5, 3);
+
+        mvc.perform(get("/api/v1/replenishment-requests/" + request).header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].plannedQty").value(3));
+    }
+
     /** {@code sent} brakes dispatched, {@code arrived} of them confirmed at the destination as passed. */
     private long received(int sent, int arrived) throws Exception {
         long order = dispatchedOrder(brake, sent);
@@ -158,18 +193,38 @@ class TransferClosingApiTest extends TransferFlowTestData {
 
     /** A transfer of {@code quantity} brakes for the request, dispatched and fully received. */
     private long linkedOrder(long request, int quantity) throws Exception {
+        long order = shortDispatched(request, quantity, quantity);
+        confirm("bmlb", order, inspected(order, brake, quantity, 0)).andExpect(status().isOk());
+        return order;
+    }
+
+    /** A transfer of {@code planned} brakes for the request, of which the source prepared and dispatched {@code sent}. */
+    private long shortDispatched(long request, int planned, int sent) throws Exception {
         mvc.perform(post(ORDERS).header(HttpHeaders.AUTHORIZATION, signIn("bmkt"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("replenishmentRequestId", request, "sourceStoreId", source,
                                 "destStoreId", dest, "lines", List.of(Map.of("productId", brake,
-                                        "plannedQty", quantity))))))
+                                        "plannedQty", planned))))))
                 .andExpect(status().isCreated());
         long order = jdbc.queryForObject("SELECT max(id) FROM transfer_order", Long.class);
         assign("bmcg", "DISPATCH_PREPARATION", order, sourceStaff).andExpect(status().isOk());
-        prepare("nvcg", order, brake, quantity).andExpect(status().isOk());
-        dispatch("bmcg", order, brake, quantity).andExpect(status().isOk());
-        confirm("bmlb", order, inspected(order, brake, quantity, 0)).andExpect(status().isOk());
+        prepare("nvcg", order, brake, sent).andExpect(status().isOk());
+        dispatch("bmcg", order, brake, sent).andExpect(status().isOk());
         return order;
+    }
+
+    private long shortRequest() {
+        long request = jdbc.queryForObject("INSERT INTO replenishment_request (requesting_store_id, created_by) "
+                + "VALUES (?, ?) RETURNING id", Long.class, dest, destManager.getId());
+        jdbc.update("INSERT INTO replenishment_request_line (replenishment_request_id, product_id, requested_qty) "
+                + "VALUES (?, ?, 5)", request, brake);
+        return request;
+    }
+
+    private ResultActions toPurchase(long request, int quantity) throws Exception {
+        return mvc.perform(put("/api/v1/replenishment-requests/" + request + "/to-purchase")
+                .header(HttpHeaders.AUTHORIZATION, signIn("bmkt")).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("lines", List.of(Map.of("productId", brake, "toPurchaseQty", quantity))))));
     }
 
     private void extra(long order, int quantity) throws Exception {
