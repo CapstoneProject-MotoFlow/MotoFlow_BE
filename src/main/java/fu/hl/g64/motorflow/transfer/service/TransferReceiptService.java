@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.dto.RecountRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResponse;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResultRequest;
+import fu.hl.g64.motorflow.transfer.dto.TransferReturnRequest;
 
 /**
  * UC-106, UC-43, UC-44 for transferred goods: the receiving Branch Manager records the arrival and assigns a Staff
@@ -14,6 +15,12 @@ public interface TransferReceiptService {
 
     /** UC-106: the destination Branch Manager records that goods arrived; each part expects what is still uncovered. */
     TransferReceiptResponse arrive(AuthenticatedUser user, long transferOrderId);
+
+    /**
+     * UC-76 Step 3_Return to source: a source Branch Manager records goods coming back, each part at most what is
+     * still uncovered. Inspected and confirmed like any receipt; confirming puts them back at the source (BR-61).
+     */
+    TransferReceiptResponse arriveReturn(AuthenticatedUser user, long transferOrderId, TransferReturnRequest request);
 
     /** The receiving Branch Manager, the coordinators, and the Staff member who inspects it. */
     TransferReceiptResponse receipt(AuthenticatedUser user, long transferOrderId, long receiptId);

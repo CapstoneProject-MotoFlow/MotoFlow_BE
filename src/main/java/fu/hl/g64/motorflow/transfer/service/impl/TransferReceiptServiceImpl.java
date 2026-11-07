@@ -10,7 +10,11 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
+import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.ClosureType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
+import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
 import fu.hl.g64.motorflow.inventory.dto.SplitMovePosting;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
@@ -34,6 +38,7 @@ import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.dto.RecountRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResponse;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResultRequest;
+import fu.hl.g64.motorflow.transfer.dto.TransferReturnRequest;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrderLine;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
@@ -69,6 +74,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
     private final GoodsReceiptNoteRepository receipts;
     private final GoodsReceiptNoteLineRepository receiptLines;
     private final DiscrepancyCaseRepository cases;
+    private final DiscrepancyResolutionEventRepository events;
     private final ProductRepository products;
     private final StoreRepository stores;
     private final StoreScope storeScope;
@@ -101,13 +107,47 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         if (uncovered.values().stream().allMatch(quantity -> quantity == 0)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG210");
         }
+        return open(user, ReceiptType.TRANSFER_IN, transferOrderId, uncovered);
+    }
+
+    // UC-76 Step 3_Return to source
+    @Transactional
+    @Override
+    public TransferReceiptResponse arriveReturn(AuthenticatedUser user, long transferOrderId,
+                                                TransferReturnRequest body) {
+        TransferOrder order = lockOrder(transferOrderId);
+        requireManager(user, order.getSourceStoreId());
+        if (order.getStatus() != TransferOrderStatus.RECONCILING) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        List<TransferOrderLine> parts = orderLines.findByTransferOrderIdOrderByProductId(transferOrderId);
+        Map<Long, Integer> uncovered = reconciliation.uncovered(transferOrderId, parts);
+        Map<Long, Product> catalog = products.findAllById(uncovered.keySet()).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<Long, Integer> coming = new LinkedHashMap<>();
+        for (int i = 0; i < body.lines().size(); i++) {
+            TransferReturnRequest.Line line = body.lines().get(i);
+            if (!uncovered.containsKey(line.productId()) || coming.putIfAbsent(line.productId(), line.quantity()) != null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG166", i + 1);
+            }
+            if (line.quantity() > uncovered.get(line.productId())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG217", catalog.get(line.productId()).getSku(),
+                        uncovered.get(line.productId()));
+            }
+        }
+        return open(user, ReceiptType.RETURN_TO_SOURCE, transferOrderId, coming);
+    }
+
+    /** A receipt of the order waiting for inspection, each part expecting the given quantity. */
+    private TransferReceiptResponse open(AuthenticatedUser user, ReceiptType type, long transferOrderId,
+                                         Map<Long, Integer> expected) {
         LocalDateTime now = LocalDateTime.now(clock);
-        GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.transfer(ReceiptType.TRANSFER_IN, transferOrderId,
-                now));
-        receiptLines.saveAll(uncovered.entrySet().stream().filter(entry -> entry.getValue() > 0)
+        GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.transfer(type, transferOrderId, now));
+        receiptLines.saveAll(expected.entrySet().stream().filter(entry -> entry.getValue() > 0)
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> GoodsReceiptNoteLine.transfer(receipt.getId(), entry.getKey(), entry.getValue())).toList());
-        auditLog.save(AuditLog.record(ENTITY, transferOrderId, "TRANSFER_RECEIPT_ARRIVED", user.id(), null, null,
+        auditLog.save(AuditLog.record(ENTITY, transferOrderId, type == ReceiptType.TRANSFER_IN
+                ? "TRANSFER_RECEIPT_ARRIVED" : "TRANSFER_RETURN_ARRIVED", user.id(), null, null,
                 Map.of("goods_receipt_note_id", receipt.getId()), now));
         return view(receipt);
     }
@@ -165,6 +205,11 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                         line.getDocumentQty());
             }
             int delivered = result.passedQty() + result.damagedQty();
+            // Goods coming back can only be goods that left (BR-61): nothing above what is expected.
+            if (receipt.getReceiptType() == ReceiptType.RETURN_TO_SOURCE && delivered > line.getDocumentQty()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG220", parts.get(line.getProductId()).getSku(),
+                        line.getDocumentQty());
+            }
             line.record(line.getDocumentQty(), delivered, 0, result.damagedQty(), null, null, null);
             line.settleTransferExcess(Math.max(delivered - line.getDocumentQty(), 0));
         }
@@ -249,6 +294,19 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         }
         Map<Long, DiscrepancyCase> opened = orders.findCases(id).stream()
                 .collect(Collectors.toMap(DiscrepancyCase::getProductId, Function.identity()));
+        // UC-76: what a later receipt or a return brought settles the part's case (BR-59, BR-61).
+        ResolutionType settled = receipt.getReceiptType() == ReceiptType.TRANSFER_IN
+                ? ResolutionType.LATE_DELIVERY_RECEIVED : ResolutionType.RECEIVED_BACK_AT_SOURCE;
+        for (GoodsReceiptNoteLine line : lines) {
+            DiscrepancyCase shortage = opened.get(line.getProductId());
+            int arrived = line.getDeliveredQty() - line.getExcessQty();
+            if (shortage != null && arrived > 0) {
+                DiscrepancyResolutionEvent event = DiscrepancyResolutionEvent.pending(shortage.getId(), settled,
+                        arrived, receipt.getId(), null, user.id(), now);
+                event.confirm(arrived, user.id(), now);
+                events.save(event);
+            }
+        }
         List<String> missing = new ArrayList<>();
         for (TransferOrderLine part : parts) {
             int unresolved = figures.get(part.getProductId()).unresolved();
@@ -257,6 +315,9 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                 missing.add(catalog.get(part.getProductId()).getSku() + " x" + unresolved);
             }
         }
+        opened.values().stream().filter(DiscrepancyCase::isOpen)
+                .filter(shortage -> figures.get(shortage.getProductId()).unresolved() == 0)
+                .forEach(shortage -> shortage.close(ClosureType.ALL_SETTLED, null, user.id(), now));
         if (!missing.isEmpty()) {
             String message = "Phiếu chuyển kho #%d còn thiếu %s chưa có kết quả, cần xử lý chênh lệch"
                     .formatted(id, String.join(", ", missing));

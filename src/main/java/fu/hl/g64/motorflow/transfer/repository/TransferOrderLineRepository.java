@@ -78,6 +78,21 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             """)
     List<ProductQty> openReceiptQty(@Param("id") long transferOrderId);
 
+    /** Losses linked to an adjustment that may still be applied: they settle nothing yet but are spoken for. */
+    @Query("""
+            select c.productId as productId, sum(e.quantity) as qty
+            from DiscrepancyResolutionEvent e
+            join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            join AdjustmentRequest a on a.id = e.adjustmentRequestId
+            where c.transferOrderId = :id
+              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.APPROVED_LOSS
+              and a.status in (fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.DRAFT,
+                               fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.PENDING,
+                               fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPROVED)
+            group by c.productId
+            """)
+    List<ProductQty> pendingLoss(@Param("id") long transferOrderId);
+
     /** BR-66: a loss settles transit goods only once its adjustment has been applied. */
     @Query("""
             select c.productId as productId, sum(e.quantity) as qty

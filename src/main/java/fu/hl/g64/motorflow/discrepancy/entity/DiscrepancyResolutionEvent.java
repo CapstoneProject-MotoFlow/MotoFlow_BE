@@ -87,6 +87,18 @@ public class DiscrepancyResolutionEvent {
         return event;
     }
 
+    /**
+     * UC-76 Step 3_Loss or damage: transfer goods to be written off by the STOCK_LOSS adjustment
+     * {@code adjustmentRequestId}; they count as lost only once it is applied (BR-66).
+     */
+    public static DiscrepancyResolutionEvent transferLoss(long caseId, int quantity, long adjustmentRequestId,
+                                                          String reason, long by, LocalDateTime occurredAt) {
+        DiscrepancyResolutionEvent event = pending(caseId, ResolutionType.APPROVED_LOSS, quantity, null, reason, by,
+                occurredAt);
+        event.adjustmentRequestId = adjustmentRequestId;
+        return event;
+    }
+
     public boolean isConfirmed() {
         return confirmedAt != null;
     }

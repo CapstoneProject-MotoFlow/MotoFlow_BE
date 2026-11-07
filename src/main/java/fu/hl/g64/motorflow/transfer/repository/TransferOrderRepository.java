@@ -147,6 +147,19 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
     List<TransitLot> findTransitLots(@Param("id") long id, @Param("storeId") long storeId,
                                      @Param("productId") long productId);
 
+    /** BR-66: units of the part an adjustment writes off transit at the warehouse. */
+    @Query("""
+            select coalesce(-sum(l.quantityChange), 0) from AdjustmentStockLine l
+            where l.adjustmentRequestId = :adjustmentId and l.storeId = :storeId and l.productId = :productId
+              and l.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+              and l.quantityChange < 0
+            """)
+    long transitWriteOff(@Param("adjustmentId") long adjustmentId, @Param("storeId") long storeId,
+                         @Param("productId") long productId);
+
+    @Query("select count(e) > 0 from DiscrepancyResolutionEvent e where e.adjustmentRequestId = :adjustmentId")
+    boolean lossLinked(@Param("adjustmentId") long adjustmentId);
+
     /** UC-73: a lot taken out of the source on dispatch. */
     interface DispatchedLot {
         long getProductId();
