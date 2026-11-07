@@ -30,6 +30,7 @@ import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.helper.DebtLedger;
 import fu.hl.g64.motorflow.receivable.helper.DebtLedger.Allocation;
 import fu.hl.g64.motorflow.receivable.helper.DebtLedger.Debt;
+import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
 import fu.hl.g64.motorflow.receivable.repository.PaymentAllocationRepository;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
 import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
@@ -78,6 +79,7 @@ public class CustomerDebtServiceImpl implements CustomerDebtService {
     private final AttachmentService attachments;
     private final AuditLogRepository auditLog;
     private final DebtLedger ledger;
+    private final TransactionReferences references;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -218,18 +220,13 @@ public class CustomerDebtServiceImpl implements CustomerDebtService {
         if (tendered != null && (request.paymentMethod() != PaymentMethod.CASH || tendered < request.amount())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG153");
         }
-        String reference = StringUtils.hasText(request.transactionReference())
-                ? request.transactionReference().strip() : null;
+        String reference = TransactionReferences.clean(request.transactionReference());
         if (request.paymentMethod() == PaymentMethod.BANK_TRANSFER && reference == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG154");
         }
 
         Customer customer = lock(customerId);
-        if (reference != null) {
-            payments.findByTransactionReference(reference).stream().findFirst().ifPresent(existing -> {
-                throw new BusinessException(HttpStatus.CONFLICT, "MSG151", reference, String.valueOf(existing.getId()));
-            });
-        }
+        references.requireUnused(reference);
         List<Debt> eligible = eligible(customer.getId(), store.getId(), request.receivableIds());
         List<Allocation> plan = allocation(eligible, request.amount());
         // The allocation and the balances the collector confirmed must both still hold, so a payment sent twice
@@ -250,7 +247,7 @@ public class CustomerDebtServiceImpl implements CustomerDebtService {
         }
 
         LocalDateTime now = LocalDateTime.now(clock);
-        Payment payment = payments.save(Payment.verifiedDebtPayment(request.amount(), tendered,
+        Payment payment = references.save(Payment.verifiedDebtPayment(request.amount(), tendered,
                 request.paymentMethod(), reference, collector.id(), now));
         List<PaymentAllocation> saved = allocations.saveAll(plan.stream()
                 .map(a -> PaymentAllocation.of(payment.getId(), a.debt().id(), a.amount())).toList());
