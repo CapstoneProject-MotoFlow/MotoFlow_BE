@@ -47,4 +47,17 @@ public class TransferReconciliation {
                     Math.max(dispatched - received - returned - loss, 0));
         }));
     }
+
+    /**
+     * Unresolved per part less what open receipts already expect: the most a new receipt, late delivery, return or
+     * loss may still cover, so two of them never settle the same unit.
+     */
+    public Map<Long, Integer> uncovered(long transferOrderId, List<TransferOrderLine> orderLines) {
+        Map<Long, Long> expected = lines.openReceiptQty(transferOrderId).stream()
+                .collect(Collectors.toMap(TransferOrderLineRepository.ProductQty::getProductId,
+                        TransferOrderLineRepository.ProductQty::getQty));
+        return byProduct(transferOrderId, orderLines).entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
+                entry -> Math.max(entry.getValue().unresolved()
+                        - expected.getOrDefault(entry.getKey(), 0L).intValue(), 0)));
+    }
 }

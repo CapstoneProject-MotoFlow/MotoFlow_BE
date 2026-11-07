@@ -120,6 +120,33 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
             """)
     List<DiscrepancyResolutionEvent> findEvents(@Param("caseIds") Collection<Long> caseIds);
 
+    /** A lot of the order still in transit at the destination, and how many of its units. */
+    interface TransitLot {
+        long getLotId();
+
+        long getQuantity();
+    }
+
+    /**
+     * BR-75: the order's own goods in transit, which only its dispatch put there and only its receipts, returns and
+     * write-offs take away; another order's goods of the same part in the same warehouse are never touched.
+     */
+    @Query("""
+            select m.lotId as lotId, sum(m.quantityChange) as quantity
+            from StockMovement m
+            join Lot l on l.id = m.lotId
+            where m.storeId = :storeId and m.productId = :productId
+              and m.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+              and (m.transferOrderId = :id
+                   or m.goodsReceiptNoteId in (select g.id from GoodsReceiptNote g where g.transferOrderId = :id)
+                   or m.adjustmentRequestId in (select a.id from AdjustmentRequest a where a.transferOrderId = :id))
+            group by m.lotId, l.expiryDate, l.receivedDate
+            having sum(m.quantityChange) > 0
+            order by l.expiryDate asc nulls last, l.receivedDate asc, m.lotId asc
+            """)
+    List<TransitLot> findTransitLots(@Param("id") long id, @Param("storeId") long storeId,
+                                     @Param("productId") long productId);
+
     /** UC-73: a lot taken out of the source on dispatch. */
     interface DispatchedLot {
         long getProductId();

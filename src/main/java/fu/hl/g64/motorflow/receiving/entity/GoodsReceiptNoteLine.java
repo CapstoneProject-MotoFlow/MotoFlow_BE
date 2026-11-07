@@ -79,6 +79,27 @@ public class GoodsReceiptNoteLine {
         return line;
     }
 
+    /** A part of a transfer receipt: {@code documentQty} is what is still expected of the transfer order. */
+    public static GoodsReceiptNoteLine transfer(long goodsReceiptNoteId, long productId, int documentQty) {
+        GoodsReceiptNoteLine line = new GoodsReceiptNoteLine();
+        line.goodsReceiptNoteId = goodsReceiptNoteId;
+        line.productId = productId;
+        line.documentQty = documentQty;
+        line.excessDecision = ExcessDecision.NOT_APPLICABLE;
+        return line;
+    }
+
+    /**
+     * BR-68: transfer excess is not Owner's decision; it waits for the source to confirm an extra dispatch and is
+     * posted when the transfer order is closed.
+     */
+    public void settleTransferExcess(int excess) {
+        if (excess < 0 || excess > passedQty) {
+            throw new IllegalArgumentException("excess " + excess + " is outside 0.." + passedQty);
+        }
+        excessQty = excess;
+    }
+
     /**
      * UC-43 step 3 and 6: the recorded quantities and printed lot data; passed = delivered - wrong item - damaged
      * (BR-24). The caller checked that wrong item + damaged does not exceed delivered (MSG27).

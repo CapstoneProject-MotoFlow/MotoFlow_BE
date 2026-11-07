@@ -67,6 +67,17 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             """)
     List<ReceiptTotals> confirmedReceipts(@Param("id") long transferOrderId);
 
+    /** What open receipts of the order, at the destination or back at the source, still expect per part. */
+    @Query("""
+            select l.productId as productId, sum(l.documentQty) as qty
+            from GoodsReceiptNoteLine l
+            join GoodsReceiptNote g on g.id = l.goodsReceiptNoteId
+            where g.transferOrderId = :id
+              and g.status <> fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.CONFIRMED
+            group by l.productId
+            """)
+    List<ProductQty> openReceiptQty(@Param("id") long transferOrderId);
+
     /** BR-66: a loss settles transit goods only once its adjustment has been applied. */
     @Query("""
             select c.productId as productId, sum(e.quantity) as qty

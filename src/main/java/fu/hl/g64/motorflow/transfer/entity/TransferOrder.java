@@ -85,4 +85,11 @@ public class TransferOrder {
         dispatchedBy = by;
         dispatchedAt = now;
     }
+
+    /** The first confirmed receipt: what remains is reconciled until the order is closed (UC-76, UC-77). */
+    public void startReconciling() {
+        if (status == TransferOrderStatus.IN_TRANSIT) {
+            status = TransferOrderStatus.RECONCILING;
+        }
+    }
 }

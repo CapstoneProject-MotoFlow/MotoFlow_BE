@@ -111,6 +111,22 @@ public class DiscrepancyCase {
         return found;
     }
 
+    /**
+     * UC-44 for a transfer: what a confirmed transfer receipt left unresolved for one part (BR-59). It is settled by a
+     * late receipt, a return to the source or an applied loss (UC-76), never by a supplier replacement.
+     */
+    public static DiscrepancyCase transfer(long transferOrderId, long productId, int shortQty, LocalDateTime now) {
+        DiscrepancyCase found = new DiscrepancyCase();
+        found.sourceType = SourceType.TRANSFER;
+        found.transferOrderId = transferOrderId;
+        found.productId = productId;
+        found.shortQty = shortQty;
+        found.replacementLimitQty = 0;
+        found.status = DiscrepancyCaseStatus.OPEN;
+        found.openedAt = now;
+        return found;
+    }
+
     public boolean isOpen() {
         return status == DiscrepancyCaseStatus.OPEN;
     }
