@@ -84,7 +84,7 @@ public class CountSheetServiceImpl implements CountSheetService {
     // region hasDifference (owner: Z)
     @Override
     public boolean hasDifference(List<StockCountLine> countLines) {
-        throw new UnsupportedOperationException("UC-94");
+        return countLines.stream().anyMatch(l -> l.isCounted() && l.difference() != 0);
     }
     // endregion
 }

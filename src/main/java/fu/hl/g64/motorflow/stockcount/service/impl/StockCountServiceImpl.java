@@ -39,6 +39,7 @@ import fu.hl.g64.motorflow.stockcount.dto.StockCountLinesSaveRequest;
 import fu.hl.g64.motorflow.stockcount.dto.StockCountListResponse;
 import fu.hl.g64.motorflow.stockcount.dto.StockCountRecountRequest;
 import fu.hl.g64.motorflow.stockcount.dto.StockCountSubmitRequest;
+import fu.hl.g64.motorflow.stockcount.helper.StockCountAccess.Viewer;
 import fu.hl.g64.motorflow.stockcount.helper.StockCountAccess;
 import fu.hl.g64.motorflow.stockcount.helper.StockCountMapper;
 import fu.hl.g64.motorflow.stockcount.service.CountSheetService;
@@ -311,15 +312,96 @@ public class StockCountServiceImpl implements StockCountService {
 
     // region confirm (owner: Z)
     @Override
+    @Transactional
     public StockCountDetailResponse confirm(AuthenticatedUser user, long id, StockCountConfirmRequest request) {
-        throw new UnsupportedOperationException("UC-94");
+        StockCount count = access.lockCount(id);
+        access.requireManagerOf(user, count.getStoreId());
+        requireResultSubmitted(count);
+
+        List<StockCountLine> all = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(id);
+        Set<Long> allIds = all.stream().map(StockCountLine::getId).collect(Collectors.toSet());
+        Set<Long> removedIds = request.removedLineIds() == null ? Set.of() : new HashSet<>(request.removedLineIds());
+        Map<Long, String> reasons = request.reasons() == null ? Map.of() : request.reasons().stream()
+                .filter(r -> r.reason() != null && !r.reason().isBlank())
+                .collect(Collectors.toMap(StockCountConfirmRequest.Reason::lineId, r -> r.reason().strip(), (a, b) -> b));
+
+        // SC-7: only uncounted lines of this count may go, every other line is counted and a difference has a reason.
+        boolean invalid = !allIds.containsAll(removedIds) || removedIds.size() == all.size();
+        List<StockCountLine> kept = all.stream().filter(l -> !removedIds.contains(l.getId())).toList();
+        for (StockCountLine line : all) {
+            if (removedIds.contains(line.getId())) {
+                invalid |= line.isCounted();
+            } else {
+                invalid |= !line.isCounted() || (line.difference() != 0 && !reasons.containsKey(line.getId()));
+            }
+        }
+        if (invalid) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG236");
+        }
+        // SC-14: a count that already went to the Owner keeps its lines.
+        if (!removedIds.isEmpty() && count.wasConfirmed()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG243");
+        }
+        access.requireOpenPeriod(count.getInventoryPeriodId());
+
+        warehouseTasks.confirmResult(user, TaskType.COUNTING, id);
+        lines.deleteAll(all.stream().filter(l -> removedIds.contains(l.getId())).toList());
+        for (StockCountLine line : kept) {
+            line.explain(line.difference() != 0 ? reasons.get(line.getId()) : null);
+            line.clearRecount();
+        }
+        boolean hasDifference = countSheets.hasDifference(kept);
+        count.confirm(user.id(), hasDifference, LocalDateTime.now(clock));
+        if (hasDifference) {
+            notifications.notifyOwners("STOCK_COUNT_AWAITING_APPROVAL",
+                    "Phiếu kiểm kê #%d có chênh lệch và đang chờ bạn duyệt.".formatted(id), "STOCK_COUNT", id);
+        }
+        return mapper.toDetail(count, Viewer.MANAGER);
+    }
+
+    /** SC-6 (MSG235): the count is COUNTING, the counter sent the result and the book quantities are taken. */
+    private void requireResultSubmitted(StockCount count) {
+        boolean submitted = tasks.findOpenForUpdate(TaskType.COUNTING, count.getId())
+                .map(WarehouseTask::getStatus).filter(s -> s == WarehouseTaskStatus.RESULT_SUBMITTED).isPresent();
+        if (count.getStatus() != StockCountStatus.COUNTING || !submitted || count.needsBookQuantities()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
+        }
     }
     // endregion
 
     // region requestRecount (owner: Z)
     @Override
+    @Transactional
     public StockCountDetailResponse requestRecount(AuthenticatedUser user, long id, StockCountRecountRequest request) {
-        throw new UnsupportedOperationException("UC-94");
+        StockCount count = access.lockCount(id);
+        boolean byOwner = !access.isManagerOf(user, count.getStoreId());
+        if (byOwner) {
+            access.requireOwner(user);
+            if (count.getStatus() != StockCountStatus.AWAITING_APPROVAL) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
+            }
+        } else {
+            requireResultSubmitted(count);
+        }
+
+        Set<Long> lineIds = new HashSet<>(request.lineIds());
+        List<StockCountLine> chosen = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(id).stream()
+                .filter(l -> lineIds.contains(l.getId())).toList();
+        if (chosen.size() != lineIds.size()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG237");
+        }
+
+        String reason = request.reason().strip();
+        chosen.forEach(l -> l.requestRecount(reason));
+        count.returnForRecount();
+        long counter = warehouseTasks.returnForRecount(TaskType.COUNTING, id);
+        notifications.notify(counter, "STOCK_COUNT_RECOUNT",
+                "Phiếu kiểm kê #%d có %d dòng cần đếm lại.".formatted(id, chosen.size()), "STOCK_COUNT", id);
+        if (byOwner) {
+            notifications.notifyStoreManagers(count.getStoreId(), "STOCK_COUNT_RECOUNT",
+                    "Owner trả %d dòng của phiếu kiểm kê #%d về đếm lại.".formatted(chosen.size(), id), "STOCK_COUNT", id);
+        }
+        return mapper.toDetail(count, byOwner ? Viewer.OWNER : Viewer.MANAGER);
     }
     // endregion
 
