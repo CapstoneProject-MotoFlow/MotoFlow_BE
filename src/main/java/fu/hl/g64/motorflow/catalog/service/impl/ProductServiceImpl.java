@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.catalog.service.impl;
 
+import fu.hl.g64.motorflow.catalog.dto.BarcodeLookupResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductRequest;
 import fu.hl.g64.motorflow.catalog.dto.ProductResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductSearch;
@@ -133,6 +134,22 @@ public class ProductServiceImpl implements ProductService {
                 product.getStatus(), product.getDiscontinuedAt(), values(codes, IdentifierType.OEM),
                 values(codes, IdentifierType.BARCODE), imageUrls, models, retailPricesInEffect(List.of(id)).get(id),
                 stock, product.getCreatedAt(), product.getUpdatedAt());
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public BarcodeLookupResponse findByBarcode(AuthenticatedUser user, String code, Long storeId) {
+        String barcode = code.strip();
+        ProductIdentifier match = identifiers.findByIdentifierTypeAndIdentifierValueIn(IdentifierType.BARCODE,
+                        List.of(barcode)).stream().findFirst()
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG91", barcode));
+        Product product = find(match.getProductId());
+        // Staff and Branch Managers scan at their own counter, so a requested store is ignored for them.
+        Store store = storeScope.viewableStore(user, user.storeId() == null ? storeId : null);
+        Integer available = store == null ? null : stockBalances.findByStoreIdAndProductId(store.getId(), product.getId())
+                .map(StockBalance::getAvailableQty).orElse(0);
+        return new BarcodeLookupResponse(product.getId(), product.getSku(), product.getPartName(), product.getBrand(),
+                product.getBaseUnit(), product.getStatus(), barcode, store == null ? null : store.getId(), available);
     }
 
     @Transactional
