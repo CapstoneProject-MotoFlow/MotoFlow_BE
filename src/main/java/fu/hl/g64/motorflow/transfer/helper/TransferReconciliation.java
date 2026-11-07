@@ -65,13 +65,19 @@ public class TransferReconciliation {
     }
 
     /**
-     * Unresolved per part less what open receipts already expect and what losses awaiting their adjustment already
-     * claim: the most a new receipt, return or loss may still cover, so two of them never settle the same unit.
+     * Unresolved per part less what open receipts already expect, what losses awaiting their adjustment already
+     * claim and what coordinators decided to send back but the source has not opened a return for yet: the most a new
+     * receipt, return decision or loss may still cover, so two of them never settle the same unit. An open return is
+     * already counted with the open receipts, so only the part of a return decision above it is subtracted here.
      */
     public Map<Long, Integer> uncovered(long transferOrderId, List<TransferOrderLine> orderLines) {
         Map<Long, Long> claimed = new HashMap<>();
         lines.openReceiptQty(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
         lines.pendingLoss(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
+        Map<Long, Long> opened = new HashMap<>();
+        lines.openReturnQty(transferOrderId).forEach(row -> opened.merge(row.getProductId(), row.getQty(), Long::sum));
+        lines.pendingReturnDecisions(transferOrderId).forEach(row -> claimed.merge(row.getProductId(),
+                Math.max(row.getQty() - opened.getOrDefault(row.getProductId(), 0L), 0), Long::sum));
         return byProduct(transferOrderId, orderLines).entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
                 entry -> Math.max(entry.getValue().unresolved()
                         - claimed.getOrDefault(entry.getKey(), 0L).intValue(), 0)));

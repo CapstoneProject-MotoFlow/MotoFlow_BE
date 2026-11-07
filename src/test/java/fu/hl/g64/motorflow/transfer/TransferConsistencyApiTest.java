@@ -46,6 +46,15 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
         confirm("bmcg", order, back).andExpect(status().isOk());
         assertInvariant(order, 2);
 
+        // R-06: the return decision stays pending after a return recorded as 0, so it still claims the 2 units.
+        arrive(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG210"));
+        // The coordinator gives it up for a late delivery, which frees the units.
+        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("productId", brake, "decision", "LATE_DELIVERY", "quantity", 2))))
+                .andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event WHERE resolution_type = "
+                + "'RECEIVED_BACK_AT_SOURCE' AND confirmed_at IS NULL", Long.class)).isZero();
         long again = arrive("bmlb", order);
         assign("bmlb", "INSPECTION", again, destStaff).andExpect(status().isOk());
         result("nvlb", order, again, brake, 2, 0).andExpect(status().isOk());
@@ -156,6 +165,12 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
 
     /** UC-76 Step 3_Return to source of {@code quantity} brakes by the source Branch Manager; the receipt's id. */
     private long arriveReturn(long order, int quantity) throws Exception {
+        // R-06: the coordinator decides the return before the source may open it.
+        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("productId", brake, "decision", "RETURN_TO_SOURCE",
+                                "quantity", quantity))))
+                .andExpect(status().isOk());
         mvc.perform(post(ORDERS + "/" + order + "/returns").header(HttpHeaders.AUTHORIZATION, signIn("bmcg"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("lines", List.of(Map.of("productId", brake, "quantity", quantity))))))

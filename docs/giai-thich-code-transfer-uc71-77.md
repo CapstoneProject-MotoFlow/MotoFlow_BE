@@ -134,16 +134,20 @@ Mọi màn hình, kiểm tra và bước đóng phiếu đều đọc số từ 
 | Số | Công thức |
 |---|---|
 | `dispatched` | `dispatched_qty` của dòng (không gồm phần xuất thêm) |
-| `received` | min(đạt + hỏng của các lượt `TRANSFER_IN` đã xác nhận, `dispatched`) |
-| `extraReceived` | đạt + hỏng của các lượt đó trừ `received` (BR-68) |
+| `received` | đạt + hỏng của các lượt `TRANSFER_IN` đã xác nhận, trừ phần nhận thừa của chính các lượt đó (R-01) |
+| `extraReceived` | tổng `excess_qty` của các lượt đó: hàng nhận vượt số lượt nhận chờ, chưa từng nằm trong `IN_TRANSIT` (BR-68, R-01) |
 | `returned` | đạt + hỏng của các lượt `RETURN_TO_SOURCE` đã xác nhận |
 | `loss` | tổng event `APPROVED_LOSS` có điều chỉnh đã `APPLIED` (BR-66) |
 | `unresolved` | max(`dispatched` − `received` − `returned` − `loss`, 0) (BR-60) |
 
 Thêm hai số dẫn xuất:
 
-- **Phần còn phủ được** (`uncovered`) = `unresolved` − số đang chờ trên các lượt nhận chưa xác nhận − số LOSS đã gắn nhưng điều chỉnh còn `DRAFT`, `PENDING` hoặc `APPROVED`. Không âm.
+- **Phần còn phủ được** (`uncovered`) = `unresolved` − số đang chờ trên các lượt nhận chưa xác nhận − số LOSS đã gắn nhưng điều chỉnh còn `DRAFT`, `PENDING` hoặc `APPROVED` − phần quyết định trả về chưa được mở lượt trả (R-06, xem mục 7). Không âm.
 - **Số đã giao cho yêu cầu bổ sung** (`fulfilled`) = tổng `received` của mọi phiếu gắn với yêu cầu. Hàng thừa không tính vào đây.
+
+**Bất biến (R-01).** Tồn `IN_TRANSIT` của phiếu tại kho đích luôn bằng `dispatched` − `received` − `returned` − `loss` (loss là phần đã `APPLIED`). Nhận thừa không đụng tới `IN_TRANSIT`, nên không làm lệch công thức. Test `TransferConsistencyApiTest.assertInvariant` kiểm tra đúng đẳng thức này sau từng bước.
+
+**Chặn nhận quá số còn thiếu (R-01).** Khi còn lượt trả về hoặc LOSS đang chờ cho phụ tùng, một lượt nhận muộn không được ghi nhiều hơn số lượt đó chờ (`MSG224`, kèm số tối đa). Phiếu còn lượt nhận hoặc trả về chưa xác nhận thì không đóng được (`MSG225`). Phiếu đã `CLOSED` thì không ghi kết quả, không trả đếm lại và không xác nhận được nữa (`MSG29`).
 
 **Ví dụ.** Xuất 4, nhận đạt 1, chờ trả về 2 trên lượt chưa xác nhận:
 
@@ -154,19 +158,39 @@ Thêm hai số dẫn xuất:
 
 Khi lượt nhận được xác nhận mà phụ tùng còn `unresolved > 0` và chưa có hồ sơ, service mở `discrepancy_case` loại `TRANSFER` với `short_qty = unresolved`. Owner và BM kho tổng được báo `TRANSFER_DISCREPANCY`.
 
-**Quyết định chỉ là lịch sử.** `POST /discrepancy/decisions` ghi `audit_log` `TRANSFER_DISCREPANCY_DECIDED` và gửi thông báo. Quyết định không làm giảm số nào, cũng không giữ chỗ.
+**Quyết định luôn ghi lịch sử.** `POST /discrepancy/decisions` ghi `audit_log` `TRANSFER_DISCREPANCY_DECIDED` và gửi thông báo. Quyết định không làm giảm `unresolved`. Riêng quyết định `RETURN_TO_SOURCE` còn giữ chỗ bằng một event chờ (R-06, mô tả bên dưới).
 
 **Chỗ chặn là số thật trên chứng từ:**
 
 | Cách xử lý | Chứng từ | Chặn ở đâu | Khi nào giảm `unresolved` |
 |---|---|---|---|
 | Đến muộn | Lượt `TRANSFER_IN` mới | `documentQty` = phần còn phủ được | Khi lượt đó được xác nhận. Ghi event `LATE_DELIVERY_RECEIVED` gắn lượt nhận |
-| Trả về nguồn | Lượt `RETURN_TO_SOURCE` | Số khai ≤ phần còn phủ được (`MSG217`). Staff ghi không quá số khai (`MSG220`) | Khi lượt đó được xác nhận. Ghi event `RECEIVED_BACK_AT_SOURCE` gắn lượt nhận |
+| Trả về nguồn | Lượt `RETURN_TO_SOURCE` | Phải có quyết định của điều phối (`MSG226`). Số khai ≤ số đã quyết định trừ số các lượt trả đang mở (`MSG217`). Staff ghi không quá số khai (`MSG220`) | Khi lượt đó được xác nhận. Event chờ của quyết định được chốt bằng lượt nhận (xem R-06) |
 | Mất hoặc hỏng | Yêu cầu điều chỉnh `STOCK_LOSS` của phiếu | Số trên quyết định ≤ phần còn phủ được. Điều chỉnh phải ghi giảm `IN_TRANSIT` ở kho đích đúng bằng số đó và chưa gắn hồ sơ nào (`MSG219`) | Khi điều chỉnh `APPLIED`. Event `APPROVED_LOSS` được ghi ngay lúc quyết định |
 | Giao bù (BR-62) | Phiếu mới có `makeupForCaseId` | `MSG206` | Không bao giờ. Phiếu gốc vẫn thiếu |
 
 - Hồ sơ đóng `ALL_SETTLED` khi `unresolved` về 0, ngay lúc xác nhận lượt nhận cuối.
 - Điều chỉnh bị `REJECTED`, `CANCELLED` hoặc `WITHDRAWN` thì phần đó trở lại thành phần còn phủ được.
+
+### R-02: số kế hoạch và số đã xuất
+
+Khi phiếu đã xuất, yêu cầu bổ sung đếm số đã xuất (`dispatched_qty`) thay cho số kế hoạch (`planned_qty`), mỗi dòng đúng một lần. Nhờ vậy một lần xuất thiếu giải phóng phần chưa gửi để lập phiếu mới hoặc chuyển sang mua. Phiếu chưa xuất vẫn đếm số kế hoạch. Trong chi tiết yêu cầu bổ sung, `plannedQty` là số đã lên phiếu theo cách đếm này, không phải số kế hoạch ban đầu của riêng phiếu nào.
+
+### R-06: quyết định trả về nguồn
+
+Trước đây kho nguồn tự mở lượt trả chỉ bị chặn bởi phần còn phủ được, không cần điều phối quyết định. Giờ thứ tự bắt buộc là: điều phối quyết định `RETURN_TO_SOURCE`, kho nguồn mở lượt trả, Staff ghi kết quả, BM xác nhận.
+
+- **Event chờ.** Quyết định ghi một event `RECEIVED_BACK_AT_SOURCE` chưa xác nhận (`confirmed_at` rỗng) và chưa có GRN. Hồ sơ được khoá trước khi ghi (sau khi đã khoá phiếu). Số quyết định vẫn bị giới hạn bởi phần còn phủ được (`MSG217`), và phần chưa được mở lượt trả bị trừ khỏi phần còn phủ được, nên hai quyết định cộng lại không vượt số chưa có kết quả. Lượt trả đang mở đã nằm trong số chờ của lượt nhận, nên không bị trừ hai lần.
+- **Mở lượt trả.** `POST /returns` cho mỗi phụ tùng: nếu chưa có quyết định nào thì `MSG226`; nếu số khai lớn hơn (số đã quyết định − số các lượt trả đang mở) thì `MSG217` kèm số tối đa. Giới hạn này luôn không lớn hơn phần còn phủ được, vì mọi quyết định đã bị chặn bởi phần đó.
+- **Xác nhận lượt trả.** Không tạo event mới. Với mỗi dòng có `arrived = delivered − excess > 0`, service khoá các event chờ của phụ tùng, cũ nhất trước, rồi trừ dần `arrived`. Event có số ≤ phần còn lại thì được chốt luôn bằng GRN này. Event lớn hơn thì bị giảm đi phần còn lại và một event `RECEIVED_BACK_AT_SOURCE` đã xác nhận được ghi cho đúng phần còn lại (trả một phần). Lượt trả ghi 0 thì các event chờ giữ nguyên và có thể mở lượt trả mới. Dữ liệu từ trước R-06 không có event chờ thì rơi về cách cũ: ghi một event đã xác nhận.
+- **Nhả quyết định trả về.** Quyết định trả về chưa được mở lượt trả (số đã quyết định trừ số các lượt trả đang mở) có thể được điều phối nhả ra để đổi sang `LATE_DELIVERY` hoặc `LOSS`, ví dụ khi lượt trả ghi 0 và hàng vẫn thiếu. Với hai quyết định này, giới hạn là phần còn phủ được cộng phần có thể nhả (`MSG217` trả về tổng này). Phần vượt phần còn phủ được sẽ được lấy từ các event chờ, event mới nhất trước: event bị giảm số, hoặc bị xoá nếu nhả hết (event chờ chưa có GRN, chưa có dòng ghi tồn, nên xoá an toàn). Số đã nhả được ghi vào `audit_log` ở khoá `released_return_qty`. Lượt trả đang mở thì không nhả được. Quyết định `RETURN_TO_SOURCE` vẫn chỉ bị giới hạn bởi phần còn phủ được.
+- **Số "đã trả" (`returned`)** vẫn tính từ các GRN `RETURN_TO_SOURCE` đã xác nhận, không đọc từ event.
+- **Migration V4.** Ràng buộc CHECK của V1 trên `discrepancy_resolution_event` (không đặt tên, PostgreSQL gọi là `discrepancy_resolution_event_check`) bắt mọi event `RECEIVED_BACK_AT_SOURCE` phải có GRN, nên không lưu được event chờ. V4 xoá ràng buộc đó và thêm `discrepancy_resolution_event_grn_when_confirmed`: `REPLACEMENT_RECEIVED` và `LATE_DELIVERY_RECEIVED` vẫn bắt buộc có GRN, còn `RECEIVED_BACK_AT_SOURCE` chỉ được thiếu GRN khi chưa xác nhận. V3 đã thuộc một PR khác nên migration này là V4.
+- **Luồng nhà cung cấp** không đổi: `DiscrepancySettlement` bỏ qua `RECEIVED_BACK_AT_SOURCE`, và không đoạn code nào ở luồng nhà cung cấp tạo hay đọc loại event này.
+
+### R-04: hoãn sang UC-83
+
+R-04 (phiếu có hàng mất thật chưa đóng được qua API vì chưa có UC tạo, duyệt và áp dụng điều chỉnh) được hoãn tới khi làm UC-83 đến UC-85, xem mục 9.
 
 ## 8. UC-75 và UC-77
 
@@ -235,6 +259,9 @@ Repo chưa có service tạo, duyệt và áp dụng yêu cầu điều chỉnh,
 | MSG221 | 409 | Đóng phiếu khi còn phụ tùng chưa có kết quả |
 | MSG222 | 409 | Đóng phiếu khi phần nhận thừa chưa được xác nhận |
 | MSG223 | 409 | Đóng phiếu khi kho nguồn không đủ hàng cho phần xuất thêm |
+| MSG224 | 400 | Lượt nhận muộn ghi nhiều hơn số còn thiếu khi còn lượt trả về hoặc LOSS đang chờ |
+| MSG225 | 409 | Đóng phiếu khi còn lượt nhận hoặc trả về chưa xác nhận |
+| MSG226 | 400 | Mở lượt trả về kho nguồn khi điều phối chưa quyết định trả phụ tùng đó |
 
 Mã dùng lại:
 

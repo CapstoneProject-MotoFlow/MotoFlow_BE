@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.transfer;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -82,6 +84,7 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.code").value("MSG217"));
         decide("bmkt", order, chain, "LATE_DELIVERY", 1, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG216"));
+        decide("bmkt", order, brake, "RETURN_TO_SOURCE", 2, null).andExpect(status().isOk());
         arriveReturn("bmcg", order, brake, 4).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG217"));
         arriveReturn("bmcg", order, brake, 2).andExpect(status().isCreated());
@@ -171,6 +174,130 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
         arriveReturn("owner", order, brake, 1).andExpect(status().isForbidden());
         arriveReturn("bmcg", order, chain, 1).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG166"));
+    }
+
+    @Test
+    void aReturnNeedsTheCoordinatorsDecision() throws Exception {
+        long order = shortOrder(4, 1);
+
+        arriveReturn("bmcg", order, brake, 1).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG226"));
+    }
+
+    @Test
+    void aFullReturnSettlesTheDecisionWithItsReceipt() throws Exception {
+        long order = shortOrder(4, 1);
+        long back = decidedReturn(order, 2, 2);
+        result("nvcg", order, back, brake, 2, 0).andExpect(status().isOk());
+        confirm("bmcg2", order, back).andExpect(status().isOk());
+
+        List<Map<String, Object>> events = returnEvents(order);
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).get("quantity")).isEqualTo(2);
+        assertThat(events.get(0).get("goods_receipt_note_id")).isEqualTo(back);
+        assertThat(events.get(0).get("confirmed_at")).isNotNull();
+    }
+
+    @Test
+    void aPartialReturnSplitsTheDecision() throws Exception {
+        long order = shortOrder(4, 1);
+        long back = decidedReturn(order, 2, 2);
+        result("nvcg", order, back, brake, 1, 0).andExpect(status().isOk());
+        confirm("bmcg2", order, back).andExpect(status().isOk());
+
+        List<Map<String, Object>> events = returnEvents(order);
+        assertThat(events).hasSize(2);
+        Map<String, Object> pending = events.stream().filter(e -> e.get("confirmed_at") == null).findFirst().orElseThrow();
+        Map<String, Object> done = events.stream().filter(e -> e.get("confirmed_at") != null).findFirst().orElseThrow();
+        assertThat(pending.get("quantity")).isEqualTo(1);
+        assertThat(pending.get("goods_receipt_note_id")).isNull();
+        assertThat(done.get("quantity")).isEqualTo(1);
+        assertThat(done.get("goods_receipt_note_id")).isEqualTo(back);
+    }
+
+    @Test
+    void aReturnRecordedAsNothingLeavesTheDecisionToReturnAgain() throws Exception {
+        long order = shortOrder(4, 1);
+        long back = decidedReturn(order, 2, 2);
+        result("nvcg", order, back, brake, 0, 0).andExpect(status().isOk());
+        confirm("bmcg2", order, back).andExpect(status().isOk());
+
+        List<Map<String, Object>> events = returnEvents(order);
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).get("quantity")).isEqualTo(2);
+        assertThat(events.get(0).get("confirmed_at")).isNull();
+        arriveReturn("bmcg", order, brake, 2).andExpect(status().isCreated());
+    }
+
+    @Test
+    void decisionsTogetherCannotExceedWhatIsUnresolved() throws Exception {
+        long order = shortOrder(4, 1);
+
+        decide("owner", order, brake, "RETURN_TO_SOURCE", 2, null).andExpect(status().isOk());
+        decide("owner", order, brake, "RETURN_TO_SOURCE", 2, null).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG217"));
+    }
+
+    @Test
+    void onlyAPendingReturnMayLackAReceiptOnTheEvent() throws Exception {
+        long order = shortOrder(4, 1);
+        long shortage = jdbc.queryForObject("SELECT id FROM discrepancy_case WHERE transfer_order_id = ?", Long.class,
+                order);
+
+        jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, resolution_type, quantity, "
+                + "recorded_by, occurred_at) VALUES (?, 'RECEIVED_BACK_AT_SOURCE', 1, ?, now())", shortage,
+                owner.getId());
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, "
+                + "resolution_type, quantity, recorded_by, occurred_at) VALUES (?, 'REPLACEMENT_RECEIVED', 1, ?, now())",
+                shortage, owner.getId())).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, "
+                + "resolution_type, quantity, recorded_by, occurred_at, confirmed_by, confirmed_at) "
+                + "VALUES (?, 'RECEIVED_BACK_AT_SOURCE', 1, ?, now(), ?, now())", shortage, owner.getId(),
+                owner.getId())).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** A RETURN_TO_SOURCE decision of {@code decided}, then a return of {@code quantity} opened and given to staff. */
+    private long decidedReturn(long order, int decided, int quantity) throws Exception {
+        decide("owner", order, brake, "RETURN_TO_SOURCE", decided, null).andExpect(status().isOk());
+        arriveReturn("bmcg", order, brake, quantity).andExpect(status().isCreated());
+        long back = jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
+        assign("bmcg", "INSPECTION", back, sourceStaff).andExpect(status().isOk());
+        return back;
+    }
+
+    private List<Map<String, Object>> returnEvents(long order) {
+        return jdbc.queryForList("SELECT e.* FROM discrepancy_resolution_event e JOIN discrepancy_case c "
+                + "ON c.id = e.discrepancy_case_id WHERE c.transfer_order_id = ? "
+                + "AND e.resolution_type = 'RECEIVED_BACK_AT_SOURCE' ORDER BY e.id", order);
+    }
+
+    @Test
+    void aReturnDecisionNotOpenedIsReleasedByALossAndTheOrderCloses() throws Exception {
+        long order = shortOrder(3, 1);
+        long back = decidedReturn(order, 2, 2);
+        result("nvcg", order, back, brake, 0, 0).andExpect(status().isOk());
+        confirm("bmcg2", order, back).andExpect(status().isOk());
+        long adjustment = transitLoss(order, brake, 2);
+
+        decide("owner", order, brake, "LOSS", 2, adjustment).andExpect(status().isOk());
+
+        assertThat(returnEvents(order)).isEmpty();
+        assertThat(jdbc.queryForObject("SELECT new_data::text FROM audit_log WHERE action = "
+                + "'TRANSFER_DISCREPANCY_DECIDED' ORDER BY id DESC LIMIT 1", String.class))
+                .contains("released_return_qty");
+        jdbc.update("UPDATE adjustment_request SET status = 'APPLIED', applied_at = now() WHERE id = ?", adjustment);
+        mvc.perform(post(ORDERS + "/" + order + "/close").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void anOpenReturnIsNotReleasedByALoss() throws Exception {
+        long order = shortOrder(4, 1);
+        decidedReturn(order, 2, 2);
+        long adjustment = transitLoss(order, brake, 2);
+
+        decide("owner", order, brake, "LOSS", 2, adjustment).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG217"));
     }
 
     /** Dispatched {@code sent} brakes, {@code received} confirmed at the destination: the rest is missing. */

@@ -125,15 +125,27 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         Map<Long, Integer> uncovered = reconciliation.uncovered(transferOrderId, parts);
         Map<Long, Product> catalog = products.findAllById(uncovered.keySet()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
+        // The source returns only what a coordinator decided (R-06), less the returns it already opened. Every
+        // decision was capped by uncovered and is subtracted from it, so allowed never exceeds what is unresolved.
+        Map<Long, Long> decided = new HashMap<>();
+        orderLines.pendingReturnDecisions(transferOrderId)
+                .forEach(row -> decided.merge(row.getProductId(), row.getQty(), Long::sum));
+        Map<Long, Long> opened = new HashMap<>();
+        orderLines.openReturnQty(transferOrderId).forEach(row -> opened.merge(row.getProductId(), row.getQty(), Long::sum));
         Map<Long, Integer> coming = new LinkedHashMap<>();
         for (int i = 0; i < body.lines().size(); i++) {
             TransferReturnRequest.Line line = body.lines().get(i);
             if (!uncovered.containsKey(line.productId()) || coming.putIfAbsent(line.productId(), line.quantity()) != null) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG166", i + 1);
             }
-            if (line.quantity() > uncovered.get(line.productId())) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG217", catalog.get(line.productId()).getSku(),
-                        uncovered.get(line.productId()));
+            String sku = catalog.get(line.productId()).getSku();
+            long decidedQty = decided.getOrDefault(line.productId(), 0L);
+            if (decidedQty == 0) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG226", sku);
+            }
+            long allowed = decidedQty - opened.getOrDefault(line.productId(), 0L);
+            if (line.quantity() > allowed) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG217", sku, Math.max(allowed, 0));
             }
         }
         return open(user, ReceiptType.RETURN_TO_SOURCE, transferOrderId, coming);
@@ -313,11 +325,30 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         for (GoodsReceiptNoteLine line : lines) {
             DiscrepancyCase shortage = opened.get(line.getProductId());
             int arrived = line.getDeliveredQty() - line.getExcessQty();
-            if (shortage != null && arrived > 0) {
-                DiscrepancyResolutionEvent event = DiscrepancyResolutionEvent.pending(shortage.getId(), settled,
-                        arrived, receipt.getId(), null, user.id(), now);
-                event.confirm(arrived, user.id(), now);
-                events.save(event);
+            if (shortage == null || arrived <= 0) {
+                continue;
+            }
+            int remaining = arrived;
+            if (settled == ResolutionType.RECEIVED_BACK_AT_SOURCE) {
+                // R-06: the coordinator's pending decisions are consumed, oldest first; a partial return splits one.
+                for (DiscrepancyResolutionEvent decision : events.findPendingReturnDecisionsForUpdate(id,
+                        line.getProductId())) {
+                    if (remaining == 0) {
+                        break;
+                    }
+                    if (decision.getQuantity() <= remaining) {
+                        remaining -= decision.getQuantity();
+                        decision.settle(receipt.getId(), user.id(), now);
+                    } else {
+                        decision.reduceTo(decision.getQuantity() - remaining);
+                        events.save(confirmed(decision.getDiscrepancyCaseId(), settled, remaining, receipt, user, now));
+                        remaining = 0;
+                    }
+                }
+            }
+            // Without a decision (a return opened before decisions were required) the receipt itself is the record.
+            if (remaining > 0) {
+                events.save(confirmed(shortage.getId(), settled, remaining, receipt, user, now));
             }
         }
         List<String> missing = new ArrayList<>();
@@ -347,6 +378,15 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_RECEIPT_CONFIRMED", user.id(), null, null,
                 Map.of("goods_receipt_note_id", receipt.getId(), "receipt_type", receipt.getReceiptType().name()),
                 now));
+    }
+
+    private static DiscrepancyResolutionEvent confirmed(long caseId, ResolutionType type, int quantity,
+                                                        GoodsReceiptNote receipt, AuthenticatedUser user,
+                                                        LocalDateTime now) {
+        DiscrepancyResolutionEvent event = DiscrepancyResolutionEvent.pending(caseId, type, quantity, receipt.getId(),
+                null, user.id(), now);
+        event.confirm(quantity, user.id(), now);
+        return event;
     }
 
     /** BR-56: the Owners and the central warehouse Branch Managers. */

@@ -10,6 +10,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
+import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
@@ -34,6 +35,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -50,6 +52,7 @@ public class TransferDiscrepancyServiceImpl implements TransferDiscrepancyServic
     private final TransferOrderLineRepository lines;
     private final TransferReconciliation reconciliation;
     private final AdjustmentRequestRepository adjustments;
+    private final DiscrepancyCaseRepository cases;
     private final DiscrepancyResolutionEventRepository events;
     private final ProductRepository products;
     private final StoreScope storeScope;
@@ -77,19 +80,33 @@ public class TransferDiscrepancyServiceImpl implements TransferDiscrepancyServic
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG216", part.getSku()));
         int uncovered = reconciliation.uncovered(transferOrderId,
                 lines.findByTransferOrderIdOrderByProductId(transferOrderId)).getOrDefault(body.productId(), 0);
-        if (body.quantity() > uncovered) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG217", part.getSku(), uncovered);
+        // A return decided but not opened yet may be given up for a late delivery or a loss; an open return may not.
+        int releasable = body.decision() == Decision.RETURN_TO_SOURCE ? 0 : releasableReturn(transferOrderId, part.getId());
+        if (body.quantity() > uncovered + releasable) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG217", part.getSku(), uncovered + releasable);
         }
         String reason = StringUtils.hasText(body.reason()) ? body.reason().strip() : null;
         LocalDateTime now = LocalDateTime.now(clock);
+        int released = Math.max(body.quantity() - uncovered, 0);
+        if (released > 0) {
+            releaseReturnDecisions(transferOrderId, shortage, released);
+        }
         if (body.decision() == Decision.LOSS) {
             linkLoss(order, shortage, part, body, reason, user, now);
+        } else if (body.decision() == Decision.RETURN_TO_SOURCE) {
+            // Pending until the return receipt is confirmed; the source can open a return only up to these (UC-76).
+            cases.findByIdForUpdate(shortage.getId()).orElseThrow();
+            events.save(DiscrepancyResolutionEvent.returnDecision(shortage.getId(), body.quantity(), reason, user.id(),
+                    now));
         }
         Map<String, Object> decided = new LinkedHashMap<>();
         decided.put("product_id", body.productId());
         decided.put("decision", body.decision().name());
         decided.put("quantity", body.quantity());
         decided.put("adjustment_request_id", body.adjustmentRequestId());
+        if (released > 0) {
+            decided.put("released_return_qty", released);
+        }
         // History only: what settles the quantity is the receipt or the applied adjustment, never this row.
         auditLog.save(AuditLog.record(ENTITY, transferOrderId, "TRANSFER_DISCREPANCY_DECIDED", user.id(), reason,
                 null, decided, now));
@@ -106,6 +123,37 @@ public class TransferDiscrepancyServiceImpl implements TransferDiscrepancyServic
                     transferOrderId);
         }
         return transferOrders.detail(user, transferOrderId);
+    }
+
+    /** Return decisions of the part that no return has been opened for yet (R-06). */
+    private int releasableReturn(long transferOrderId, long productId) {
+        long decided = lines.pendingReturnDecisions(transferOrderId).stream()
+                .filter(row -> row.getProductId() == productId).mapToLong(TransferOrderLineRepository.ProductQty::getQty).sum();
+        long opened = lines.openReturnQty(transferOrderId).stream()
+                .filter(row -> row.getProductId() == productId).mapToLong(TransferOrderLineRepository.ProductQty::getQty).sum();
+        return (int) Math.max(decided - opened, 0);
+    }
+
+    /**
+     * Gives {@code quantity} back from the part's pending return decisions, newest first, so a return recorded as 0
+     * does not hold units for ever. Lock order: order, case, events. A pending decision has no GRN, stock movement or
+     * attachment, so it is deleted when released whole.
+     */
+    private void releaseReturnDecisions(long transferOrderId, DiscrepancyCase shortage, int quantity) {
+        cases.findByIdForUpdate(shortage.getId()).orElseThrow();
+        List<DiscrepancyResolutionEvent> pending = events.findPendingReturnDecisionsForUpdate(transferOrderId,
+                shortage.getProductId());
+        int left = quantity;
+        for (int i = pending.size() - 1; i >= 0 && left > 0; i--) {
+            DiscrepancyResolutionEvent decision = pending.get(i);
+            if (decision.getQuantity() <= left) {
+                left -= decision.getQuantity();
+                events.delete(decision);
+            } else {
+                decision.reduceTo(decision.getQuantity() - left);
+                left = 0;
+            }
+        }
     }
 
     /**

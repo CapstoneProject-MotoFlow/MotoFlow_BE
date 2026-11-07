@@ -86,6 +86,18 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             """)
     List<ProductQty> openReturnQty(@Param("id") long transferOrderId);
 
+    /** UC-76: quantity per part that coordinators decided to send back and no confirmed return has settled yet. */
+    @Query("""
+            select c.productId as productId, sum(e.quantity) as qty
+            from DiscrepancyResolutionEvent e
+            join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            where c.transferOrderId = :id
+              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_BACK_AT_SOURCE
+              and e.confirmedAt is null
+            group by c.productId
+            """)
+    List<ProductQty> pendingReturnDecisions(@Param("id") long transferOrderId);
+
     /** Losses linked to an adjustment that may still be applied: they settle nothing yet but are spoken for. */
     @Query("""
             select c.productId as productId, sum(e.quantity) as qty

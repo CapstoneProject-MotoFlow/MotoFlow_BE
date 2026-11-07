@@ -60,6 +60,11 @@ public interface DiscrepancyCaseRepository extends JpaRepository<DiscrepancyCase
     @Query("select c from DiscrepancyCase c where c.id in :ids order by c.id")
     List<DiscrepancyCase> findAllByIdForUpdate(Collection<Long> ids);
 
+    /** One case, locked. A transfer order is locked first, then its case (UC-76 return decision). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from DiscrepancyCase c where c.id = :id")
+    Optional<DiscrepancyCase> findByIdForUpdate(long id);
+
     /** The receipt a case was opened on, read without loading the case (see {@link #findAllByIdForUpdate}). */
     @Query("select c.goodsReceiptNoteId from DiscrepancyCase c where c.id = :id")
     Optional<Long> findReceiptIdOf(long id);
