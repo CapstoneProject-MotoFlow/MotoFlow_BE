@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/past-date-stock?date={{yesterday}}&storeId={{branchStoreId}}&includeZero=true"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Đúng kho đã chọn', () =>
+          pm.expect(b.storeId).to.eql(Number(pm.collectionVariables.get('branchStoreId'))));
+      pm.test('Tồn cuối ngày là số không âm', () => b.page.items.forEach(row => {
+          pm.expect(row.closingQty).to.be.a('number');
+          pm.expect(row.closingQty).to.be.at.least(0);
+      }));
+      pm.test('Không có giá', () => pm.expect(pm.response.text().toLowerCase()).to.not.match(/price|cost|value/));
+    language: text/javascript
+order: 2000

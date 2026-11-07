@@ -8,6 +8,7 @@ description: |-
   - bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.
   - Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.
   - Thư mục Mã vạch chỉ đọc dữ liệu: quét mã 8936012340011 (BUG-NGK-CPR8) của dữ liệu demo; Admin dùng tài khoản admin2.
+  - Thư mục Tồn kho ngày đã qua chỉ đọc, cần dữ liệu demo; ngày hôm nay và hôm qua tính theo giờ Việt Nam (UTC+7) trong script chạy trước request đầu tiên.
 variables:
   baseUrl: http://localhost:8080
   ownerUsername: owner
