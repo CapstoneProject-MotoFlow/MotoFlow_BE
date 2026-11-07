@@ -95,6 +95,10 @@ services:
       MOTOFLOW_ADMIN_USERNAME: ${MOTOFLOW_ADMIN_USERNAME:-admin}
       MOTOFLOW_ADMIN_PASSWORD: ${MOTOFLOW_ADMIN_PASSWORD:-}
       MOTOFLOW_AUTH_REFRESHCOOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
+      # File Upload Service (product images, delivery documents, evidence). Empty = uploads refused (MSG76).
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
     logging: *logging
 
   # Starts only with COMPOSE_PROFILES=local-db in .env; with RDS it never runs.
@@ -261,6 +265,11 @@ MOTOFLOW_ADMIN_PASSWORD=$(alnum 14)a1@
 # false only while SITE_ADDRESS is plain HTTP; browsers drop Secure cookies over http.
 REFRESH_COOKIE_SECURE=$SECURE
 BACKEND_MEM_LIMIT=1g
+# Cloudinary account of the File Upload Service (Cloudinary Console -> Settings -> API Keys).
+# Left empty, every upload is refused with MSG76: fill them in, then run: motoflow up -d backend
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
 EOF
   umask 022
   echo "Created .env with new random secrets."
