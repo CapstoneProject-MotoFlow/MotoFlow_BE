@@ -51,7 +51,7 @@ public class Customer {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    /** UC-27. A new customer may not buy on credit until Owner grants it (UC-63). */
+    /** UC-27. A new customer may not buy on credit until Owner grants it (UC-62). */
     public static Customer create(String customerName, String phone, String address, String taxCode, Long createdBy,
                                   LocalDateTime now) {
         Customer customer = new Customer();
@@ -68,6 +68,18 @@ public class Customer {
         phone = newPhone;
         address = newAddress;
         taxCode = newTaxCode;
+        updatedAt = now;
+    }
+
+    /** UC-62: Owner lets the customer buy on credit until revoked (BR-40). Each order still needs its own approval. */
+    public void grantCredit(LocalDateTime now) {
+        creditStatus = CreditStatus.ELIGIBLE;
+        updatedAt = now;
+    }
+
+    /** UC-63: no order of the customer may be completed on credit any more (BR-44); existing debts stay (BR-43). */
+    public void revokeCredit(LocalDateTime now) {
+        creditStatus = CreditStatus.REVOKED;
         updatedAt = now;
     }
 }

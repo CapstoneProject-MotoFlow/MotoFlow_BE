@@ -9,4 +9,6 @@ import java.util.List;
 public interface PaymentAllocationRepository extends JpaRepository<PaymentAllocation, Long> {
 
     List<PaymentAllocation> findByPaymentIdIn(Collection<Long> paymentIds);
+
+    List<PaymentAllocation> findByReceivableIdIn(Collection<Long> receivableIds);
 }
