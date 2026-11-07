@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
+import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequest;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequestProduct;
 import fu.hl.g64.motorflow.inventory.entity.enums.CountType;
@@ -20,7 +21,9 @@ import fu.hl.g64.motorflow.inventory.repository.StockCountRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountRequestProductRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountRequestRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
+import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
+import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
@@ -53,8 +56,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -232,22 +237,75 @@ public class StockCountServiceImpl implements StockCountService {
 
     // region start (owner: Y)
     @Override
+    @Transactional
     public StockCountDetailResponse start(AuthenticatedUser user, long id) {
-        throw new UnsupportedOperationException("UC-93");
+        StockCount count = access.lockCount(id);
+        access.requireCounter(user, count);
+        if (count.getStatus() != StockCountStatus.DRAFT && count.getStatus() != StockCountStatus.COUNTING) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
+        }
+        if (count.needsBookQuantities()) {
+            countSheets.captureBookQuantities(count,
+                    lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId()));
+            count.startCounting(LocalDateTime.now(clock));
+        }
+        return mapper.toDetail(count, access.viewerOf(user, count));
     }
     // endregion
 
     // region saveLines (owner: Y)
     @Override
+    @Transactional
     public StockCountDetailResponse saveLines(AuthenticatedUser user, long id, StockCountLinesSaveRequest request) {
-        throw new UnsupportedOperationException("UC-93");
+        StockCount count = access.lockCount(id);
+        requireRecording(user, count);
+        recordLines(user, count, request.lines());
+        return mapper.toDetail(count, access.viewerOf(user, count));
+    }
+
+    /** SC-9, then SC-6 unless the count is being counted and the result was not sent yet. */
+    private void requireRecording(AuthenticatedUser user, StockCount count) {
+        WarehouseTask task = access.requireCounter(user, count);
+        if (count.getStatus() != StockCountStatus.COUNTING || count.needsBookQuantities()
+                || task.getStatus() != WarehouseTaskStatus.ASSIGNED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
+        }
+    }
+
+    /** SC-8 for a line of another count, a quantity below 0, or a line other than the recounted ones. */
+    private void recordLines(AuthenticatedUser user, StockCount count, List<StockCountLinesSaveRequest.Line> sent) {
+        if (sent == null || sent.isEmpty()) {
+            return;
+        }
+        Map<Long, StockCountLine> own = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId())
+                .stream().collect(Collectors.toMap(StockCountLine::getId, Function.identity()));
+        boolean recounting = own.values().stream().anyMatch(StockCountLine::isRecountRequested);
+        LocalDateTime now = LocalDateTime.now(clock);
+        for (StockCountLinesSaveRequest.Line item : sent) {
+            StockCountLine line = own.get(item.lineId());
+            if (line == null || (item.countedQty() != null && item.countedQty() < 0)
+                    || (recounting && !line.isRecountRequested())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG237");
+            }
+        }
+        for (StockCountLinesSaveRequest.Line item : sent) {
+            own.get(item.lineId()).record(item.countedQty(), user.id(), now);
+        }
     }
     // endregion
 
     // region submit (owner: Y)
     @Override
+    @Transactional
     public StockCountDetailResponse submit(AuthenticatedUser user, long id, StockCountSubmitRequest request) {
-        throw new UnsupportedOperationException("UC-93");
+        StockCount count = access.lockCount(id);
+        requireRecording(user, count);
+        recordLines(user, count, request == null ? null : request.lines());
+        warehouseTasks.submitResult(user, TaskType.COUNTING, count.getId());
+        notifications.notifyStoreManagers(count.getStoreId(), "STOCK_COUNT_SUBMITTED",
+                String.format("Staff đã gửi kết quả kiểm kê phiếu kiểm kê #%d.", count.getId()), "STOCK_COUNT",
+                count.getId());
+        return mapper.toDetail(count, access.viewerOf(user, count));
     }
     // endregion
 

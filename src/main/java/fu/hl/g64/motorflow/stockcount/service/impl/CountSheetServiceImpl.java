@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.stockcount.service.impl;
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
 import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
 import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountLineRepository;
@@ -57,7 +58,26 @@ public class CountSheetServiceImpl implements CountSheetService {
     // region captureBookQuantities (owner: Y)
     @Override
     public void captureBookQuantities(StockCount count, List<StockCountLine> countLines) {
-        throw new UnsupportedOperationException("UC-93");
+        // A count already counting is starting again: only the lines sent back take a new book quantity (BR-79).
+        boolean restart = count.getStatus() == StockCountStatus.COUNTING;
+        List<StockCountLine> targets = countLines.stream().filter(l -> !restart || l.isRecountRequested()).toList();
+        if (targets.isEmpty()) {
+            return;
+        }
+        List<Long> parts = targets.stream().map(StockCountLine::getProductId).distinct().toList();
+        List<LotBalanceRepository.CountableLot> lots = lotBalances.findCountableLots(count.getStoreId(), parts);
+        for (StockCountLine line : targets) {
+            int book = lots.stream()
+                    .filter(lot -> line.getLotId() == null
+                            ? lot.getProductId().equals(line.getProductId()) && lot.getExpiryDate() == null
+                            : lot.getLotId().equals(line.getLotId()))
+                    .mapToInt(LotBalanceRepository.CountableLot::getQuantity).sum();
+            if (restart) {
+                line.restartRecount(book);
+            } else {
+                line.takeBookQty(book);
+            }
+        }
     }
     // endregion
 
