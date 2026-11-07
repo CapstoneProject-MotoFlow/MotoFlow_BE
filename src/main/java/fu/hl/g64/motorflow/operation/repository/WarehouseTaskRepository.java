@@ -85,4 +85,15 @@ public interface WarehouseTaskRepository extends JpaRepository<WarehouseTask, Lo
               and t.status in (fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.ASSIGNED,
                                fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.RESULT_SUBMITTED)""")
     List<WarehouseTask> findOpenPickings(Collection<Long> orderIds);
+
+    /** The latest picking task that was not cancelled, of each of the given sales orders that has one (BR-26). */
+    @Query("""
+            select t from WarehouseTask t
+            where t.taskType = fu.hl.g64.motorflow.operation.entity.enums.TaskType.PICKING
+              and t.salesOrderId in :orderIds
+              and t.id = (select max(o.id) from WarehouseTask o
+                          where o.taskType = fu.hl.g64.motorflow.operation.entity.enums.TaskType.PICKING
+                            and o.salesOrderId = t.salesOrderId
+                            and o.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED)""")
+    List<WarehouseTask> findLatestPickings(Collection<Long> orderIds);
 }

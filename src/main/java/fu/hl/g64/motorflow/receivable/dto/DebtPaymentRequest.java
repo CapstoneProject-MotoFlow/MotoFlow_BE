@@ -7,14 +7,17 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
 /**
  * UC-66 steps 5-6: one debt payment the collector has received and verified. {@code storeId}, {@code amount} and
- * {@code receivableIds} are as in the preview; {@code expectedAllocations} is the allocation the collector confirmed
- * from it, so the payment is refused if balances changed in between. {@code amount} is what goes to the debts;
+ * {@code receivableIds} are as in the preview; {@code expectedAllocations} are the preview's lines the collector
+ * confirmed, each with the {@code remainingBefore} and {@code allocatedAmount} shown. The payment is refused (MSG152)
+ * if any balance or share changed in between, which also stops the same payment from being recorded twice (BR-45).
+ * Lines allocated 0 may be sent or left out. {@code amount} is what goes to the debts;
  * {@code tenderedAmount} is the cash handed over, with the change given back kept apart (BR-47). A bank transfer needs
  * its {@code transactionReference}; a reference already recorded is refused (BR-45).
  */
@@ -46,13 +49,17 @@ public record DebtPaymentRequest(
         @Size(max = 10, message = "Tối đa 10 tệp.")
         List<@NotNull @Valid AttachmentUpload> evidence) {
 
-    /** One line of the confirmed preview: the receivable and the VND it receives. */
+    /** One line of the confirmed preview: the receivable, what it still owed then, and the VND it receives. */
     public record AllocationLine(
             @NotNull(message = "Vui lòng nhập khoản nợ.")
             Long receivableId,
 
+            @NotNull(message = "Vui lòng nhập số còn nợ đã xem.")
+            @PositiveOrZero(message = "Số còn nợ đã xem không được âm.")
+            Long remainingBefore,
+
             @NotNull(message = "Vui lòng nhập số tiền phân bổ.")
-            @Positive(message = "Số tiền phân bổ phải lớn hơn 0.")
+            @PositiveOrZero(message = "Số tiền phân bổ không được âm.")
             Long amount) {
     }
 }

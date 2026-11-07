@@ -282,8 +282,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     @Override
     public SalesOrderDetail update(AuthenticatedUser seller, long id, SalesOrderUpdateRequest request) {
-        SalesOrder order = lockUnfinished(id);
-        requireSeller(seller, order);
+        SalesOrder order = lockForSeller(seller, id);
         int version = currentVersion(id);
         requireVersion(request.version(), version);
 
@@ -362,7 +361,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     @Override
     public SalesOrderDetail recordPicking(AuthenticatedUser picker, long id, PickingRequest request) {
-        SalesOrder order = lockUnfinished(id);
+        SalesOrder order = orders.findByIdForUpdate(id).orElseThrow(SalesOrderServiceImpl::notFound);
+        // BR-32: only someone ever given this order to pick learns what state it is in.
+        boolean given = tasks.findHistory(TaskType.PICKING, id).stream()
+                .anyMatch(task -> task.getAssignedTo() == picker.id());
+        if (!given) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        requireUnfinished(order);
         if (order.getStatus() == SalesOrderStatus.CONFIRMED) {
             // "Confirmed results cannot be edited."
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
@@ -419,8 +425,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     @Override
     public SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request) {
-        SalesOrder order = lockUnfinished(id);
-        requireSeller(seller, order);
+        SalesOrder order = lockForSeller(seller, id);
         if (order.getStatus() == SalesOrderStatus.AWAITING_PICKING) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG174");
         }
@@ -532,9 +537,17 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 || (user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId()));
     }
 
-    /** The order, locked until the end of the transaction, unless it is completed or cancelled (MSG164). */
-    private SalesOrder lockUnfinished(long id) {
+    /**
+     * The order, locked until the end of the transaction, for its seller (BR-03), unless it is completed or cancelled
+     * (MSG164). The seller is checked first, so another store learns nothing of the order's state.
+     */
+    private SalesOrder lockForSeller(AuthenticatedUser seller, long id) {
         SalesOrder order = orders.findByIdForUpdate(id).orElseThrow(SalesOrderServiceImpl::notFound);
+        requireSeller(seller, order);
+        return requireUnfinished(order);
+    }
+
+    private static SalesOrder requireUnfinished(SalesOrder order) {
         if (!order.isUnfinished()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG164");
         }
@@ -711,6 +724,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .collect(Collectors.toMap(row -> (Long) row[0], row -> ((Number) row[1]).longValue()));
         Map<Long, WarehouseTask> pickings = tasks.findOpenPickings(ids).stream()
                 .collect(Collectors.toMap(WarehouseTask::getSalesOrderId, Function.identity()));
+        Set<Long> pickedByUser = tasks.findLatestPickings(ids).stream()
+                .filter(task -> task.getAssignedTo() == user.id()).map(WarehouseTask::getSalesOrderId)
+                .collect(Collectors.toSet());
         Map<Long, String> names = names(pickings.values().stream().map(WarehouseTask::getAssignedTo)
                 .collect(Collectors.toSet()));
         boolean staff = user.role() == Role.STAFF;
@@ -722,11 +738,13 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     order.getCustomerNameSnapshot(), staff ? null : order.getCustomerPhoneSnapshot(),
                     order.getCreatedAt(), staff ? null : totals.getOrDefault(order.getId(), 0L),
                     picking == null ? null : picking.getAssignedTo(),
-                    picking == null ? null : names.get(picking.getAssignedTo()), nextAction(user, order, picking));
+                    picking == null ? null : names.get(picking.getAssignedTo()),
+                    nextAction(user, order, picking, pickedByUser.contains(order.getId())));
         }).toList();
     }
 
-    private static NextAction nextAction(AuthenticatedUser user, SalesOrder order, WarehouseTask picking) {
+    private static NextAction nextAction(AuthenticatedUser user, SalesOrder order, WarehouseTask picking,
+                                         boolean pickedByUser) {
         if (picking != null && picking.getAssignedTo() == user.id()
                 && picking.getStatus() == WarehouseTaskStatus.ASSIGNED) {
             return NextAction.RECORD_PICKING;
@@ -737,7 +755,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return switch (order.getStatus()) {
             case AWAITING_PICKING -> picking == null && user.role() == Role.BRANCH_MANAGER
                     ? NextAction.ASSIGN_PICKER : null;
-            case PICKED -> NextAction.CONFIRM;
+            // BR-26: a Branch Manager who picked the goods leaves the confirmation to someone else.
+            case PICKED -> pickedByUser ? null : NextAction.CONFIRM;
             case CONFIRMED -> NextAction.COLLECT_PAYMENT;
             case COMPLETED, CANCELLED -> null;
         };
@@ -824,7 +843,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                         && taskStatus == WarehouseTaskStatus.ASSIGNED)
                         || (order.getStatus() == SalesOrderStatus.PICKED
                         && taskStatus == WarehouseTaskStatus.RESULT_SUBMITTED)),
-                seller && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
+                seller && !holdsTask && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
                 seller && confirmedNow && money.payableNow() > 0,
                 seller && unfinished && money.refundable() > 0,
                 seller && confirmedNow && settled && creditAllowed && money.remainingPayable() > 0

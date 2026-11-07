@@ -52,6 +52,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -229,14 +230,22 @@ public class CustomerDebtServiceImpl implements CustomerDebtService {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG151", reference, String.valueOf(existing.getId()));
             });
         }
-        List<Allocation> plan = allocation(eligible(customer.getId(), store.getId(), request.receivableIds()),
-                request.amount());
+        List<Debt> eligible = eligible(customer.getId(), store.getId(), request.receivableIds());
+        List<Allocation> plan = allocation(eligible, request.amount());
+        // The allocation and the balances the collector confirmed must both still hold, so a payment sent twice
+        // (a double click, a retried request) is refused even when the second one would split the same way.
+        Map<Long, Long> owedNow = eligible.stream().collect(Collectors.toMap(Debt::id, Debt::remaining));
         Map<Long, Long> confirmed = new HashMap<>();
-        boolean repeated = false;
+        Set<Long> seen = new HashSet<>();
+        boolean stale = false;
         for (DebtPaymentRequest.AllocationLine line : request.expectedAllocations()) {
-            repeated |= confirmed.put(line.receivableId(), line.amount()) != null;
+            stale |= !seen.add(line.receivableId())
+                    || !line.remainingBefore().equals(owedNow.get(line.receivableId()));
+            if (line.amount() > 0) {
+                confirmed.put(line.receivableId(), line.amount());
+            }
         }
-        if (repeated || !confirmed.equals(shares(plan))) {
+        if (stale || !confirmed.equals(shares(plan))) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG152");
         }
 

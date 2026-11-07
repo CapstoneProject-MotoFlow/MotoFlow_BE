@@ -357,8 +357,19 @@ class SalesOrderApiTest extends SalesOrderTestData {
 
         update(otherManagerToken, order, 7, order(null, customer, "RETAIL", null, lines(oil, 1)))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        mvc.perform(get("/api/v1/sales-orders/" + order + "/versions").header(HttpHeaders.AUTHORIZATION,
+                otherManagerToken)).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         jdbc.update("UPDATE sales_order SET status = 'CANCELLED', cancellation_reason = 'x' WHERE id = ?", order);
         update(managerToken, order, 7, order(null, customer, "RETAIL", null, lines(oil, 1)))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG164"));
+        // Another store learns nothing of the order's state: refused before the state is checked.
+        update(otherManagerToken, order, 7, order(null, customer, "RETAIL", null, lines(oil, 1)))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        confirm(otherManagerToken, order, 7, oil, 3)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        pick(otherStaffToken, order, 7, oil, 3, null)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        pick(staffToken, order, 7, oil, 3, null)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG164"));
     }
 
@@ -368,6 +379,11 @@ class SalesOrderApiTest extends SalesOrderTestData {
         long order = createOrder(pad, 4);
         assign(managerToken, "PICKING", order, manager).andExpect(status().isOk());
         pick(managerToken, order, 1, pad, 4, null).andExpect(status().isOk());
+        // Their screens offer no confirmation; the Owner's do.
+        detail(managerToken, order).andExpect(jsonPath("$.actions.canConfirm").value(false));
+        list(managerToken).andExpect(jsonPath("$.items[0].nextAction").doesNotExist());
+        detail(ownerToken, order).andExpect(jsonPath("$.actions.canConfirm").value(true));
+        list(ownerToken).andExpect(jsonPath("$.items[0].nextAction").value("CONFIRM"));
         confirm(managerToken, order, 1, pad, 4)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG124"));
 
