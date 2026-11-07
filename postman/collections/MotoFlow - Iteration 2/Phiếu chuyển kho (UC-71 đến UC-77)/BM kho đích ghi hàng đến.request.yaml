@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/receipts"
+method: POST
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('receiptId', b.id);
+      pm.test('Chờ nhận đủ số đã xuất', () => b.lines.forEach(line => pm.expect(line.documentQty).to.eql(2)));
+    language: text/javascript
+order: 12000

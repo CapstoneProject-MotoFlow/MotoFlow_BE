@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/movements?storeId={{branchStoreId}}&productId={{excessPartId}}&movementType=TRANSFER_EXTRA_DISPATCH"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const items = pm.response.json().items;
+      pm.test('Kho đích có dòng nhận phần xuất thêm', () => pm.expect(items.some(m => m.quantityChange > 0)).to.eql(true));
+    language: text/javascript
+order: 26000
