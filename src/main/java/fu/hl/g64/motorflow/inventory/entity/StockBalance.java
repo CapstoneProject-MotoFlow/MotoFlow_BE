@@ -122,6 +122,11 @@ public class StockBalance {
         return lowStockThreshold != null && availableQty < lowStockThreshold;
     }
 
+    /** Everything held in this warehouse in any status; goods in transit are not in it yet. */
+    public int onHandQty() {
+        return availableQty + awaitingInspectionQty + wrongItemQty + damagedQty + awaitingSupplierReturnQty;
+    }
+
     /** Stock that carries the moving average (see InventoryPostingService): not wrong, damaged or awaiting return. */
     public int valuedQty() {
         return availableQty + awaitingInspectionQty + inTransitQty;

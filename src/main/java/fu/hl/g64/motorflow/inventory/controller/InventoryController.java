@@ -55,10 +55,23 @@ public class InventoryController {
                                                     @RequestParam(required = false) Long storeId,
                                                     @RequestParam(required = false) String q,
                                                     @RequestParam(required = false) Long categoryId,
+                                                    @RequestParam(required = false) String storageArea,
                                                     @RequestParam(defaultValue = "false") boolean lowStockOnly,
+                                                    @RequestParam(defaultValue = "false") boolean unavailableOnly,
+                                                    @RequestParam(defaultValue = "false") boolean expiryAlertOnly,
+                                                    @RequestParam(defaultValue = "false") boolean includeZero,
                                                     @RequestParam(defaultValue = "0") int page,
                                                     @RequestParam(defaultValue = "20") int size) {
-        return inventoryService.listStock(user, new StockSearch(storeId, q, categoryId, lowStockOnly), page, size);
+        return inventoryService.listStock(user, new StockSearch(storeId, q, categoryId, storageArea, lowStockOnly,
+                unavailableOnly, expiryAlertOnly, includeZero), page, size);
+    }
+
+    @Operation(summary = "The storage areas in use, A to Z, for the area filter (UC-47). Without storeId: own warehouse, "
+            + "or every warehouse for the Owner")
+    @GetMapping("/stock/storage-areas")
+    public List<String> storageAreas(@AuthenticationPrincipal AuthenticatedUser user,
+                                     @RequestParam(required = false) Long storeId) {
+        return inventoryService.storageAreas(user, storeId);
     }
 
     @Operation(summary = "One part in one warehouse split by lot and status (UC-47)")

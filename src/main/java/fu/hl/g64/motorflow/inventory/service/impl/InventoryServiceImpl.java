@@ -4,6 +4,8 @@ import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
+import fu.hl.g64.motorflow.catalog.entity.ProductIdentifier;
+import fu.hl.g64.motorflow.catalog.entity.enums.IdentifierType;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
@@ -110,37 +112,29 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
-        Long storeId = scopeStoreId(user, filter.storeId());
-        List<Long> categoryIds = filter.categoryId() == null ? null : categories.withDescendants(filter.categoryId());
-        Specification<StockBalance> spec = (root, query, cb) -> {
-            List<Predicate> where = new ArrayList<>();
-            if (storeId != null) {
-                where.add(cb.equal(root.get("storeId"), storeId));
-            }
-            if (StringUtils.hasText(filter.q()) || filter.categoryId() != null) {
-                Subquery<Long> matching = query.subquery(Long.class);
-                var product = matching.from(Product.class);
-                List<Predicate> on = new ArrayList<>();
-                if (StringUtils.hasText(filter.q())) {
-                    String like = "%" + filter.q().strip().toLowerCase(Locale.ROOT) + "%";
-                    on.add(cb.or(cb.like(cb.lower(product.get("sku")), like),
-                            cb.like(cb.lower(product.get("partName")), like)));
-                }
-                if (filter.categoryId() != null) {
-                    on.add(product.get("categoryId").in(categoryIds));
-                }
-                matching.select(product.get("id")).where(on.toArray(Predicate[]::new));
-                where.add(root.get("productId").in(matching));
-            }
-            if (filter.lowStockOnly()) {
-                where.add(cb.isNotNull(root.get("lowStockThreshold")));
-                where.add(cb.lessThan(root.get("availableQty"), root.<Integer>get("lowStockThreshold")));
-            }
-            return cb.and(where.toArray(Predicate[]::new));
-        };
+        Specification<StockBalance> spec = stockScope(scopeStoreId(user, filter.storeId()), filter);
+        if (filter.hidesZeroStock()) {
+            spec = spec.and((root, query, cb) -> cb.greaterThan(root.get("availableQty"), 0));
+        }
+        if (filter.lowStockOnly()) {
+            spec = spec.and(lowStock());
+        }
+        if (filter.unavailableOnly()) {
+            spec = spec.and(unavailable());
+        }
+        if (filter.expiryAlertOnly()) {
+            spec = spec.and(expiryAlert());
+        }
         Page<StockBalance> found = balances.findAll(spec, PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
                 Sort.by("storeId", "productId")));
         return PageResponse.of(found, rows(user, found.getContent()));
+    }
+
+    // UC-47
+    @Transactional(readOnly = true)
+    @Override
+    public List<String> storageAreas(AuthenticatedUser user, Long storeId) {
+        return balances.findStorageAreas(scopeStoreId(user, storeId));
     }
 
     // UC-47
@@ -261,8 +255,7 @@ public class InventoryServiceImpl implements InventoryService {
         Long storeId = scopeStoreId(user, filter.storeId());
         LocalDate today = LocalDate.now(clock);
         Integer warnDays = expiryWarningDays();
-        // Without a configured warning period the near-expiry window is empty.
-        LocalDate warnUntil = warnDays == null ? today.minusDays(1) : today.plusDays(warnDays);
+        LocalDate warnUntil = warnUntil(today, warnDays);
         String q = StringUtils.hasText(filter.q()) ? filter.q().strip() : null;
         String like = q == null ? null : "%" + q.toLowerCase(Locale.ROOT) + "%";
         Page<LotStock> found = lotQueries.searchLots(filter.tab().name(), storeId, filter.supplierId(), filter.source(),
@@ -317,6 +310,78 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     // ------------------------------------------------------------------------------------------------------------
+
+    /** UC-47: the warehouse, search text, category and area; the other stock filters narrow this further. */
+    private Specification<StockBalance> stockScope(Long storeId, StockSearch filter) {
+        List<Long> categoryIds = filter.categoryId() == null ? null : categories.withDescendants(filter.categoryId());
+        return (root, query, cb) -> {
+            List<Predicate> where = new ArrayList<>();
+            if (storeId != null) {
+                where.add(cb.equal(root.get("storeId"), storeId));
+            }
+            if (StringUtils.hasText(filter.q())) {
+                String like = "%" + filter.q().strip().toLowerCase(Locale.ROOT) + "%";
+                Subquery<Long> byName = query.subquery(Long.class);
+                var product = byName.from(Product.class);
+                byName.select(product.get("id")).where(cb.or(cb.like(cb.lower(product.get("sku")), like),
+                        cb.like(cb.lower(product.get("partName")), like)));
+                Subquery<Long> byOemCode = query.subquery(Long.class);
+                var identifier = byOemCode.from(ProductIdentifier.class);
+                byOemCode.select(identifier.get("productId")).where(
+                        cb.equal(identifier.get("identifierType"), IdentifierType.OEM),
+                        cb.like(cb.lower(identifier.get("identifierValue")), like));
+                where.add(cb.or(root.get("productId").in(byName), root.get("productId").in(byOemCode),
+                        cb.like(cb.lower(root.get("binLocation")), like)));
+            }
+            if (filter.categoryId() != null) {
+                Subquery<Long> inCategory = query.subquery(Long.class);
+                var product = inCategory.from(Product.class);
+                inCategory.select(product.get("id")).where(product.get("categoryId").in(categoryIds));
+                where.add(root.get("productId").in(inCategory));
+            }
+            if (StringUtils.hasText(filter.storageArea())) {
+                where.add(cb.equal(cb.lower(root.get("storageArea")),
+                        filter.storageArea().strip().toLowerCase(Locale.ROOT)));
+            }
+            return cb.and(where.toArray(Predicate[]::new));
+        };
+    }
+
+    private static Specification<StockBalance> lowStock() {
+        return (root, query, cb) -> cb.and(cb.isNotNull(root.get("lowStockThreshold")),
+                cb.lessThan(root.get("availableQty"), root.<Integer>get("lowStockThreshold")));
+    }
+
+    private static Specification<StockBalance> unavailable() {
+        return (root, query, cb) -> cb.or(cb.greaterThan(root.get("awaitingInspectionQty"), 0),
+                cb.greaterThan(root.get("wrongItemQty"), 0), cb.greaterThan(root.get("damagedQty"), 0),
+                cb.greaterThan(root.get("awaitingSupplierReturnQty"), 0));
+    }
+
+    /** Same lots as {@link LotBalanceRepository#sumExpiryByStoreAndProduct}: expired or within the warning window. */
+    private Specification<StockBalance> expiryAlert() {
+        LocalDate warnUntil = warnUntil(LocalDate.now(clock), expiryWarningDays());
+        return (root, query, cb) -> {
+            Subquery<Long> alert = query.subquery(Long.class);
+            var balance = alert.from(LotBalance.class);
+            var lot = alert.from(Lot.class);
+            alert.select(balance.get("id")).where(cb.equal(lot.get("id"), balance.get("lotId")),
+                    cb.equal(balance.get("storeId"), root.get("storeId")),
+                    cb.equal(lot.get("productId"), root.get("productId")),
+                    cb.equal(balance.get("stockStatus"), StockStatus.AVAILABLE),
+                    cb.greaterThan(balance.get("quantity"), 0),
+                    cb.isNotNull(lot.get("expiryDate")),
+                    // warnUntil is never before yesterday, so this covers the expired dates too.
+                    cb.or(cb.lessThanOrEqualTo(lot.<LocalDate>get("expiryDate"), warnUntil),
+                            cb.equal(lot.get("status"), LotStatus.EXPIRED)));
+            return cb.exists(alert);
+        };
+    }
+
+    /** Last expiry date in the warning window; without a configured period the window is empty. */
+    private static LocalDate warnUntil(LocalDate today, Integer warnDays) {
+        return warnDays == null ? today.minusDays(1) : today.plusDays(warnDays);
+    }
 
     /**
      * The warehouse a user may read: null means every warehouse (Owner without a filter). A central warehouse Branch
@@ -390,9 +455,10 @@ public class InventoryServiceImpl implements InventoryService {
                     ? p.getMovingAvgCost().multiply(BigDecimal.valueOf(b.valuedQty())).setScale(0, RoundingMode.HALF_UP).longValue()
                     : null;
             return new StockRowResponse(b.getStoreId(), storeNames.get(b.getStoreId()), p.getId(), p.getSku(),
-                    p.getPartName(), p.getBaseUnit(), b.getStorageArea(), b.getBinLocation(), b.getLowStockThreshold(),
-                    b.getAvailableQty(), b.getAwaitingInspectionQty(), b.getWrongItemQty(), b.getDamagedQty(),
-                    b.getAwaitingSupplierReturnQty(), b.getInTransitQty(), e[1], e[0], b.isLowStock(), value);
+                    p.getPartName(), p.getBaseUnit(), p.getStatus(), b.getStorageArea(), b.getBinLocation(),
+                    b.getLowStockThreshold(), b.getAvailableQty(), b.getAwaitingInspectionQty(), b.getWrongItemQty(),
+                    b.getDamagedQty(), b.getAwaitingSupplierReturnQty(), b.getInTransitQty(), b.onHandQty(), e[1], e[0],
+                    b.isLowStock(), value);
         }).toList();
     }
 
@@ -402,11 +468,10 @@ public class InventoryServiceImpl implements InventoryService {
             return Map.of();
         }
         LocalDate today = LocalDate.now(clock);
-        Integer days = expiryWarningDays();
-        // Without a configured warning period nothing is "near expiry"; expired lots are still reported.
-        LocalDate warnUntil = days == null ? today.minusDays(1) : today.plusDays(days);
         Map<String, int[]> totals = new HashMap<>();
-        for (Object[] row : lotBalances.sumExpiryByStoreAndProduct(storeIds, productIds, today, warnUntil)) {
+        // Without a configured warning period nothing is "near expiry"; expired lots are still reported.
+        for (Object[] row : lotBalances.sumExpiryByStoreAndProduct(storeIds, productIds, today,
+                warnUntil(today, expiryWarningDays()))) {
             totals.put(key((Long) row[0], (Long) row[1]),
                     new int[]{((Number) row[2]).intValue(), ((Number) row[3]).intValue()});
         }

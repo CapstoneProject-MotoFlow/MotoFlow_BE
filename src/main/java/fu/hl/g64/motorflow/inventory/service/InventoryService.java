@@ -27,6 +27,9 @@ public interface InventoryService {
     /** UC-47: stock by part with low-stock and near-expiry warnings, ordered by store then part. */
     PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size);
 
+    /** UC-47: the storage areas in use, A to Z, for the area filter. */
+    List<String> storageAreas(AuthenticatedUser user, Long storeId);
+
     /** UC-47: one part in one warehouse, split by lot and status. */
     StockDetailResponse stockDetail(AuthenticatedUser user, long storeId, long productId);
 

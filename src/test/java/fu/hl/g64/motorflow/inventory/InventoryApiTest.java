@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
@@ -139,6 +140,79 @@ class InventoryApiTest extends ApiTestUsers {
     }
 
     @Test
+    void storageAreaFilterIgnoresCase() throws Exception {
+        place(branch, brake, "Kệ A", "A-03");
+        place(central, chain, "Kệ B", null);
+        stock("owner", "?storageArea=KỆ A").andExpect(jsonPath("$.items[*].storeName", contains("Long Biên")));
+        stock("owner", "?storageArea=Kệ").andExpect(jsonPath("$.totalItems").value(0));
+    }
+
+    @Test
+    void zeroStockIsHiddenUnlessAskedFor() throws Exception {
+        placeWithThreshold(branch, chain, 4);
+        stock("bm", "").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH")));
+        stock("bm", "?includeZero=true").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH", "XICH-428")));
+        stock("bm", "?lowStockOnly=true").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH", "XICH-428")));
+    }
+
+    @Test
+    void unavailableStockStaysListedWithoutAvailableStock() throws Exception {
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, damaged_qty, updated_at) VALUES (?, ?, 2, now())",
+                branch, chain);
+        stock("bm", "").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH")));
+        stock("bm", "?unavailableOnly=true")
+                .andExpect(jsonPath("$.items[*].sku", contains("XICH-428")))
+                .andExpect(jsonPath("$.items[0].onHandQty").value(2))
+                .andExpect(jsonPath("$.items[0].availableQty").value(0));
+    }
+
+    @Test
+    void expiryAlertFollowsTheLotsAndTheWarningWindow() throws Exception {
+        stock("owner", "?expiryAlertOnly=true").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH", "XICH-428")));
+
+        jdbc.update("DELETE FROM pricing_policy WHERE policy_type = 'EXPIRY_WARNING'");
+        stock("owner", "?expiryAlertOnly=true").andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
+
+        jdbc.update("UPDATE lot SET status = 'EXPIRED', expiry_date = '2026-12-31' WHERE store_id = ?", branch);
+        stock("owner", "?expiryAlertOnly=true").andExpect(jsonPath("$.items[*].storeName", contains("Kho tổng", "Long Biên")));
+    }
+
+    @Test
+    void searchFindsOemCodesAndBins() throws Exception {
+        jdbc.update("INSERT INTO product_identifier (product_id, identifier_type, identifier_value) VALUES "
+                + "(?, 'OEM', '45121-KVB-900'), (?, 'BARCODE', '8931234567890')", chain, chain);
+        place(branch, brake, "Kệ A", "A-03");
+        stock("owner", "?q=kvb-9").andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
+        stock("owner", "?q=8931234").andExpect(jsonPath("$.totalItems").value(0));
+        stock("owner", "?q=a-03").andExpect(jsonPath("$.items[*].storeName", contains("Long Biên")));
+    }
+
+    @Test
+    void rowCarriesProductStatusAndOnHandWithoutInTransit() throws Exception {
+        jdbc.update("UPDATE product SET status = 'DISCONTINUED' WHERE id = ?", chain);
+        jdbc.update("UPDATE stock_balance SET wrong_item_qty = 1, in_transit_qty = 7 WHERE store_id = ? AND product_id = ?",
+                central, chain);
+        stock("bmkt", "?q=xích")
+                .andExpect(jsonPath("$.items[0].productStatus").value("DISCONTINUED"))
+                .andExpect(jsonPath("$.items[0].onHandQty").value(4));
+    }
+
+    @Test
+    void storageAreasAreDistinctAndStayInTheWarehouseInScope() throws Exception {
+        place(branch, brake, "Kệ B", null);
+        place(central, brake, "Kệ B", null);
+        place(central, chain, "Kệ A", null);
+        stock("owner", "/storage-areas").andExpect(jsonPath("$", contains("Kệ A", "Kệ B")));
+        stock("owner", "/storage-areas?storeId=" + branch).andExpect(jsonPath("$", contains("Kệ B")));
+        stock("bm", "/storage-areas").andExpect(jsonPath("$", contains("Kệ B")));
+        stock("bm", "/storage-areas?storeId=" + central).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+        stock("owner", "/storage-areas?storeId=9999").andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("MSG52"));
+        stock("staff", "/storage-areas").andExpect(status().isForbidden());
+    }
+
+    @Test
     void stockDetailSplitsByLotAndHidesPurchasePriceFromManagers() throws Exception {
         mvc.perform(get("/api/v1/inventory/stock/{s}/{p}", central, brake).header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk())
@@ -226,6 +300,20 @@ class InventoryApiTest extends ApiTestUsers {
     }
 
     // ------------------------------------------------------------------------------------------------------------
+
+    private ResultActions stock(String username, String suffix) throws Exception {
+        return mvc.perform(get("/api/v1/inventory/stock" + suffix).header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
+    private void place(long store, long product, String area, String bin) {
+        jdbc.update("UPDATE stock_balance SET storage_area = ?, bin_location = ? WHERE store_id = ? AND product_id = ?",
+                area, bin, store, product);
+    }
+
+    private void placeWithThreshold(long store, long product, int threshold) {
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, low_stock_threshold, updated_at) "
+                + "VALUES (?, ?, ?, now())", store, product, threshold);
+    }
 
     private long product(String sku, String name, long category) {
         return jdbc.queryForObject("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
