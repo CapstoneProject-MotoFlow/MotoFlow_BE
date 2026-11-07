@@ -21,6 +21,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
+import fu.hl.g64.motorflow.inventory.dto.StockByProductResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse.ExpiryState;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse.LotLine;
@@ -43,6 +44,7 @@ import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.HoldingRow;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.LotStock;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
+import fu.hl.g64.motorflow.inventory.repository.StockByProductQuery;
 import fu.hl.g64.motorflow.inventory.repository.StockMovementRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
@@ -84,6 +86,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 import java.util.stream.Collectors;
 
 @Service
@@ -99,6 +102,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final StockBalanceRepository balances;
     private final LotBalanceRepository lotBalances;
     private final LotQueryRepository lotQueries;
+    private final StockByProductQuery stockByProductQuery;
     private final LotRepository lots;
     private final StockMovementRepository movements;
     private final ProductRepository products;
@@ -115,22 +119,77 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
-        Specification<StockBalance> spec = stockScope(scopeStoreId(user, filter.storeId()), filter);
-        if (filter.hidesZeroStock()) {
-            spec = spec.and(hasAvailable());
-        }
-        if (filter.lowStockOnly()) {
-            spec = spec.and(lowStock());
-        }
-        if (filter.unavailableOnly()) {
-            spec = spec.and(unavailable());
-        }
-        if (filter.expiryAlertOnly()) {
-            spec = spec.and(expiryAlert());
-        }
+        Specification<StockBalance> spec = stockFilter(scopeStoreId(user, filter.storeId()), filter);
         Page<StockBalance> found = balances.findAll(spec, PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
                 Sort.by("storeId", "productId")));
         return PageResponse.of(found, rows(user, found.getContent()));
+    }
+
+    // UC-47, Owner: the page is cut in SQL on parts; only the parts of that page are added up here.
+    @Transactional(readOnly = true)
+    @Override
+    public PageResponse<StockByProductResponse> stockByProduct(AuthenticatedUser user, StockSearch filter, int page,
+                                                              int size) {
+        if (user.role() != Role.OWNER) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        int pageNo = Math.max(page, 0);
+        int pageSize = Math.clamp(size, 1, 100);
+        StockByProductQuery.IdPage ids = stockByProductQuery.find(stockFilter(null, filter), pageNo, pageSize);
+        if (ids.productIds().isEmpty()) {
+            return new PageResponse<>(List.of(), ids.total(), pageNo, pageSize);
+        }
+        // Scope only: the flags chose the parts, the totals cover every warehouse of those parts.
+        List<StockBalance> found = balances.findAll(
+                stockScope(null, filter).and((root, query, cb) -> root.get("productId").in(ids.productIds())));
+        Map<Long, List<StockBalance>> byProduct = found.stream()
+                .collect(Collectors.groupingBy(StockBalance::getProductId));
+        Set<Long> storeIds = found.stream().map(StockBalance::getStoreId).collect(Collectors.toSet());
+        Map<Long, Product> productById = products.findAllById(ids.productIds()).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<String, int[]> expiry = expiryTotals(storeIds, ids.productIds());
+        List<StockByProductResponse> items = ids.productIds().stream()
+                .map(id -> byProductRow(productById.get(id), byProduct.getOrDefault(id, List.of()), expiry)).toList();
+        return new PageResponse<>(items, ids.total(), pageNo, pageSize);
+    }
+
+    private static StockByProductResponse byProductRow(Product p, List<StockBalance> rows, Map<String, int[]> expiry) {
+        int stores = 0;
+        int lowStores = 0;
+        int expired = 0;
+        int nearExpiry = 0;
+        long valued = 0;
+        for (StockBalance b : rows) {
+            if (b.onHandQty() + b.getInTransitQty() > 0) {
+                stores++;
+            }
+            if (b.isLowStock()) {
+                lowStores++;
+            }
+            int[] e = expiry.getOrDefault(key(b.getStoreId(), b.getProductId()), new int[2]);
+            expired += e[0];
+            nearExpiry += e[1];
+            valued += b.valuedQty();
+        }
+        Long value;
+        if (valued == 0) {
+            value = 0L;
+        } else if (p.getMovingAvgCost() == null) {
+            value = null;
+        } else {
+            value = p.getMovingAvgCost().multiply(BigDecimal.valueOf(valued)).setScale(0, RoundingMode.HALF_UP)
+                    .longValue();
+        }
+        return new StockByProductResponse(p.getId(), p.getSku(), p.getPartName(), p.getBrand(), p.getBaseUnit(),
+                p.getStatus(), stores, sum(rows, StockBalance::getAvailableQty),
+                sum(rows, StockBalance::getAwaitingInspectionQty), sum(rows, StockBalance::getWrongItemQty),
+                sum(rows, StockBalance::getDamagedQty), sum(rows, StockBalance::getAwaitingSupplierReturnQty),
+                sum(rows, StockBalance::getInTransitQty), sum(rows, StockBalance::onHandQty), nearExpiry, expired,
+                lowStores, p.getMovingAvgCost(), value);
+    }
+
+    private static int sum(List<StockBalance> rows, ToIntFunction<StockBalance> field) {
+        return rows.stream().mapToInt(field).sum();
     }
 
     // UC-47
@@ -342,11 +401,32 @@ public class InventoryServiceImpl implements InventoryService {
 
     // ------------------------------------------------------------------------------------------------------------
 
-    /** UC-47: the warehouse, search text, category and area; the other stock filters narrow this further. */
+    /** UC-47: the scope plus the stock filters the user switched on. */
+    private Specification<StockBalance> stockFilter(Long storeId, StockSearch filter) {
+        Specification<StockBalance> spec = stockScope(storeId, filter);
+        if (filter.hidesZeroStock()) {
+            spec = spec.and(hasAvailable());
+        }
+        if (filter.lowStockOnly()) {
+            spec = spec.and(lowStock());
+        }
+        if (filter.unavailableOnly()) {
+            spec = spec.and(unavailable());
+        }
+        if (filter.expiryAlertOnly()) {
+            spec = spec.and(expiryAlert());
+        }
+        return spec;
+    }
+
+    /** UC-47: the warehouse, one part, search text, category and area; the other stock filters narrow this further. */
     private Specification<StockBalance> stockScope(Long storeId, StockSearch filter) {
         List<Long> categoryIds = filter.categoryId() == null ? null : categories.withDescendants(filter.categoryId());
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
+            if (filter.productId() != null) {
+                where.add(cb.equal(root.get("productId"), filter.productId()));
+            }
             if (storeId != null) {
                 where.add(cb.equal(root.get("storeId"), storeId));
             }

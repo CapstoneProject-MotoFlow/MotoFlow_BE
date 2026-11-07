@@ -344,6 +344,76 @@ class InventoryApiTest extends ApiTestUsers {
 
     // ------------------------------------------------------------------------------------------------------------
 
+    @Test
+    void byProductAddsUpEveryWarehouseOfAPart() throws Exception {
+        byProduct("owner", "")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[0].sku").value("MA-PHANH"))
+                .andExpect(jsonPath("$.items[0].storeCount").value(2))
+                .andExpect(jsonPath("$.items[0].availableQty").value(12))
+                .andExpect(jsonPath("$.items[0].onHandQty").value(12))
+                .andExpect(jsonPath("$.items[0].nearExpiryQty").value(5))
+                .andExpect(jsonPath("$.items[0].lowStockStoreCount").value(1))
+                .andExpect(jsonPath("$.items[0].stockValue").value(1_200_000))
+                .andExpect(jsonPath("$.items[1].sku").value("XICH-428"))
+                .andExpect(jsonPath("$.items[1].storeCount").value(1))
+                .andExpect(jsonPath("$.items[1].expiredQty").value(3));
+        assertThat(total("")).isEqualTo(3);
+    }
+
+    @Test
+    void byProductIsForTheOwnerOnly() throws Exception {
+        byProduct("bm", "").andExpect(status().isForbidden());
+        byProduct("bmkt", "").andExpect(status().isForbidden());
+        byProduct("staff", "").andExpect(status().isForbidden());
+    }
+
+    @Test
+    void byProductFlagPicksThePartsButTotalsStayChainWide() throws Exception {
+        byProduct("owner", "?lowStockOnly=true")
+                .andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH")))
+                .andExpect(jsonPath("$.items[0].availableQty").value(12));
+    }
+
+    @Test
+    void byProductPagesOverParts() throws Exception {
+        byProduct("owner", "?size=1")
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH")));
+        byProduct("owner", "?size=1&page=1")
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
+    }
+
+    @Test
+    void byProductValuesAPartWithoutStockAtZero() throws Exception {
+        long spare = jdbc.queryForObject("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
+                + "VALUES ('ZZ-NEW', 'Mới', (SELECT id FROM part_category LIMIT 1), 'cái', ?) RETURNING id", Long.class,
+                owner.getId());
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, updated_at) VALUES (?, ?, now())", central, spare);
+        byProduct("owner", "").andExpect(jsonPath("$.totalItems").value(2));
+        byProduct("owner", "?includeZero=true")
+                .andExpect(jsonPath("$.totalItems").value(3))
+                .andExpect(jsonPath("$.items[2].sku").value("ZZ-NEW"))
+                .andExpect(jsonPath("$.items[2].storeCount").value(0))
+                .andExpect(jsonPath("$.items[2].stockValue").value(0));
+    }
+
+    @Test
+    void stockListNarrowsToOnePart() throws Exception {
+        stock("owner", "?productId=" + brake)
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH", "MA-PHANH")))
+                .andExpect(jsonPath("$.items[*].storeName", contains("Kho tổng", "Long Biên")));
+    }
+
+    private ResultActions byProduct(String username, String suffix) throws Exception {
+        return mvc.perform(get("/api/v1/inventory/stock/by-product" + suffix)
+                .header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
     private ResultActions stock(String username, String suffix) throws Exception {
         return mvc.perform(get("/api/v1/inventory/stock" + suffix).header(HttpHeaders.AUTHORIZATION, signIn(username)));
     }
