@@ -32,4 +32,20 @@ public class PurchaseOrderLine {
 
     @Column(name = "purchase_price", nullable = false)
     private long purchasePrice;
+
+    /** One part of a PO with the quantity and purchase price agreed with the supplier (BR-19, BR-20). */
+    public static PurchaseOrderLine create(long purchaseOrderId, long productId, int orderedQty, long purchasePrice) {
+        PurchaseOrderLine line = new PurchaseOrderLine();
+        line.purchaseOrderId = purchaseOrderId;
+        line.productId = productId;
+        line.orderedQty = orderedQty;
+        line.purchasePrice = purchasePrice;
+        return line;
+    }
+
+    /** UC-42: a corrected quantity or price. */
+    public void change(int orderedQty, long purchasePrice) {
+        this.orderedQty = orderedQty;
+        this.purchasePrice = purchasePrice;
+    }
 }

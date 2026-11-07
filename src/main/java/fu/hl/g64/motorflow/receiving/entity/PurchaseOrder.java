@@ -63,4 +63,51 @@ public class PurchaseOrder {
 
     @Column(name = "cancellation_reason")
     private String cancellationReason;
+
+    /** UC-40: the PO waits for its first delivery. Stock does not change and nothing is sent to the supplier. */
+    public static PurchaseOrder create(long supplierId, long storeId, LocalDate expectedArrival, String note,
+                                       long createdBy, LocalDateTime now) {
+        PurchaseOrder order = new PurchaseOrder();
+        order.supplierId = supplierId;
+        order.storeId = storeId;
+        order.expectedArrival = expectedArrival;
+        order.note = note;
+        order.status = PurchaseOrderStatus.AWAITING_DELIVERY;
+        order.createdBy = createdBy;
+        order.createdAt = now;
+        order.updatedAt = now;
+        return order;
+    }
+
+    /** Still expecting goods: waiting for a delivery or receiving one. */
+    public boolean isOpen() {
+        return status == PurchaseOrderStatus.AWAITING_DELIVERY || status == PurchaseOrderStatus.RECEIVING;
+    }
+
+    /**
+     * UC-42: new delivery details. The caller has checked BR-21 (no GRN yet) under the row lock; the lines change
+     * through {@link PurchaseOrderLine}.
+     */
+    public void changeDelivery(LocalDate expectedArrival, String note, LocalDateTime now) {
+        requireAwaitingDelivery();
+        this.expectedArrival = expectedArrival;
+        this.note = note;
+        updatedAt = now;
+    }
+
+    /** UC-42 Cancel PO, while no GRN has been recorded for it (BR-21, checked by the caller). */
+    public void cancel(long by, String reason, LocalDateTime now) {
+        requireAwaitingDelivery();
+        status = PurchaseOrderStatus.CANCELLED;
+        cancelledBy = by;
+        cancelledAt = now;
+        cancellationReason = reason;
+        updatedAt = now;
+    }
+
+    private void requireAwaitingDelivery() {
+        if (status != PurchaseOrderStatus.AWAITING_DELIVERY) {
+            throw new IllegalStateException("purchase order " + id + " is " + status + ", expected AWAITING_DELIVERY");
+        }
+    }
 }

@@ -95,7 +95,8 @@ src/main/java/fu/hl/g64/motorflow/
 ├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
 ├── sales/               SalesOrder, SalesOrderLine (phiên bản cũ của đơn nằm trong audit_log)
 ├── receivable/          Receivable, Payment, PaymentAllocation
-├── receiving/           PurchaseOrder(+Line), GoodsReceiptNote(+Line)
+├── receiving/           PurchaseOrder(+Line), GoodsReceiptNote(+Line); UC-39..42 yêu cầu nhập hàng (lịch sử sửa nằm trong audit_log),
+│                        danh sách lượt giao Staff đang kiểm nhận
 ├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line)
 ├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent
 ├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
