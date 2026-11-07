@@ -231,14 +231,15 @@ class CustomerDebtApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.message").value(
                         "Số tiền thu nợ không được lớn hơn 2.100.000 đ, là số còn nợ của các khoản được trả."));
 
-        Map<String, Object> payment = cash(1_800_000, 2_000_000L, line(opening, 500_000), line(a, 1_000_000),
-                line(b, 200_000));
+        Map<String, Object> payment = cash(1_800_000, 2_000_000L, line(opening, 500_000, 500_000),
+                line(a, 1_000_000, 1_000_000), line(b, 600_000, 200_000));
         send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, payment)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG152"));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM payment", Long.class)).isZero();
 
-        payment = cash(1_800_000, 2_000_000L, line(b, 300_000), line(opening, 500_000), line(a, 1_000_000));
+        payment = cash(1_800_000, 2_000_000L, line(b, 600_000, 300_000), line(opening, 500_000, 500_000),
+                line(a, 1_000_000, 1_000_000));
         String body = send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, payment)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.customerId").value(hung))
@@ -321,8 +322,8 @@ class CustomerDebtApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.message").value("Khoản nợ số " + elsewhere
                         + " không phải khoản nợ còn lại của khách hàng này tại cửa hàng đã chọn."));
 
-        Map<String, Object> transfer = payment("BANK_TRANSFER", 1_000_000, null, List.of(d, c), line(c, 700_000),
-                line(d, 300_000));
+        Map<String, Object> transfer = payment("BANK_TRANSFER", 1_000_000, null, List.of(d, c),
+                line(c, 700_000, 700_000), line(d, 900_000, 300_000));
         send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, transfer)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG154"));
         transfer.put("tenderedAmount", 1_000_000);
@@ -344,13 +345,15 @@ class CustomerDebtApiTest extends ApiTestUsers {
         long first = ((Number) JsonPath.read(body, "$.id")).longValue();
 
         // BR-45: the same transfer, typed again, is not counted twice.
-        Map<String, Object> repeat = payment("BANK_TRANSFER", 100_000, null, List.of(opening), line(opening, 100_000));
+        Map<String, Object> repeat = payment("BANK_TRANSFER", 100_000, null, List.of(opening),
+                line(opening, 400_000, 100_000));
         repeat.put("transactionReference", " ft2610130001 ");
         send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, repeat)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG151"))
                 .andExpect(jsonPath("$.message").value("Mã giao dịch ft2610130001 đã được ghi ở phiếu thu số " + first + "."));
-        Map<String, Object> shortCash = payment("CASH", 100_000, null, List.of(opening), line(opening, 100_000));
+        Map<String, Object> shortCash = payment("CASH", 100_000, null, List.of(opening),
+                line(opening, 400_000, 100_000));
         shortCash.put("tenderedAmount", 50_000);
         send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, shortCash)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG153"));
@@ -438,7 +441,7 @@ class CustomerDebtApiTest extends ApiTestUsers {
 
         // Owner collects at the store they name.
         send(post("/api/v1/customers/{id}/debt-payments", binh), ownerToken, Map.of("storeId", longBien,
-                "amount", 2_000_000, "paymentMethod", "CASH", "expectedAllocations", List.of(line(binhDebt, 2_000_000))))
+                "amount", 2_000_000, "paymentMethod", "CASH", "expectedAllocations", List.of(line(binhDebt, 2_000_000, 2_000_000))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.storeId").value(longBien))
                 .andExpect(jsonPath("$.allocations[0].remainingAmount").value(0));
@@ -447,10 +450,45 @@ class CustomerDebtApiTest extends ApiTestUsers {
     }
 
     @Test
+    void aPartCashPaymentSentTwiceIsRecordedOnce() throws Exception {
+        long opening = openingDebtId(giaLam, 1_000_000, "2026-11-30");
+        long sale = receivableOf(creditSale(hung, giaLam, 500_000, at(3), LocalDate.of(2026, 11, 3)));
+
+        // The preview's line allocated 0 may be sent back as it is.
+        send(post("/api/v1/customers/{id}/debt-payments/preview", hung), managerToken, Map.of("amount", 300_000))
+                .andExpect(jsonPath("$.allocations[*].receivableId", contains(ids(opening, sale))))
+                .andExpect(jsonPath("$.allocations[*].allocatedAmount", contains(300_000, 0)));
+        Map<String, Object> payment = cash(300_000, null, line(opening, 1_000_000, 300_000), line(sale, 500_000, 0));
+        send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, payment)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.allocations[*].receivableId", contains(ids(opening))))
+                .andExpect(jsonPath("$.allocations[*].remainingAmount", contains(700_000)));
+
+        // Sent again (a double click or a retried request): the debt would still take 300.000 the same way, but the
+        // balance the collector saw has changed (BR-45).
+        send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, payment)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG152"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment", Long.class)).isEqualTo(1);
+        send(get("/api/v1/customers/{id}/debts", hung), managerToken)
+                .andExpect(jsonPath("$.debts[*].remainingAmount", contains(700_000, 500_000)));
+
+        // A Branch Manager collects only at their own store.
+        Map<String, Object> elsewhere = cash(100_000, null, line(opening, 700_000, 100_000));
+        elsewhere.put("storeId", longBien);
+        send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, elsewhere)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        send(get("/api/v1/receivables/customers?storeId={s}", longBien), managerToken)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment", Long.class)).isEqualTo(1);
+    }
+
+    @Test
     void aPaymentRecordedMeanwhileByAnotherCollectorMakesTheConfirmedAllocationStale() throws Exception {
         long opening = openingDebtId(giaLam, 300_000, "2026-11-30");
         long sale = receivableOf(creditSale(hung, giaLam, 1_000_000, at(3), LocalDate.of(2026, 11, 3)));
-        Map<String, Object> ours = cash(500_000, null, line(opening, 300_000), line(sale, 200_000));
+        Map<String, Object> ours = cash(500_000, null, line(opening, 300_000, 300_000),
+                line(sale, 1_000_000, 200_000));
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try (Connection other = dataSource.getConnection()) {
@@ -555,8 +593,8 @@ class CustomerDebtApiTest extends ApiTestUsers {
                 "contentType", name.endsWith(".png") ? "image/png" : "image/jpeg", "fileSize", 120_000);
     }
 
-    private static Map<String, Object> line(long receivableId, long amount) {
-        return Map.of("receivableId", receivableId, "amount", amount);
+    private static Map<String, Object> line(long receivableId, long remainingBefore, long amount) {
+        return Map.of("receivableId", receivableId, "remainingBefore", remainingBefore, "amount", amount);
     }
 
     @SafeVarargs

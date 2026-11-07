@@ -88,7 +88,9 @@ public class CustomerDebtController {
         return debts.previewPayment(collector, customerId, request);
     }
 
-    @Operation(summary = "Record one verified debt payment with the allocation confirmed from the preview (UC-66)")
+    @Operation(summary = "Record one verified debt payment with the allocation confirmed from the preview (UC-66). "
+            + "expectedAllocations are the preview's lines: receivableId, remainingBefore, and allocatedAmount as "
+            + "amount; lines allocated 0 may be left out. A changed balance or share gives MSG152")
     @PostMapping("/debt-payments")
     @ResponseStatus(HttpStatus.CREATED)
     public DebtPaymentResponse recordPayment(@AuthenticationPrincipal AuthenticatedUser collector,
