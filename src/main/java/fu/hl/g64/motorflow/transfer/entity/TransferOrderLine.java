@@ -41,4 +41,12 @@ public class TransferOrderLine {
 
     @Column(name = "makeup_for_case_id")
     private Long makeupForCaseId;
+
+    /** UC-57: what the person preparing the dispatch actually took out; never more than planned. */
+    public void recordPrepared(int preparedQty) {
+        if (preparedQty < 0 || preparedQty > plannedQty) {
+            throw new IllegalArgumentException("prepared quantity must be 0.." + plannedQty);
+        }
+        this.preparedQty = preparedQty;
+    }
 }
