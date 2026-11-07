@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.dto.LotAdjustPosting;
 import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
+import fu.hl.g64.motorflow.inventory.dto.LotReceiptPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
@@ -166,6 +167,38 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         }
         post(balance, lot, p.status(), p.quantityChange(), costOf(product, lot), p.movementType(), p.source(),
                 p.reason(), p.performedBy(), period, now);
+        refreshDepletion(lot);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void receiveIntoLot(LotReceiptPosting p) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        InventoryPeriod period = openPeriod(now.toLocalDate());
+        Lot lot = lots.findById(p.lotId()).orElseThrow(() -> new IllegalArgumentException("unknown lot " + p.lotId()));
+        if (lot.getSourceType() != LotSourceType.RECEIPT) {
+            throw new IllegalArgumentException("lot " + lot.getId() + " did not come from a supplier receipt");
+        }
+        // Same lock order as receiveNewLot: stock_balance, then product, then lot_balance.
+        StockBalance balance = lockBalance(p.storeId(), lot.getProductId(), now);
+        Product product = fresh(products.findByIdForUpdate(lot.getProductId())
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
+
+        int available = p.quantities().getOrDefault(StockStatus.AVAILABLE, 0);
+        product.receiveIntoAverage(stockBalances.sumValuedQuantity(lot.getProductId()), available,
+                lot.getPurchaseUnitPrice());
+
+        BigDecimal unitCost = BigDecimal.valueOf(lot.getPurchaseUnitPrice());
+        for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
+            if (e.getValue() == null || e.getValue() == 0) {
+                continue;
+            }
+            if (e.getValue() < 0) {
+                throw new IllegalArgumentException("received quantity must be positive");
+            }
+            post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
+                    p.performedBy(), period, now);
+        }
         refreshDepletion(lot);
     }
 

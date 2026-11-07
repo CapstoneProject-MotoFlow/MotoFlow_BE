@@ -95,13 +95,17 @@ src/main/java/fu/hl/g64/motorflow/
 ├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
 ├── sales/               SalesOrder, SalesOrderLine (phiên bản cũ của đơn nằm trong audit_log)
 ├── receivable/          Receivable, Payment, PaymentAllocation
-├── receiving/           PurchaseOrder(+Line), GoodsReceiptNote(+Line)
+├── receiving/           PurchaseOrder(+Line), GoodsReceiptNote(+Line); UC-39..42 yêu cầu nhập hàng (lịch sử sửa nằm trong audit_log),
+│                        danh sách lượt giao Staff đang kiểm nhận; UC-106 tạo phiếu nhận hàng (cả phiếu giao bù), UC-43 ghi kết quả
+│                        kiểm nhận, UC-44 xác nhận hoặc trả kiểm lại, UC-45 quyết định hàng thừa (BR-67)
 ├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line)
-├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent
+├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent; UC-46 xử lý sai lệch với nhà cung cấp: số phải trả, trả hàng,
+│                        giao bù, Owner miễn giao bù (BR-27)
 ├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
 │                        PeriodStockBalance
 ├── adjustment/          AdjustmentRequest, AdjustmentStockLine, AdjustmentAmountLine
-└── operation/           WarehouseTask, Notification, Attachment; UC-86 giao việc kho (BR-32), UC-85 thông báo
+└── operation/           WarehouseTask, Notification, Attachment; UC-86 giao việc kho (BR-32), UC-85 thông báo, ảnh chứng từ
+                         và bằng chứng đã tải lên gắn vào phiếu
 ```
 
 Mỗi feature dùng các package con sau, chỉ tạo package nào thực sự cần:
@@ -142,6 +146,7 @@ Các migration nằm trong `src/main/resources/db/migration/`:
 | File | Nội dung |
 |---|---|
 | `V1__init_schema.sql` | Toàn bộ 44 bảng, FK và index theo Report 4 mục 3 |
+| `V2__discrepancy_replacement_limit.sql` | `discrepancy_case`: thêm cột `replacement_limit_qty` (trần giao bù), số giao bù không còn phụ thuộc số trả lại (UC-46, BR-27, BR-67) |
 
 **Quy tắc:**
 - **Không sửa migration đã có** (Flyway sẽ báo checksum sai trên mọi máy đã chạy nó).

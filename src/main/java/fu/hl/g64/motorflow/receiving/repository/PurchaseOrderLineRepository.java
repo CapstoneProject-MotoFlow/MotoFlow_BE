@@ -15,4 +15,6 @@ public interface PurchaseOrderLineRepository extends JpaRepository<PurchaseOrder
             where l.purchaseOrderId in :requestIds
             group by l.purchaseOrderId""")
     List<Object[]> summarizeByRequest(Collection<Long> requestIds);
+
+    List<PurchaseOrderLine> findByPurchaseOrderIdOrderByIdAsc(Long purchaseOrderId);
 }

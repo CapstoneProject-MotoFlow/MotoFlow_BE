@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.inventory.service;
 
 import fu.hl.g64.motorflow.inventory.dto.LotAdjustPosting;
 import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
+import fu.hl.g64.motorflow.inventory.dto.LotReceiptPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
@@ -52,4 +53,11 @@ public interface InventoryPostingService {
 
     /** Plus or minus on one known lot; never below zero (MSG84). */
     void adjustLot(LotAdjustPosting posting);
+
+    /**
+     * Stock in on a lot that a supplier receipt created, at the lot's purchase price: excess that Owner accepts or
+     * rejects after the GRN was confirmed (UC-45). Like {@link #receiveNewLot}, the AVAILABLE quantity recalculates the
+     * moving average (BR-74), and the other statuses keep the goods out of it.
+     */
+    void receiveIntoLot(LotReceiptPosting posting);
 }
