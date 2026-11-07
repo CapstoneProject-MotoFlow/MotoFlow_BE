@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/submit"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "lines": [{ "lineId": {{firstLineId}}, "countedQty": {{firstLineCounted}} }]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+    language: text/javascript
+order: 21000

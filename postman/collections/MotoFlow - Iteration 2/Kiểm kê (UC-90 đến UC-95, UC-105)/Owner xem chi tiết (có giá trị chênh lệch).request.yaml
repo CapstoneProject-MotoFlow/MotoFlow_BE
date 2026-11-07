@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const line = pm.response.json().lines.find(l => l.id === Number(pm.collectionVariables.get('firstLineId')));
+      pm.test('Chênh lệch +1', () => pm.expect(line.difference).to.eql(1));
+      pm.test('Owner thấy giá trị chênh lệch', () => pm.expect(line).to.have.property('differenceValue'));
+    language: text/javascript
+order: 25000

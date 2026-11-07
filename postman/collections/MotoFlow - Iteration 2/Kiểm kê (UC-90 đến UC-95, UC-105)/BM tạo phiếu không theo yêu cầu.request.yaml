@@ -1,0 +1,30 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "countType": "CYCLE",
+      "countDate": "{{countDate}}",
+      "scopeType": "PRODUCTS",
+      "productIds": [{{countPartId}}]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: beforeRequest
+    code: |-
+      // The count date is today in Vietnam time (UTC+7), inside the open period.
+      pm.collectionVariables.set('countDate', new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10));
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('cancelCountId', pm.response.json().id);
+    language: text/javascript
+order: 27000

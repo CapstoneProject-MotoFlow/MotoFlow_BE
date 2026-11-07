@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const lines = pm.response.json().lines;
+      pm.test('BM thấy số sổ', () => lines.forEach(l => pm.expect(l.bookQty).to.be.a('number')));
+      pm.test('BM không thấy giá trị chênh lệch', () => lines.forEach(l => pm.expect(l.differenceValue == null).to.be.true));
+      // The first line is counted one more than the book, so the count has a difference to approve.
+      pm.collectionVariables.set('firstLineId', lines[0].id);
+      pm.collectionVariables.set('firstLineCounted', lines[0].bookQty + 1);
+      pm.collectionVariables.set('submitLines', JSON.stringify(lines.map((l, i) =>
+          ({ lineId: l.id, countedQty: i === 0 ? l.bookQty + 1 : l.bookQty }))));
+    language: text/javascript
+order: 14000

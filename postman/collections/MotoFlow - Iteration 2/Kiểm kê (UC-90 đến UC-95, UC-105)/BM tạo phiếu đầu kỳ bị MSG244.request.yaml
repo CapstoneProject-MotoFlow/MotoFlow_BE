@@ -1,0 +1,29 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "countType": "OPENING",
+      "countDate": "{{countDate}}",
+      "scopeType": "WHOLE"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: beforeRequest
+    code: |-
+      // The count date is today in Vietnam time (UTC+7), inside the open period.
+      pm.collectionVariables.set('countDate', new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10));
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã MSG244', () => pm.expect(pm.response.json().code).to.eql('MSG244'));
+    language: text/javascript
+order: 8000
