@@ -16,6 +16,7 @@ public record ReplenishmentCreateRequest(
         String note,
 
         @NotEmpty(message = "Vui lòng thêm ít nhất một phụ tùng.")
+        @Size(max = 200, message = "Tối đa 200 phụ tùng trong một yêu cầu.")
         List<@NotNull @Valid Line> lines) {
 
     public record Line(

@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -128,6 +129,11 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
         mvc.perform(post(REQUESTS).header(HttpHeaders.AUTHORIZATION, signIn("bm"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"lines\":[{\"productId\":" + brake + ",\"requestedQty\":1.5}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
+        mvc.perform(post(REQUESTS).header(HttpHeaders.AUTHORIZATION, signIn("bm"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("lines", Collections.nCopies(201, line(brake, 1))))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"));
         create("bm", null, "x".repeat(501), line(brake, 1)).andExpect(status().isBadRequest())

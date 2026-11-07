@@ -72,7 +72,7 @@ Ba điểm dễ thắc mắc khi đọc query:
 
 ### `LotQueryRepository.issueOrder` (UC-98)
 
-Lấy tối đa 20 lô cùng phụ tùng từng có ở kho đang xem, theo thứ tự xuất của BR-75: hạn sớm nhất trước, không hạn xếp cuối, rồi ngày nhận, rồi id. Cột `available` chỉ cộng số lượng trạng thái `AVAILABLE`. Service dùng kết quả này để tính `current` và `skipped`.
+Lấy tối đa 20 lô cùng phụ tùng: lô còn hàng ở kho đang xem, cộng lô đang xem, theo thứ tự xuất của BR-75: hạn sớm nhất trước, không hạn xếp cuối, rồi ngày nhận, rồi id. Cột `available` chỉ cộng số lượng trạng thái `AVAILABLE`. Service dùng kết quả này để tính `current` và `skipped`.
 
 ### Các query trong `StockMovementRepository` (UC-98)
 
@@ -128,7 +128,7 @@ BR-72 giới hạn thông tin giá vốn, và màn hình danh sách lô không c
 
 ## 6. Các điểm cần lưu ý
 
-- **`issueOrder` tối đa 20 dòng:** nếu lô đang xem đứng sau vị trí 20 thì không có dòng `current = true`.
+- **`issueOrder` tối đa 20 dòng:** lô đang xem chỉ bị cắt khi có hơn 20 lô còn hàng đứng trước nó. Khi đó không có dòng `current = true`.
 - **`byStatus` có thể có `IN_TRANSIT`:** tổng `byStatus` có thể lớn hơn `remainingQty`.
 - **Lô đang chuyển tới kho đích:** không hiện ở tab `DEPLETED` của kho đích vì chưa tới nơi, nhưng BM kho đích vẫn mở được chi tiết vì đã có dòng `lot_balance`.
 - **Trạng thái hạn tính lúc đọc:** các API này không cập nhật `lot.status`.
