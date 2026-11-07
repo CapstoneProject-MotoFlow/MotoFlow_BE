@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.stockcount.service.impl;
 
+import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
+import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
@@ -8,6 +10,7 @@ import fu.hl.g64.motorflow.inventory.entity.StockCountRequest;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequestProduct;
 import fu.hl.g64.motorflow.inventory.entity.enums.CountType;
 import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockCountRequestStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
@@ -17,6 +20,7 @@ import fu.hl.g64.motorflow.inventory.repository.StockCountRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountRequestProductRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountRequestRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
+import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
@@ -38,6 +42,7 @@ import fu.hl.g64.motorflow.stockcount.service.CountSheetService;
 import fu.hl.g64.motorflow.stockcount.service.StockCountService;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -165,22 +170,63 @@ public class StockCountServiceImpl implements StockCountService {
 
     // region getStockCounts (owner: X)
     @Override
+    @Transactional(readOnly = true)
     public StockCountListResponse getStockCounts(AuthenticatedUser user, StockCountFilter filter, Pageable pageable) {
-        throw new UnsupportedOperationException("UC-90");
+        Long storeId = filter.storeId();
+        Long counterId = null;
+        if (user.role() == Role.BRANCH_MANAGER) {
+            Long own = user.storeId();
+            access.requireManagerOf(user, storeId != null ? storeId : own != null ? own : -1L);
+            storeId = own;
+        } else if (user.role() == Role.STAFF) {
+            counterId = user.id();
+        }
+        Page<Object[]> found = counts.search(storeId, filter.countType(), filter.status(), filter.from(),
+                filter.to(), counterId, pageable);
+        List<StockCountListResponse.Row> rows = found.stream().map(row -> {
+            StockCount c = (StockCount) row[0];
+            return new StockCountListResponse.Row(c.getId(), c.getStoreId(), (String) row[1], c.getCountType(),
+                    c.getCountDate(), c.getScopeType(), c.getScopeNote(), c.getStatus(),
+                    c.getStockCountRequestId(), c.getCreatedAt(), c.getConfirmedAt());
+        }).toList();
+        List<CountRequestResponse> pending = user.role() == Role.BRANCH_MANAGER
+                ? mapper.toRequests(requests.search(storeId, StockCountRequestStatus.PENDING)) : List.of();
+        return new StockCountListResponse(PageResponse.of(found, rows), pending);
     }
     // endregion
 
     // region getStockCount (owner: X)
     @Override
+    @Transactional(readOnly = true)
     public StockCountDetailResponse getStockCount(AuthenticatedUser user, long id) {
-        throw new UnsupportedOperationException("UC-92");
+        StockCount count = access.loadCount(id);
+        return mapper.toDetail(count, access.viewerOf(user, count));
     }
     // endregion
 
     // region cancel (owner: X)
     @Override
+    @Transactional
     public StockCountDetailResponse cancel(AuthenticatedUser user, long id, StockCountCancelRequest request) {
-        throw new UnsupportedOperationException("UC-94");
+        StockCount count = access.lockCount(id);
+        access.requireManagerOf(user, count.getStoreId());
+        if (count.getStatus() != StockCountStatus.DRAFT && count.getStatus() != StockCountStatus.COUNTING) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
+        }
+        if (count.wasConfirmed()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG243");
+        }
+        count.cancel(user.id(), request.reason().strip(), LocalDateTime.now(clock));
+        warehouseTasks.cancelForDocument(TaskType.COUNTING, id);
+        if (count.getStockCountRequestId() != null
+                || lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(id).stream()
+                        .anyMatch(line -> line.getCountedQty() != null)) {
+            notifications.notifyOwners("STOCK_COUNT_CANCELLED",
+                    "Quản lý đã hủy phiếu kiểm kê #%d của cửa hàng %s.".formatted(id,
+                            stores.findById(count.getStoreId()).orElseThrow().getStoreName()),
+                    "STOCK_COUNT", id);
+        }
+        return mapper.toDetail(count, StockCountAccess.Viewer.MANAGER);
     }
     // endregion
 
