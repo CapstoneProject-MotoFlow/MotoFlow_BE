@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.transfer.service;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
+import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
@@ -32,4 +33,10 @@ public interface TransferOrderService {
      * available stock into transit at the destination. Confirming an order already dispatched returns it unchanged.
      */
     TransferOrderDetailResponse dispatch(AuthenticatedUser user, long id, TransferDispatchRequest request);
+
+    /**
+     * UC-75: a source Branch Manager confirms how much of the excess received they sent. Only counted here; the stock
+     * of both warehouses changes when the order is closed (BR-68).
+     */
+    TransferOrderDetailResponse confirmExtraDispatch(AuthenticatedUser user, long id, ExtraDispatchRequest request);
 }

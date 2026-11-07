@@ -86,6 +86,12 @@ public class TransferOrder {
         dispatchedAt = now;
     }
 
+    /** UC-75: the source confirmed (part of) the excess received; posted at closing (BR-68). */
+    public void confirmExtraDispatch(Long by, LocalDateTime now) {
+        extraDispatchConfirmedBy = by;
+        extraDispatchConfirmedAt = now;
+    }
+
     /** The first confirmed receipt: what remains is reconciled until the order is closed (UC-76, UC-77). */
     public void startReconciling() {
         if (status == TransferOrderStatus.IN_TRANSIT) {

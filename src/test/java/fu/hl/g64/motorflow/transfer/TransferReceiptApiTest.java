@@ -187,44 +187,6 @@ class TransferReceiptApiTest extends TransferFlowTestData {
 
     // ------------------------------------------------------------------------------------------------------------
 
-    private ResultActions arrive(long order) throws Exception {
-        return mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn("bmlb")));
-    }
-
-    private long arrive(String manager, long order) throws Exception {
-        mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn(manager)))
-                .andExpect(status().isCreated());
-        return jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
-    }
-
-    /** Arrived, given to the destination Staff member and recorded: [productId, passed, damaged, ...]. */
-    private long inspected(long order, long... lines) throws Exception {
-        long receipt = arrive("bmlb", order);
-        assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
-        result("nvlb", order, receipt, lines).andExpect(status().isOk());
-        return receipt;
-    }
-
-    private ResultActions result(String recorder, long order, long receipt, long... lines) throws Exception {
-        List<Map<String, Object>> rows = new ArrayList<>();
-        for (int i = 0; i < lines.length; i += 3) {
-            rows.add(Map.of("productId", lines[i], "passedQty", lines[i + 1], "damagedQty", lines[i + 2]));
-        }
-        return mvc.perform(put(ORDERS + "/" + order + "/receipts/" + receipt + "/result")
-                .header(HttpHeaders.AUTHORIZATION, signIn(recorder)).contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("lines", rows))));
-    }
-
-    private ResultActions confirm(String manager, long order, long receipt) throws Exception {
-        return mvc.perform(post(ORDERS + "/" + order + "/receipts/" + receipt + "/confirm")
-                .header(HttpHeaders.AUTHORIZATION, signIn(manager)));
-    }
-
-    private ResultActions receiptView(String username, long order, long receipt) throws Exception {
-        return mvc.perform(get(ORDERS + "/" + order + "/receipts/" + receipt)
-                .header(HttpHeaders.AUTHORIZATION, signIn(username)));
-    }
-
     private List<Long> recipients(String type) {
         return jdbc.queryForList("SELECT recipient_id FROM notification WHERE notification_type = ?", Long.class, type);
     }

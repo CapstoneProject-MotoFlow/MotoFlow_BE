@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.transfer.controller;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
+import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
@@ -90,5 +91,16 @@ public class TransferOrderController {
     public TransferOrderDetailResponse dispatch(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id,
                                                 @Valid @RequestBody TransferDispatchRequest request) {
         return service.dispatch(user, id, request);
+    }
+
+    @Operation(summary = "Confirm the extra dispatch (UC-75). A source Branch Manager confirms, per part, how much of "
+            + "the excess the destination received was really sent; it adds up and posts nothing until closing. "
+            + "A line confirmed as 0 needs a reason")
+    @PostMapping("/{id}/extra-dispatch")
+    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    public TransferOrderDetailResponse confirmExtraDispatch(@AuthenticationPrincipal AuthenticatedUser user,
+                                                            @PathVariable long id,
+                                                            @Valid @RequestBody ExtraDispatchRequest request) {
+        return service.confirmExtraDispatch(user, id, request);
     }
 }

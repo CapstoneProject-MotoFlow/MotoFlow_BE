@@ -22,9 +22,11 @@ import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
+import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
+import fu.hl.g64.motorflow.operation.service.AttachmentService;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
@@ -34,6 +36,7 @@ import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
+import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
@@ -59,6 +62,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.LocalDate;
@@ -98,6 +102,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
     private final WarehouseTaskRepository tasks;
     private final WarehouseTaskService warehouseTasks;
     private final PickingGuide guide;
+    private final AttachmentService attachments;
     private final Clock clock;
 
     // UC-71
@@ -253,6 +258,64 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         return detail(user, order);
     }
 
+    // UC-75
+    @Transactional
+    @Override
+    public TransferOrderDetailResponse confirmExtraDispatch(AuthenticatedUser user, long id, ExtraDispatchRequest body) {
+        TransferOrder order = orders.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+        if (!isManagerOf(user, order.getSourceStoreId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        if (order.getStatus() != TransferOrderStatus.RECONCILING) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        List<TransferOrderLine> orderLines = lines.findByTransferOrderIdOrderByProductId(id);
+        Map<Long, Product> parts = products.findAllById(orderLines.stream().map(TransferOrderLine::getProductId)
+                .toList()).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<Long, TransferReconciliation.Part> figures = reconciliation.byProduct(id, orderLines);
+        Map<Long, TransferOrderLine> byProduct = orderLines.stream()
+                .collect(Collectors.toMap(TransferOrderLine::getProductId, Function.identity()));
+        // What was received above the dispatch and not yet confirmed: confirming twice cannot go beyond it.
+        Map<Long, Integer> pending = orderLines.stream().collect(Collectors.toMap(TransferOrderLine::getProductId,
+                line -> Math.max(figures.get(line.getProductId()).extraReceived() - line.getExtraDispatchedQty(), 0)));
+        if (pending.values().stream().allMatch(quantity -> quantity == 0)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG213");
+        }
+        Map<Long, Integer> sent = new LinkedHashMap<>();
+        for (int i = 0; i < body.lines().size(); i++) {
+            ExtraDispatchRequest.Line line = body.lines().get(i);
+            if (!byProduct.containsKey(line.productId()) || sent.putIfAbsent(line.productId(), line.extraQty()) != null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG166", i + 1);
+            }
+            if (line.extraQty() > pending.get(line.productId())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG214", parts.get(line.productId()).getSku(),
+                        pending.get(line.productId()));
+            }
+        }
+        String reason = StringUtils.hasText(body.reason()) ? body.reason().strip() : null;
+        if (reason == null && sent.values().stream().anyMatch(quantity -> quantity == 0)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG215");
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<Map<String, Object>> recorded = new ArrayList<>();
+        sent.forEach((productId, quantity) -> {
+            byProduct.get(productId).confirmExtraDispatch(quantity);
+            recorded.add(Map.of("product_id", productId, "pending_qty", pending.get(productId), "extra_qty", quantity));
+        });
+        order.confirmExtraDispatch(user.id(), now);
+        auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_EXTRA_DISPATCH_CONFIRMED", user.id(), reason, null,
+                Map.of("lines", recorded), now));
+        attachments.attach(OwnerType.TRANSFER_ORDER, id, body.evidence() == null ? List.of() : body.evidence(),
+                user.id());
+        if (order.getCreatedBy() != user.id()) {
+            notifications.notify(order.getCreatedBy(), "TRANSFER_EXTRA_DISPATCH_CONFIRMED",
+                    "Phiếu chuyển kho #%d: kho nguồn đã xác nhận phần xuất thêm, có thể đối soát để đóng phiếu"
+                            .formatted(id), ENTITY, id);
+        }
+        return detail(user, order);
+    }
+
     /** UC-74 step 3: one line per part of the order, each equal to what was prepared, not all zero. */
     private static Map<Long, Integer> sentQuantities(TransferDispatchRequest body, List<TransferOrderLine> orderLines,
                                                      Map<Long, Product> parts) {
@@ -323,7 +386,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 orders.findReceipts(id).stream().map(receipt -> new TransferOrderDetailResponse.Receipt(
                         receipt.getId(), receipt.getReceiptType(), receipt.getStatus(), receipt.getArrivedAt(),
                         receipt.getConfirmedAt())).toList(),
-                discrepancies);
+                discrepancies, staff ? List.of() : attachments.list(OwnerType.TRANSFER_ORDER, id));
     }
 
     private List<TransferOrderDetailResponse.Discrepancy> discrepancies(long transferOrderId) {

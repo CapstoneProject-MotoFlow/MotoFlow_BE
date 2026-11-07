@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.transfer.dto;
 
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
+import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
@@ -13,7 +14,8 @@ import java.util.List;
 
 /**
  * UC-73. For Staff the reconciliation figures are null and {@code discrepancies} is empty: they see only what to
- * prepare or receive. {@code unitCost} of a lot is for the Owner only (BR-72).
+ * prepare or receive. {@code unitCost} of a lot is for the Owner only (BR-72). {@code attachments}: evidence of the
+ * extra dispatch (UC-75), empty for Staff.
  */
 public record TransferOrderDetailResponse(
         long id, TransferOrderStatus status, Long replenishmentRequestId,
@@ -22,7 +24,8 @@ public record TransferOrderDetailResponse(
         Person dispatchedBy, LocalDateTime dispatchedAt,
         Person extraDispatchConfirmedBy, LocalDateTime extraDispatchConfirmedAt,
         Person closedBy, LocalDateTime closedAt,
-        List<Line> lines, List<Lot> lots, List<Receipt> receipts, List<Discrepancy> discrepancies) {
+        List<Line> lines, List<Lot> lots, List<Receipt> receipts, List<Discrepancy> discrepancies,
+        List<AttachmentResponse> attachments) {
 
     public record Person(long id, String fullName) {
     }

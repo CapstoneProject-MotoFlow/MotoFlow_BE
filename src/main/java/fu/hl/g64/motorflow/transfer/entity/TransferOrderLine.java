@@ -60,6 +60,14 @@ public class TransferOrderLine {
         dispatchedQty = quantity;
     }
 
+    /** UC-75: adds to what the source confirmed it sent above the dispatch; the dispatch itself never changes. */
+    public void confirmExtraDispatch(int quantity) {
+        if (quantity < 0) {
+            throw new IllegalArgumentException("extra quantity must not be negative");
+        }
+        extraDispatchedQty += quantity;
+    }
+
     /** UC-57: what the person preparing the dispatch actually took out; never more than planned. */
     public void recordPrepared(int preparedQty) {
         if (preparedQty < 0 || preparedQty > plannedQty) {
