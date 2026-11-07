@@ -14,6 +14,7 @@ import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockMovementResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockRowResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockSearch;
+import fu.hl.g64.motorflow.inventory.dto.StockSummaryResponse;
 import fu.hl.g64.motorflow.inventory.dto.StorageLocationRequest;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
@@ -64,6 +65,17 @@ public class InventoryController {
                                                     @RequestParam(defaultValue = "20") int size) {
         return inventoryService.listStock(user, new StockSearch(storeId, q, categoryId, storageArea, lowStockOnly,
                 unavailableOnly, expiryAlertOnly, includeZero), page, size);
+    }
+
+    @Operation(summary = "Counts for the stock screen over the whole filter (UC-47). Without storeId: own warehouse, or "
+            + "every warehouse for the Owner")
+    @GetMapping("/stock/summary")
+    public StockSummaryResponse stockSummary(@AuthenticationPrincipal AuthenticatedUser user,
+                                             @RequestParam(required = false) Long storeId,
+                                             @RequestParam(required = false) String q,
+                                             @RequestParam(required = false) Long categoryId,
+                                             @RequestParam(required = false) String storageArea) {
+        return inventoryService.stockSummary(user, StockSearch.scope(storeId, q, categoryId, storageArea));
     }
 
     @Operation(summary = "The storage areas in use, A to Z, for the area filter (UC-47). Without storeId: own warehouse, "

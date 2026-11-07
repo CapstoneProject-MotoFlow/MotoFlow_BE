@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.inventory;
 
+import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
@@ -20,8 +21,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -213,6 +216,46 @@ class InventoryApiTest extends ApiTestUsers {
     }
 
     @Test
+    void summaryMatchesTheRowsOfTheList() throws Exception {
+        placeWithThreshold(branch, chain, 4);
+        place(central, chain, "Kệ A", null);
+        long third = product("GUONG-XE", "Gương", jdbc.queryForObject("SELECT category_id FROM product WHERE id = ?",
+                Long.class, brake));
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, damaged_qty, updated_at) VALUES (?, ?, 2, now())",
+                central, third);
+        jdbc.update("INSERT INTO stock_balance (store_id, product_id, in_transit_qty, updated_at) VALUES (?, ?, 2, now())",
+                branch, third);
+
+        String rows = stock("owner", "?includeZero=true&size=100").andReturn().getResponse().getContentAsString();
+        List<Integer> onHand = JsonPath.read(rows, "$.items[?(@.onHandQty > 0)].onHandQty");
+        assertThat(onHand).hasSize(4);
+        stock("owner", "/summary")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.withStock").value(onHand.size()))
+                .andExpect(jsonPath("$.lowStock").value(total("?lowStockOnly=true")))
+                .andExpect(jsonPath("$.unavailable").value(total("?unavailableOnly=true")))
+                .andExpect(jsonPath("$.expiryAlert").value(total("?expiryAlertOnly=true")));
+        assertThat(List.of(total("?lowStockOnly=true"), total("?unavailableOnly=true"), total("?expiryAlertOnly=true")))
+                .containsExactly(2, 1, 2);
+    }
+
+    @Test
+    void summaryFollowsTheFilterAndTheWarehouseInScope() throws Exception {
+        place(central, chain, "Kệ A", null);
+        stock("owner", "/summary?storeId=" + branch).andExpect(jsonPath("$.withStock").value(1))
+                .andExpect(jsonPath("$.lowStock").value(1))
+                .andExpect(jsonPath("$.expiryAlert").value(0));
+        stock("owner", "/summary?q=xích").andExpect(jsonPath("$.withStock").value(1));
+        stock("owner", "/summary?storageArea=kệ a").andExpect(jsonPath("$.withStock").value(1))
+                .andExpect(jsonPath("$.expiryAlert").value(1));
+        stock("owner", "/summary?categoryId=999999").andExpect(status().isOk());
+        stock("bm", "/summary").andExpect(jsonPath("$.withStock").value(1));
+        stock("bm", "/summary?storeId=" + central).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+        stock("staff", "/summary").andExpect(status().isForbidden());
+    }
+
+    @Test
     void stockDetailSplitsByLotAndHidesPurchasePriceFromManagers() throws Exception {
         mvc.perform(get("/api/v1/inventory/stock/{s}/{p}", central, brake).header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk())
@@ -303,6 +346,10 @@ class InventoryApiTest extends ApiTestUsers {
 
     private ResultActions stock(String username, String suffix) throws Exception {
         return mvc.perform(get("/api/v1/inventory/stock" + suffix).header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
+    private int total(String query) throws Exception {
+        return JsonPath.read(stock("owner", query).andReturn().getResponse().getContentAsString(), "$.totalItems");
     }
 
     private void place(long store, long product, String area, String bin) {

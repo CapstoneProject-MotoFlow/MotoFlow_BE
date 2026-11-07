@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/stock/storage-areas"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      pm.test('Là danh sách không trùng', () => {
+          const areas = pm.response.json();
+          pm.expect(areas).to.be.an('array');
+          pm.expect(new Set(areas).size).to.eql(areas.length);
+      });
+    language: text/javascript
+order: 3000

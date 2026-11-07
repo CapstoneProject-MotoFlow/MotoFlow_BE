@@ -26,6 +26,7 @@ import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse.LotLine;
 import fu.hl.g64.motorflow.inventory.dto.StockMovementResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockRowResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockSearch;
+import fu.hl.g64.motorflow.inventory.dto.StockSummaryResponse;
 import fu.hl.g64.motorflow.inventory.dto.StorageLocationRequest;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.LotBalance;
@@ -114,7 +115,7 @@ public class InventoryServiceImpl implements InventoryService {
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
         Specification<StockBalance> spec = stockScope(scopeStoreId(user, filter.storeId()), filter);
         if (filter.hidesZeroStock()) {
-            spec = spec.and((root, query, cb) -> cb.greaterThan(root.get("availableQty"), 0));
+            spec = spec.and(hasAvailable());
         }
         if (filter.lowStockOnly()) {
             spec = spec.and(lowStock());
@@ -128,6 +129,16 @@ public class InventoryServiceImpl implements InventoryService {
         Page<StockBalance> found = balances.findAll(spec, PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
                 Sort.by("storeId", "productId")));
         return PageResponse.of(found, rows(user, found.getContent()));
+    }
+
+    // UC-47
+    @Transactional(readOnly = true)
+    @Override
+    public StockSummaryResponse stockSummary(AuthenticatedUser user, StockSearch scope) {
+        Specification<StockBalance> spec = stockScope(scopeStoreId(user, scope.storeId()), scope);
+        return new StockSummaryResponse(balances.count(spec.and(hasAvailable().or(unavailable()))),
+                balances.count(spec.and(lowStock())), balances.count(spec.and(unavailable())),
+                balances.count(spec.and(expiryAlert())));
     }
 
     // UC-47
@@ -345,6 +356,10 @@ public class InventoryServiceImpl implements InventoryService {
             }
             return cb.and(where.toArray(Predicate[]::new));
         };
+    }
+
+    private static Specification<StockBalance> hasAvailable() {
+        return (root, query, cb) -> cb.greaterThan(root.get("availableQty"), 0);
     }
 
     private static Specification<StockBalance> lowStock() {
