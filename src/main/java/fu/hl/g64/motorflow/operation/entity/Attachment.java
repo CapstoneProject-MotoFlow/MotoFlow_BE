@@ -50,4 +50,19 @@ public class Attachment {
 
     @Column(name = "uploaded_at", nullable = false)
     private LocalDateTime uploadedAt;
+
+    /** A file the browser already uploaded to Cloudinary, attached to one record. */
+    public static Attachment create(OwnerType ownerType, long ownerId, String fileName, String contentType,
+                                    long fileSize, String storageKey, long uploadedBy, LocalDateTime now) {
+        Attachment attachment = new Attachment();
+        attachment.ownerType = ownerType;
+        attachment.ownerId = ownerId;
+        attachment.fileName = fileName;
+        attachment.contentType = contentType;
+        attachment.fileSize = fileSize;
+        attachment.storageKey = storageKey;
+        attachment.uploadedBy = uploadedBy;
+        attachment.uploadedAt = now;
+        return attachment;
+    }
 }

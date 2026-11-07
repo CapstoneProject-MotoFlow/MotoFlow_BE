@@ -210,10 +210,14 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.canUpdate").value(false))
                 .andExpect(jsonPath("$.canCancel").value(false))
                 // Excess beyond the order is not counted as received; the delivery still waiting is not counted.
+                // The confirmed delivery covers every line: the damaged pads and the wrong oil are owed through
+                // their discrepancy cases, not by the PO.
                 .andExpect(jsonPath("$.lines[*].sku", contains("MA-PHANH-01", "DEN-01", "NHOT-01")))
                 .andExpect(jsonPath("$.lines[*].orderedQty", contains(10, 4, 6)))
                 .andExpect(jsonPath("$.lines[*].receivedQty", contains(8, 4, 5)))
-                .andExpect(jsonPath("$.lines[*].outstandingQty", contains(2, 0, 1)))
+                .andExpect(jsonPath("$.lines[*].acceptedExcessQty", contains(0, 1, 0)))
+                .andExpect(jsonPath("$.lines[*].outstandingQty", contains(0, 0, 0)))
+                .andExpect(jsonPath("$.receipts[*].replacement", contains(false, false)))
                 .andExpect(jsonPath("$.receipts[*].id", contains(ids(confirmedDelivery, uninspectedDelivery))))
                 .andExpect(jsonPath("$.receipts[*].deliveryDocumentNo", contains("PX-001", "PX-002")))
                 .andExpect(jsonPath("$.receipts[0].status").value("CONFIRMED"))

@@ -12,6 +12,9 @@ import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
+import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement;
+import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Progress;
+import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Standing;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
@@ -36,6 +39,7 @@ import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
 import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderHistory;
 import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderHistory.LineValues;
+import fu.hl.g64.motorflow.receiving.helper.ReceivingLedger;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
 import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderLineRepository;
@@ -93,6 +97,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     private final UserAccountRepository users;
     private final AuditLogRepository auditLog;
     private final NotificationService notifications;
+    private final ReceivingLedger ledger;
+    private final DiscrepancySettlement settlement;
     private final Clock clock;
 
     // UC-39
@@ -313,15 +319,10 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         Supplier supplier = suppliers.findById(order.getSupplierId()).orElseThrow();
         String storeName = stores.findById(order.getStoreId()).map(Store::getStoreName).orElse(null);
 
-        // What confirmed deliveries took into stock against each line: excess beyond the PO is not part of it.
-        Set<Long> confirmed = deliveries.stream().filter(r -> r.getStatus() == GoodsReceiptNoteStatus.CONFIRMED)
-                .map(GoodsReceiptNote::getId).collect(Collectors.toSet());
-        Map<Long, Integer> received = new HashMap<>();
+        Set<Long> replacements = ledger.replacementReceiptIds(deliveryIds);
+        ReceivingLedger.Ledger standing = ReceivingLedger.compute(lines, deliveries, results, replacements);
         Map<Long, List<ReceiptLine>> resultsByDelivery = new HashMap<>();
         for (GoodsReceiptNoteLine result : results) {
-            if (confirmed.contains(result.getGoodsReceiptNoteId())) {
-                received.merge(result.getProductId(), result.getPassedQty() - result.getExcessQty(), Integer::sum);
-            }
             Product part = parts.get(result.getProductId());
             resultsByDelivery.computeIfAbsent(result.getGoodsReceiptNoteId(), key -> new ArrayList<>())
                     .add(new ReceiptLine(result.getProductId(), part.getSku(), part.getPartName(),
@@ -336,26 +337,35 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             Product part = parts.get(line.getProductId());
             long lineValue = (long) line.getOrderedQty() * line.getPurchasePrice();
             orderedValue += lineValue;
-            int got = received.getOrDefault(line.getProductId(), 0);
+            ReceivingLedger.Part got = standing.parts().get(line.getProductId());
             lineRows.add(new Line(line.getId(), line.getProductId(), part.getSku(), part.getPartName(),
                     part.getBaseUnit(), part.getStatus(), line.getOrderedQty(), owner ? line.getPurchasePrice() : null,
-                    owner ? lineValue : null, got, Math.max(line.getOrderedQty() - got, 0)));
+                    owner ? lineValue : null, got.receivedQty(), got.acceptedExcessQty(), got.outstandingQty()));
         }
         List<Receipt> receiptRows = deliveries.stream().map(r -> new Receipt(r.getId(), r.getDeliveryDocumentNo(),
-                r.getDeliveryDocumentDate(), r.getArrivedAt(), r.getStatus(), r.getRecordedBy(),
+                r.getDeliveryDocumentDate(), r.getArrivedAt(), r.getStatus(), replacements.contains(r.getId()),
+                r.getRecordedBy(),
                 names.get(r.getRecordedBy()), r.getSubmittedAt(), r.getConfirmedBy(), names.get(r.getConfirmedBy()),
                 r.getConfirmedAt(), r.getStatus() == GoodsReceiptNoteStatus.AWAITING_INSPECTION ? List.of()
                 : resultsByDelivery.getOrDefault(r.getId(), List.of()))).toList();
+        Map<Long, Progress> progress = settlement.progress(cases.stream().map(DiscrepancyCase::getId).toList());
         List<Discrepancy> caseRows = cases.stream().map(c -> {
             Product part = parts.get(c.getProductId());
+            Standing done = new Standing(c, progress.get(c.getId()));
             return new Discrepancy(c.getId(), c.getGoodsReceiptNoteId(), c.getProductId(), part.getSku(),
                     part.getPartName(), c.getShortQty(), c.getWrongItemQty(), c.getDamagedQty(),
-                    c.getRejectedExcessQty(), c.getReturnRequiredQty(), c.getReplacementRequiredQty(), c.getStatus(),
-                    c.getOpenedAt(), c.getClosedAt());
+                    c.getRejectedExcessQty(), c.getReturnRequiredQty(), c.getReplacementRequiredQty(),
+                    done.outstandingReturn(), done.outstandingReplacement(), c.isOpen() ? done.openReplacement() : 0,
+                    c.getStatus(), c.getOpenedAt(), c.getClosedAt());
         }).toList();
         long openCases = cases.stream().filter(c -> c.getStatus() == DiscrepancyCaseStatus.OPEN).count();
         boolean changeable = owner && order.getStatus() == PurchaseOrderStatus.AWAITING_DELIVERY
                 && deliveries.isEmpty();
+        // UC-106: only the Branch Manager of the receiving store records deliveries.
+        boolean receiving = user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
+        boolean canCreateReceipt = receiving && (order.getStatus() == PurchaseOrderStatus.AWAITING_DELIVERY
+                || order.getStatus() == PurchaseOrderStatus.RECEIVING) && standing.anyOutstanding();
+        boolean canCreateReplacement = receiving && caseRows.stream().anyMatch(c -> c.openReplacementQty() > 0);
 
         return new PurchaseOrderDetail(id, order.getStatus(), supplier.getId(), supplier.getSupplierCode(),
                 supplier.getSupplierName(), order.getStoreId(), storeName, order.getExpectedArrival(),
@@ -363,7 +373,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 order.getCreatedBy(), names.get(order.getCreatedBy()), order.getCreatedAt(), order.getUpdatedAt(),
                 order.getCancelledBy(), names.get(order.getCancelledBy()), order.getCancelledAt(),
                 order.getCancellationReason(), owner ? orderedValue : null, openCases, changeable, changeable,
-                lineRows, receiptRows, caseRows,
+                canCreateReceipt, canCreateReplacement, lineRows, receiptRows, caseRows,
                 steps.stream().map(step -> PurchaseOrderHistory.entry(step, names.get(step.getActorId()), parts, owner))
                         .toList());
     }

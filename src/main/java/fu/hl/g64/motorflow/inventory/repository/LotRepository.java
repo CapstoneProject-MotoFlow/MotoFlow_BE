@@ -34,4 +34,7 @@ public interface LotRepository extends JpaRepository<Lot, Long> {
             + "where l.source_type = 'RECEIPT' and l.supplier_id is not null and p.status = 'ACTIVE' "
             + "group by l.product_id order by max(l.received_date) desc, max(l.id) desc limit :limit", nativeQuery = true)
     List<Long> findRecentlyPurchasedProductIds(int limit);
+
+    /** The lots that confirmed GRN lines created; one lot per line at most (goods_receipt_note_line_id is unique). */
+    List<Lot> findByGoodsReceiptNoteLineIdIn(Collection<Long> goodsReceiptNoteLineIds);
 }
