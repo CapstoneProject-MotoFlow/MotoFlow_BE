@@ -9,7 +9,9 @@ import jakarta.validation.constraints.Size;
 /**
  * UC-60 Step 7_Net collection exceeds the total, UC-56 Step 4_Collected money remains: money given back to the
  * customer before completion, at most what the order holds (BR-48). {@code verified} is the seller's "Đã trả tiền cho
- * khách": an unverified refund does not count until verified (BR-46).
+ * khách": an unverified refund does not count until verified (BR-46). {@code expectedRefundable} is the order's
+ * {@code money.refundable} the seller saw: if it changed meanwhile, for instance because the same refund was already
+ * sent, nothing is recorded (MSG194). A refund sent with a cancellation is checked by the cancellation instead.
  */
 public record OrderRefundRequest(
         @NotNull(message = "Vui lòng nhập số tiền hoàn.")
@@ -24,5 +26,8 @@ public record OrderRefundRequest(
         String transactionReference,
 
         @NotNull(message = "Vui lòng cho biết đã trả tiền cho khách hay chưa.")
-        Boolean verified) {
+        Boolean verified,
+
+        @NotNull(message = "Vui lòng tải lại đơn để xem số tiền còn hoàn được.")
+        Long expectedRefundable) {
 }

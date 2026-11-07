@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.sales;
 
 import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.PathNotFoundException;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
@@ -195,6 +196,16 @@ public abstract class SalesOrderTestData extends ApiTestUsers {
 
     protected ResultActions detail(String token, long order) throws Exception {
         return mvc.perform(get("/api/v1/sales-orders/" + order).header(HttpHeaders.AUTHORIZATION, token));
+    }
+
+    /** A field of the order's money as the seller's screen shows it now (0 before the order has any). */
+    protected long moneyNow(long order, String field) throws Exception {
+        String body = detail(ownerToken, order).andReturn().getResponse().getContentAsString();
+        try {
+            return JsonPath.<Number>read(body, "$.money." + field).longValue();
+        } catch (PathNotFoundException noMoneyYet) {
+            return 0;
+        }
     }
 
     protected ResultActions list(String token, String... parameters) throws Exception {

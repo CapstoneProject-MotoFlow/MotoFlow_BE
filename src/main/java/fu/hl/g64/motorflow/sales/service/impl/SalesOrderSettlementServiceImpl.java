@@ -51,6 +51,7 @@ import fu.hl.g64.motorflow.sales.service.SalesOrderService;
 import fu.hl.g64.motorflow.sales.service.SalesOrderSettlementService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -71,6 +72,7 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementService {
@@ -103,13 +105,16 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Override
     public SettlementResult recordPayment(AuthenticatedUser seller, long orderId, OrderPaymentRequest request) {
         Long paymentId = transactions.execute(status -> {
-            SalesOrder order = lockUnfinished(orderId);
-            requireSeller(seller, order);
+            SalesOrder order = lockForSeller(seller, orderId);
             requireConfirmed(order);
             long total = total(orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId));
             long payable = collections.of(orderId).payable(total);
             if (payable == 0) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG180");
+            }
+            // BR-45: the same payment sent twice (a double click, a retried request) finds less still payable.
+            if (request.expectedPayable() != payable) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG194");
             }
             if (request.amount() > payable) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG181", money(payable));
@@ -133,9 +138,13 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Override
     public SettlementResult recordRefund(AuthenticatedUser seller, long orderId, OrderRefundRequest request) {
         Long refundId = transactions.execute(status -> {
-            SalesOrder order = lockUnfinished(orderId);
-            requireSeller(seller, order);
-            return saveRefund(orderId, collections.of(orderId), request.amount(), request.paymentMethod(),
+            lockForSeller(seller, orderId);
+            OrderCollections.Money money = collections.of(orderId);
+            // BR-45: the same refund sent twice finds less still refundable.
+            if (request.expectedRefundable() != money.refundable()) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG194");
+            }
+            return saveRefund(orderId, money, request.amount(), request.paymentMethod(),
                     request.transactionReference(), request.verified(), seller, LocalDateTime.now(clock)).getId();
         });
         return settle(seller, orderId, Objects.requireNonNull(refundId));
@@ -145,8 +154,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Override
     public SettlementResult verifyPayment(AuthenticatedUser seller, long orderId, long paymentId) {
         transactions.executeWithoutResult(status -> {
-            SalesOrder order = lockUnfinished(orderId);
-            requireSeller(seller, order);
+            SalesOrder order = lockForSeller(seller, orderId);
             Payment payment = unverifiedRow(orderId, paymentId);
             if (payment.getPaymentType() == PaymentType.REFUND) {
                 OrderCollections.Money money = collections.of(orderId);
@@ -164,8 +172,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Transactional
     @Override
     public SalesOrderDetail rejectPayment(AuthenticatedUser seller, long orderId, long paymentId, String reason) {
-        SalesOrder order = lockUnfinished(orderId);
-        requireSeller(seller, order);
+        SalesOrder order = lockForSeller(seller, orderId);
         Payment payment = unverifiedRow(orderId, paymentId);
         LocalDateTime now = LocalDateTime.now(clock);
         String why = reason.strip();
@@ -183,8 +190,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Transactional
     @Override
     public SalesOrderDetail complete(AuthenticatedUser seller, long orderId, CompleteSalesOrderRequest request) {
-        SalesOrder order = lockUnfinished(orderId);
-        requireSeller(seller, order);
+        SalesOrder order = lockForSeller(seller, orderId);
         requireConfirmed(order);
         requireVersion(request.version(), currentVersion(orderId));
         List<SalesOrderLine> lines = orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId);
@@ -206,8 +212,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Transactional
     @Override
     public SalesOrderDetail recordCredit(AuthenticatedUser seller, long orderId, OrderCreditRequest request) {
-        SalesOrder order = lockUnfinished(orderId);
-        requireSeller(seller, order);
+        SalesOrder order = lockForSeller(seller, orderId);
         requireConfirmed(order);
         requireVersion(request.version(), currentVersion(orderId));
         if (order.getCustomerId() == null) {
@@ -310,6 +315,12 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
             // UC-60 Step 7_Completion conditions fail: the payment stays, nothing is posted.
             code = blocked.getCode();
             message = messages.getMessage(code, blocked.getArgs(), code, VIETNAMESE);
+        } catch (RuntimeException failed) {
+            // A lock timeout, a deadlock or a bug: the money is saved already, so say so instead of an error page,
+            // which would invite the cashier to collect it again. POST /complete retries.
+            log.error("Completing sales order {} after payment {} failed", orderId, paymentId, failed);
+            code = "MSG195";
+            message = messages.getMessage(code, null, code, VIETNAMESE);
         }
         return new SettlementResult(salesOrders.get(seller, orderId), paymentId, completed, code, message);
     }
@@ -413,9 +424,13 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         return payment;
     }
 
-    /** The order, locked until the end of the transaction, unless it is completed or cancelled (MSG164). */
-    private SalesOrder lockUnfinished(long id) {
+    /**
+     * The order, locked until the end of the transaction, for its seller (BR-03), unless it is completed or cancelled
+     * (MSG164). The seller is checked first, so another store learns nothing of the order's state.
+     */
+    private SalesOrder lockForSeller(AuthenticatedUser seller, long id) {
         SalesOrder order = orders.findByIdForUpdate(id).orElseThrow(SalesOrderSettlementServiceImpl::notFound);
+        requireSeller(seller, order);
         if (!order.isUnfinished()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG164");
         }

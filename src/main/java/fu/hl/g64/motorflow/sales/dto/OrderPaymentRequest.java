@@ -15,7 +15,8 @@ import java.util.List;
  * what is still payable; {@code tenderedAmount} is the cash handed over, the difference being change returned
  * (BR-47). A bank transfer needs its {@code transactionReference}, which must not be recorded already (BR-45).
  * {@code verified} is the seller's "Đã nhận đủ số tiền này": an unverified payment does not count until verified
- * (BR-46).
+ * (BR-46). {@code expectedPayable} is the order's {@code money.payableNow} the seller saw: if it changed meanwhile,
+ * for instance because the same payment was already sent, nothing is recorded (MSG194).
  */
 public record OrderPaymentRequest(
         @NotNull(message = "Vui lòng nhập số tiền ghi thu cho đơn.")
@@ -35,6 +36,9 @@ public record OrderPaymentRequest(
 
         @NotNull(message = "Vui lòng cho biết đã nhận đủ số tiền này hay chưa.")
         Boolean verified,
+
+        @NotNull(message = "Vui lòng tải lại đơn để xem số tiền còn phải thu.")
+        Long expectedPayable,
 
         @Size(max = 10, message = "Tối đa 10 tệp.")
         List<@NotNull @Valid AttachmentUpload> evidence) {

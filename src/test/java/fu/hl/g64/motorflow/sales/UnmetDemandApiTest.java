@@ -141,6 +141,7 @@ class UnmetDemandApiTest extends SalesOrderTestData {
         body.put("amount", amount);
         body.put("paymentMethod", "CASH");
         body.put("verified", true);
+        body.put("expectedPayable", moneyNow(order, "payableNow"));
         return mvc.perform(post("/api/v1/sales-orders/" + order + "/payments")
                 .header(HttpHeaders.AUTHORIZATION, managerToken)
                 .contentType(MediaType.APPLICATION_JSON).content(json(body)));

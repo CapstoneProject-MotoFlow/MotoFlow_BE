@@ -90,6 +90,10 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     public TaskAssignmentResponse assign(AuthenticatedUser manager, AssignTaskRequest request) {
         TaskType type = request.taskType();
         long documentId = request.documentId();
+        if (type == TaskType.PICKING) {
+            // UC-56: a cancellation running at the same time finishes first, so no picker is given a cancelled order.
+            salesOrders.findByIdForUpdate(documentId);
+        }
         Document document = requireManagedDocument(manager, type, documentId);
         Optional<WarehouseTask> open = tasks.findOpenForUpdate(type, documentId);
         String blocked = blockedCode(document, open);

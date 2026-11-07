@@ -50,6 +50,12 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.order.actions.canRecordPayment").value(true))
                 .andExpect(jsonPath("$.order.actions.canComplete").value(false));
         assertThat(saleIssues()).isZero();
+        // BR-45: the same cash payment sent again (a double click, a retried request) is not recorded twice.
+        send(managerToken, "/api/v1/sales-orders/" + order + "/payments", Map.of("amount", 100_000,
+                "paymentMethod", "CASH", "verified", true, "expectedPayable", 285_000))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG194"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment WHERE sales_order_id = ?", Integer.class, order))
+                .isEqualTo(1);
 
         clock.advance(Duration.ofMinutes(5));
         pay(managerToken, order, 185_000, null, "BANK_TRANSFER", "FT26101300001", true).andExpect(status().isOk())
@@ -75,6 +81,13 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG164"));
         complete(managerToken, order, 1)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG164"));
+        // Another store learns nothing of the completed order.
+        pay(otherManagerToken, order, 1_000, null, "CASH", null, true)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        complete(otherManagerToken, order, 1)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        cancel(otherManagerToken, order, "x", null)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
 
         // BR-45: one bank transfer is recorded once, on any order.
         long other = confirmedOrder(oil, 1);
@@ -108,6 +121,12 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG184"));
         verify(managerToken, order, first + 100)
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG191"));
+        verify(otherManagerToken, order, first)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        reject(otherManagerToken, order, first, "x")
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        credit(otherManagerToken, order, 1, 285_000, TODAY.plusDays(30).toString(), true)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
 
         reject(managerToken, order, first, "Không thấy tiền về tài khoản").andExpect(status().isOk())
                 .andExpect(jsonPath("$.money.payments[0].status").value("REJECTED"))
@@ -154,6 +173,40 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void aTechnicalFailureWhileCompletingKeepsThePaymentAndSaysSo() throws Exception {
+        long order = confirmedOrder(pad, 2);   // 200,000 đ
+        // The stock cannot be written for a moment, as with a lock timeout or a lost connection.
+        jdbc.execute("CREATE FUNCTION test_refuse_movement() RETURNS trigger AS $$ BEGIN "
+                + "RAISE EXCEPTION 'stock is unavailable'; END $$ LANGUAGE plpgsql");
+        jdbc.execute("CREATE TRIGGER test_refuse_movement BEFORE INSERT ON stock_movement "
+                + "FOR EACH ROW EXECUTE FUNCTION test_refuse_movement()");
+        try {
+            pay(managerToken, order, 200_000, null, "CASH", null, true).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.completed").value(false))
+                    .andExpect(jsonPath("$.paymentId").isNumber())
+                    .andExpect(jsonPath("$.completionBlockedCode").value("MSG195"))
+                    .andExpect(jsonPath("$.completionBlockedMessage").value("Đã ghi khoản tiền nhưng chưa hoàn tất "
+                            + "được đơn bán. Vui lòng bấm Hoàn tất để thử lại."))
+                    .andExpect(jsonPath("$.order.status").value("CONFIRMED"))
+                    .andExpect(jsonPath("$.order.money.netCollected").value(200_000));
+        } finally {
+            jdbc.execute("DROP TRIGGER test_refuse_movement ON stock_movement");
+            jdbc.execute("DROP FUNCTION test_refuse_movement()");
+        }
+        assertThat(saleIssues()).isZero();
+
+        // Completion re-checks the discount threshold in effect now.
+        jdbc.update("UPDATE sales_order SET discount_rate = 5 WHERE id = ?", order);
+        jdbc.update("DELETE FROM pricing_policy WHERE policy_type = 'DISCOUNT_THRESHOLD'");
+        complete(managerToken, order, 1)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG163"));
+        jdbc.update("UPDATE sales_order SET discount_rate = 0 WHERE id = ?", order);
+        complete(managerToken, order, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+        assertThat(saleIssues()).isEqualTo(1);
+    }
+
+    @Test
     void anOverpaymentIsRefundedBeforeTheOrderCompletes() throws Exception {
         long order = confirmedOrder(pad, 2, oil, 1);   // 285,000 đ
         pay(managerToken, order, 200_000, null, "CASH", null, true).andExpect(status().isOk());
@@ -177,7 +230,16 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
         refund(managerToken, order, 250_000, "CASH", true)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG183"));
 
-        refund(managerToken, order, 15_000, "CASH", true).andExpect(status().isOk())
+        Map<String, Object> part = Map.of("amount", 5_000, "paymentMethod", "CASH", "verified", true,
+                "expectedRefundable", 200_000);
+        send(managerToken, "/api/v1/sales-orders/" + order + "/refunds", part).andExpect(status().isOk())
+                .andExpect(jsonPath("$.completed").value(false))
+                .andExpect(jsonPath("$.order.money.overpaidAmount").value(10_000));
+        // BR-45: the same refund sent again is not recorded twice.
+        send(managerToken, "/api/v1/sales-orders/" + order + "/refunds", part)
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG194"));
+
+        refund(managerToken, order, 10_000, "CASH", true).andExpect(status().isOk())
                 .andExpect(jsonPath("$.completed").value(true))
                 .andExpect(jsonPath("$.order.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.order.money.verifiedRefunded").value(15_000))
@@ -317,13 +379,14 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
         body.put("paymentMethod", method);
         body.put("transactionReference", reference);
         body.put("verified", verified);
+        body.put("expectedPayable", moneyNow(order, "payableNow"));
         return send(token, "/api/v1/sales-orders/" + order + "/payments", body);
     }
 
     private ResultActions refund(String token, long order, long amount, String method, boolean verified)
             throws Exception {
-        return send(token, "/api/v1/sales-orders/" + order + "/refunds",
-                Map.of("amount", amount, "paymentMethod", method, "verified", verified));
+        return send(token, "/api/v1/sales-orders/" + order + "/refunds", Map.of("amount", amount,
+                "paymentMethod", method, "verified", verified, "expectedRefundable", moneyNow(order, "refundable")));
     }
 
     private ResultActions verify(String token, long order, long payment) throws Exception {
