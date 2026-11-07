@@ -403,7 +403,124 @@
                   "pm.test('Biến động không có giá vốn', () => b.movements.forEach(m => {",
                   "    pm.expect(m.unitCost).to.eql(null);",
                   "    pm.expect(m.value).to.eql(null);",
-                  "}));"
+                  "}));",
+                  "// Phần đầu tên NCC, viết hoa, để request tìm lô theo NCC dùng; lô đầu kỳ không có NCC thì để trống.",
+                  "pm.collectionVariables.set('lotSupplierQuery', b.supplierName ? b.supplierName.slice(0, 4).toUpperCase() : '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tìm lô theo tên NCC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=100&q={{lotSupplierQuery}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const q = (pm.collectionVariables.get('lotSupplierQuery') || '').toLowerCase();",
+                  "if (!q) {",
+                  "    pm.test.skip('Lô đang xem là lô không có NCC, bỏ qua', () => {});",
+                  "} else {",
+                  "    pm.test('Có lô đang xem', () => pm.expect(b.page.items.map(r => r.lotId))",
+                  "        .to.include(Number(pm.collectionVariables.get('lotId'))));",
+                  "    pm.test('Mọi dòng khớp mã lô, SKU, tên phụ tùng, số lô hãng hoặc NCC', () => b.page.items.forEach(r =>",
+                  "        pm.expect([String(r.lotId), r.sku, r.partName, r.manufacturerLotNo, r.supplierName]",
+                  "            .some(v => v && String(v).toLowerCase().includes(q))).to.be.true));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem lô theo từng kho (byStore)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "pm.test('byStore có kho của Branch Manager', () => pm.expect(b.byStore.map(s => s.storeId)).to.include(bmStore));",
+                  "pm.test('Mọi kho trong byStore còn giữ lô', () => b.byStore.forEach(s =>",
+                  "    pm.expect(s.availableQty + s.otherQty + s.inTransitQty).to.be.above(0)));",
+                  "pm.test('Sắp theo tên kho', () => {",
+                  "    const names = b.byStore.map(s => s.storeName);",
+                  "    pm.expect(names).to.eql([...names].sort());",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM chỉ thấy kho mình trong byStore",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "pm.test('Chỉ có kho của mình', () => {",
+                  "    pm.expect(b.byStore.length).to.be.at.most(1);",
+                  "    b.byStore.forEach(s => pm.expect(s.storeId).to.eql(bmStore));",
+                  "});",
+                  "pm.test('Khớp số còn lại của kho', () => pm.expect(b.byStore",
+                  "    .reduce((t, s) => t + s.availableQty + s.otherQty, 0)).to.eql(b.remainingQty));"
                 ]
               }
             }
