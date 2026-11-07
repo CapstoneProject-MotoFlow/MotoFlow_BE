@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.inventory.repository;
 
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDate;
@@ -37,4 +38,15 @@ public interface LotRepository extends JpaRepository<Lot, Long> {
 
     /** The lots that confirmed GRN lines created; one lot per line at most (goods_receipt_note_line_id is unique). */
     List<Lot> findByGoodsReceiptNoteLineIdIn(Collection<Long> goodsReceiptNoteLineIds);
+
+    /** JOB-03: lots still in stock whose expiry date has passed (BR-76). Depleted lots are left as they are. */
+    @Query("""
+            select l.id from Lot l
+            where l.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.IN_STOCK and l.expiryDate < :today""")
+    List<Long> findIdsToExpire(LocalDate today);
+
+    /** JOB-03: marks the lots expired; their stock stays where it is, it only can no longer be sold or moved. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Lot l set l.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED where l.id in :ids")
+    int markExpired(Collection<Long> ids);
 }

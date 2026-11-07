@@ -37,6 +37,7 @@ import fu.hl.g64.motorflow.inventory.entity.enums.LotStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
+import fu.hl.g64.motorflow.inventory.helper.ExpiryWarning;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.LotStock;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository;
@@ -45,8 +46,6 @@ import fu.hl.g64.motorflow.inventory.repository.StockMovementRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
-import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
-import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
@@ -104,7 +103,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final StoreRepository stores;
     private final SupplierRepository suppliers;
     private final UserAccountRepository users;
-    private final PricingPolicyRepository policies;
+    private final ExpiryWarning expiryWarning;
     private final GoodsReceiptNoteLineRepository receiptLines;
     private final StoreScope storeScope;
     private final Clock clock;
@@ -495,8 +494,7 @@ public class InventoryServiceImpl implements InventoryService {
 
     /** UC-104 setting in effect, or null if the Owner has not set one. */
     private Integer expiryWarningDays() {
-        return policies.findExpiryWarningsInEffect(LocalDateTime.now(clock)).stream()
-                .findFirst().map(PricingPolicy::getExpiryWarningDays).orElse(null);
+        return expiryWarning.daysInEffect();
     }
 
     private static ExpiryState expiryState(Lot lot, LocalDate today, Integer warnDays) {

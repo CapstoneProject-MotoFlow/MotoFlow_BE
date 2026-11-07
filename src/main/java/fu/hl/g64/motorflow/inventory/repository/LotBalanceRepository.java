@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.inventory.repository;
 
+import fu.hl.g64.motorflow.inventory.dto.ExpiringLotRow;
 import fu.hl.g64.motorflow.inventory.entity.LotBalance;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import jakarta.persistence.LockModeType;
@@ -71,4 +72,29 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
             where l.id = b.lotId and l.productId = :productId and b.storeId = :storeId and b.quantity > 0
             order by l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
     List<LotBalance> findHeldByStoreAndProduct(Long storeId, Long productId);
+
+    /** JOB-03: available stock of lots expiring between {@code today} and {@code warnUntil}, by lot and warehouse. */
+    @Query("""
+            select new fu.hl.g64.motorflow.inventory.dto.ExpiringLotRow(b.lotId, b.storeId, s.storeName, p.sku,
+                   l.expiryDate, sum(b.quantity))
+            from LotBalance b join Lot l on l.id = b.lotId join Product p on p.id = l.productId
+                 join Store s on s.id = b.storeId
+            where b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE and b.quantity > 0
+              and l.status <> fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED
+              and l.expiryDate >= :today and l.expiryDate <= :warnUntil
+            group by b.lotId, b.storeId, s.storeName, p.sku, l.expiryDate
+            order by b.storeId, l.expiryDate, b.lotId""")
+    List<ExpiringLotRow> findNearExpiry(LocalDate today, LocalDate warnUntil);
+
+    /** JOB-03: available stock of the given lots, by lot and warehouse. */
+    @Query("""
+            select new fu.hl.g64.motorflow.inventory.dto.ExpiringLotRow(b.lotId, b.storeId, s.storeName, p.sku,
+                   l.expiryDate, sum(b.quantity))
+            from LotBalance b join Lot l on l.id = b.lotId join Product p on p.id = l.productId
+                 join Store s on s.id = b.storeId
+            where b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE and b.quantity > 0
+              and b.lotId in :lotIds
+            group by b.lotId, b.storeId, s.storeName, p.sku, l.expiryDate
+            order by b.storeId, b.lotId""")
+    List<ExpiringLotRow> findAvailableOf(Collection<Long> lotIds);
 }
