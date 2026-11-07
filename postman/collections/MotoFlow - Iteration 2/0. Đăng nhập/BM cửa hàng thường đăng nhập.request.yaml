@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "{{branchBmUsername}}",
+      "password": "{{password}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.collectionVariables.set('branchBmToken', b.accessToken);
+      pm.collectionVariables.set('branchStoreId', b.user.storeId);
+      pm.test('Vai trò BRANCH_MANAGER', () => pm.expect(b.user.role).to.eql('BRANCH_MANAGER'));
+    language: text/javascript
+order: 3000

@@ -117,6 +117,16 @@ public class StockMovement {
         return m;
     }
 
+    /** The source document of this movement (exactly one source column is set). */
+    public SourceRef source() {
+        if (salesOrderId != null) return SourceRef.salesOrder(salesOrderId);
+        if (goodsReceiptNoteId != null) return SourceRef.goodsReceiptNote(goodsReceiptNoteId);
+        if (transferOrderId != null) return SourceRef.transferOrder(transferOrderId);
+        if (discrepancyResolutionEventId != null) return SourceRef.discrepancyResolutionEvent(discrepancyResolutionEventId);
+        if (adjustmentRequestId != null) return SourceRef.adjustmentRequest(adjustmentRequestId);
+        return SourceRef.stockCount(stockCountId);
+    }
+
     /** The document a movement comes from; maps to exactly one of the source columns. */
     public record SourceRef(SourceType type, long id) {
         public enum SourceType {

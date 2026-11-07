@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/products?status=ACTIVE&size=2"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const items = pm.response.json().items;
+      pm.test('Có đủ 2 phụ tùng', () => pm.expect(items.length).to.eql(2));
+      pm.collectionVariables.set('partId', items[0].id);
+      pm.collectionVariables.set('secondPartId', items[1].id);
+    language: text/javascript
+order: 1000

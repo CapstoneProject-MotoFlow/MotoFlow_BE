@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -408,12 +409,13 @@ class AccountAdminApiTest extends IntegrationTest {
         void catalogAndRetailPricePermissionsGoWhenTheUserIsNoLongerABranchManager() throws Exception {
             UserAccount staff = createUser("staff01", Role.STAFF, storeId);
 
-            updatePermissions(staff.getId(), Map.of("role", "BRANCH_MANAGER", "storeId", storeId, "catalogEdit", true))
+            updatePermissions(staff.getId(), Map.of("role", "BRANCH_MANAGER", "storeId", storeId))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.role").value("BRANCH_MANAGER"))
-                    .andExpect(jsonPath("$.permissions", contains("CATALOG_EDIT")));
-            // Granted by the Owner (BR-08).
-            jdbc.update("UPDATE user_account SET can_edit_retail_price = TRUE WHERE id = ?", staff.getId());
+                    .andExpect(jsonPath("$.permissions", hasSize(0)));
+            // Granted by the Owner (BR-01, BR-08).
+            jdbc.update("UPDATE user_account SET can_edit_catalog = TRUE, can_edit_retail_price = TRUE WHERE id = ?",
+                    staff.getId());
 
             updatePermissions(staff.getId(), Map.of("role", "STAFF", "storeId", storeId))
                     .andExpect(status().isOk())
@@ -422,10 +424,27 @@ class AccountAdminApiTest extends IntegrationTest {
             assertThat(jdbc.queryForList("SELECT action || ':' || coalesce(new_data ->> 'permission_code', "
                     + "new_data ->> 'value') FROM audit_log WHERE entity_id = ? AND action <> 'ACCOUNT_CREATED' ORDER BY id",
                     String.class, staff.getId()))
-                    .containsExactly("ROLE_CHANGED:BRANCH_MANAGER", "PERMISSION_GRANTED:CATALOG_EDIT",
+                    .containsExactly("ROLE_CHANGED:BRANCH_MANAGER",
                             "ROLE_CHANGED:STAFF", "PERMISSION_REVOKED:CATALOG_EDIT", "PERMISSION_REVOKED:RETAIL_PRICE_EDIT");
             assertThat(jdbc.queryForObject("SELECT count(*) FROM user_account WHERE can_edit_catalog OR can_edit_retail_price",
                     Long.class)).isZero();
+        }
+
+        @Test
+        void adminMovingABranchManagerKeepsThePermissionsTheOwnerGave() throws Exception {
+            UserAccount manager = createUser("bm01", Role.BRANCH_MANAGER, storeId);
+            jdbc.update("UPDATE user_account SET can_edit_catalog = TRUE, can_edit_retail_price = TRUE WHERE id = ?",
+                    manager.getId());
+            Long otherStore = createStore("CH02", "ACTIVE");
+
+            // An old client may still send catalogEdit; it is ignored (BR-01: only the Owner grants it).
+            updatePermissions(manager.getId(), Map.of("role", "BRANCH_MANAGER", "storeId", otherStore, "catalogEdit", false))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.storeId").value(otherStore))
+                    .andExpect(jsonPath("$.permissions", containsInAnyOrder("CATALOG_EDIT", "RETAIL_PRICE_EDIT")));
+
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_id = ? "
+                    + "AND action IN ('PERMISSION_GRANTED', 'PERMISSION_REVOKED')", Long.class, manager.getId())).isZero();
         }
 
         @Test
@@ -453,7 +472,7 @@ class AccountAdminApiTest extends IntegrationTest {
             assertThatThrownBy(() -> accountService.lockAccount(lockedCaller, admin.getId(), null))
                     .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG69"));
             assertThatThrownBy(() -> permissionService.updatePermissions(lockedCaller, admin.getId(),
-                    new UpdatePermissionsRequest(Role.OWNER, null, false, null, false)))
+                    new UpdatePermissionsRequest(Role.OWNER, null, null, false)))
                     .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG69"));
             assertThat(users.findById(admin.getId()).orElseThrow().getRole()).isEqualTo(Role.ADMIN);
         }
@@ -467,8 +486,6 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG15"));
             updatePermissions(staff.getId(), Map.of("role", "STAFF"))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG16"));
-            updatePermissions(staff.getId(), Map.of("role", "STAFF", "storeId", storeId, "catalogEdit", true))
-                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG17"));
             updatePermissions(staff.getId(), Map.of("role", "STAFF", "storeId", closed))
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG46"));
             updatePermissions(9999L, Map.of("role", "OWNER"))

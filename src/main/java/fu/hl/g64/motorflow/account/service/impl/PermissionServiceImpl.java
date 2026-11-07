@@ -72,9 +72,6 @@ public class PermissionServiceImpl implements PermissionService {
         Store store = storeId == null ? null : stores.findById(storeId)
                 .filter(s -> s.acceptsStaff() || storeId.equals(account.getStoreId()))
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG46"));
-        if (request.catalogEdit() && role != Role.BRANCH_MANAGER) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG17");
-        }
 
         LocalDateTime now = LocalDateTime.now(clock);
         String reason = StringUtils.hasText(request.reason()) ? request.reason().strip() : null;
@@ -97,9 +94,10 @@ public class PermissionServiceImpl implements PermissionService {
             account.changeRoleAndStore(role, storeId, now);
         }
 
-        // BR-05, BR-08: operation permissions belong to Branch Managers only; the retail price one is the Owner's to give.
+        // BR-01, BR-05, BR-08: both permissions are the Owner's to give (UC-37); Admin only keeps them
+        // while the account stays a Branch Manager and removes them when it stops being one.
         boolean manager = role == Role.BRANCH_MANAGER;
-        setPermission(account, PermissionCode.CATALOG_EDIT, manager && request.catalogEdit(), reason, admin, now);
+        setPermission(account, PermissionCode.CATALOG_EDIT, manager && account.isCanEditCatalog(), reason, admin, now);
         setPermission(account, PermissionCode.RETAIL_PRICE_EDIT, manager && account.isCanEditRetailPrice(), reason, admin, now);
         return AccountResponse.from(account, store == null ? null : store.getStoreName(), now);
     }
@@ -117,7 +115,7 @@ public class PermissionServiceImpl implements PermissionService {
         return entries.stream().map(entry -> PermissionHistoryResponse.from(entry, names.get(entry.getActorId()))).toList();
     }
 
-    // UC-38
+    // UC-37
     @Transactional(readOnly = true)
     @Override
     public List<BranchManagerResponse> listBranchManagers(Long storeId) {
@@ -134,7 +132,7 @@ public class PermissionServiceImpl implements PermissionService {
                 .toList();
     }
 
-    // UC-38
+    // UC-37
     @Transactional
     @Override
     public BranchManagerResponse updateManagerPermissions(AuthenticatedUser owner, long managerId,

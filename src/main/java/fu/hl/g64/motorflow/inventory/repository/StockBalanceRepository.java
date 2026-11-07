@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.inventory.repository;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -12,7 +13,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-public interface StockBalanceRepository extends JpaRepository<StockBalance, Long> {
+public interface StockBalanceRepository extends JpaRepository<StockBalance, Long>, JpaSpecificationExecutor<StockBalance> {
 
     /** [storeId, number of products with on-hand stock]. Goods in transit belong to no warehouse yet. */
     @Query("""
@@ -69,4 +70,15 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
             select coalesce(sum(b.availableQty + b.awaitingInspectionQty + b.inTransitQty), 0)
             from StockBalance b where b.productId = :productId""")
     long sumValuedQuantity(Long productId);
+
+    Optional<StockBalance> findByStoreIdAndProductId(Long storeId, Long productId);
+
+    /** UC-47: the storage areas in use in one warehouse, or in every warehouse when {@code storeId} is null. */
+    @Query("""
+            select distinct b.storageArea from StockBalance b
+            where b.storageArea is not null and (:storeId is null or b.storeId = :storeId)
+            order by b.storageArea""")
+    List<String> findStorageAreas(Long storeId);
+
+    List<StockBalance> findByProductIdIn(Collection<Long> productIds);
 }
