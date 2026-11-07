@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
@@ -38,4 +39,16 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
               and p.status <> fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus.REJECTED
             order by p.id""")
     List<Payment> findByTransactionReference(String reference);
+
+    /** The payments and refunds of one order, oldest first (UC-60 step 2, UC-56 step 2). */
+    List<Payment> findBySalesOrderIdOrderByRecordedAtAscIdAsc(Long salesOrderId);
+
+    /** [payment id, sum of applied corrections of its amount] of the payments that have any (BR-49). */
+    @Query("""
+            select l.paymentId, sum(l.amountChange) from AdjustmentAmountLine l
+            join AdjustmentRequest q on q.id = l.adjustmentRequestId
+            where l.paymentId in :paymentIds
+              and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED
+            group by l.paymentId""")
+    List<Object[]> sumCorrections(Collection<Long> paymentIds);
 }

@@ -10,19 +10,28 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
+import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
+import fu.hl.g64.motorflow.operation.service.AttachmentService;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.partner.entity.Customer;
+import fu.hl.g64.motorflow.partner.entity.enums.CreditStatus;
 import fu.hl.g64.motorflow.partner.repository.CustomerRepository;
+import fu.hl.g64.motorflow.receivable.entity.Payment;
+import fu.hl.g64.motorflow.receivable.entity.Receivable;
+import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
+import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.NextAction;
 import fu.hl.g64.motorflow.sales.dto.PickingRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail.Actions;
+import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail.Closing;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail.HistoryEntry;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail.Picker;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderLineRequest;
@@ -37,6 +46,7 @@ import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
+import fu.hl.g64.motorflow.sales.helper.OrderCollections;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Priced;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
@@ -103,6 +113,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final NotificationService notifications;
     private final OrderPricing pricing;
     private final PickingGuide guide;
+    private final OrderCollections collections;
+    private final ReceivableRepository receivables;
+    private final AttachmentService attachments;
     private final Clock clock;
 
     // UC-52
@@ -768,9 +781,19 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, PickingGuide.Part> stock = unfinished
                 ? guide.parts(order.getStoreId(), productIds, now.toLocalDate()) : Map.of();
         Map<Long, String> reasons = shortReasons(steps, lines);
+        OrderCollections.Money collected = staff ? null : collections.of(id);
         Set<Long> people = new HashSet<>();
         people.add(order.getCreatedBy());
         people.add(order.getConfirmedBy());
+        people.add(order.getCreditDecidedBy());
+        people.add(order.getCompletedBy());
+        people.add(order.getCancelledBy());
+        if (collected != null) {
+            collected.rows().forEach(row -> {
+                people.add(row.getRecordedBy());
+                people.add(row.getVerifiedBy());
+            });
+        }
         steps.forEach(step -> people.add(step.getActorId()));
         assignments.forEach(task -> {
             people.add(task.getAssignedTo());
@@ -809,14 +832,27 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         boolean seller = isSeller(user, order);
         boolean holdsTask = holder.filter(task -> task.getAssignedTo() == user.id()).isPresent();
         WarehouseTaskStatus taskStatus = holder.map(WarehouseTask::getStatus).orElse(null);
+        SalesOrderDetail.Money money = collected == null ? null : money(order, totals.total(), collected, names);
+        boolean confirmedNow = order.getStatus() == SalesOrderStatus.CONFIRMED;
+        boolean settled = money != null && money.unverifiedCount() == 0;
+        boolean creditAllowed = order.getCustomerId() != null && customers.findById(order.getCustomerId())
+                .filter(customer -> customer.getCreditStatus() == CreditStatus.ELIGIBLE).isPresent();
         Actions actions = new Actions(seller && unfinished,
                 user.role() == Role.BRANCH_MANAGER && seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
                 holdsTask && ((order.getStatus() == SalesOrderStatus.AWAITING_PICKING
                         && taskStatus == WarehouseTaskStatus.ASSIGNED)
                         || (order.getStatus() == SalesOrderStatus.PICKED
                         && taskStatus == WarehouseTaskStatus.RESULT_SUBMITTED)),
-                seller && !holdsTask && (order.getStatus() == SalesOrderStatus.PICKED
-                        || order.getStatus() == SalesOrderStatus.CONFIRMED));
+                seller && !holdsTask && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
+                seller && confirmedNow && money.payableNow() > 0,
+                seller && unfinished && money.refundable() > 0,
+                seller && confirmedNow && settled && creditAllowed && money.remainingPayable() > 0
+                        && money.overpaidAmount() == 0,
+                seller && confirmedNow && settled && money.remainingPayable() == 0 && money.overpaidAmount() == 0,
+                seller && unfinished);
+        Closing closing = staff ? null : new Closing(order.getCompletionType(), order.getCompletedBy(),
+                names.get(order.getCompletedBy()), order.getCompletedAt(), order.getCancelledBy(),
+                names.get(order.getCancelledBy()), order.getCancelledAt(), order.getCancellationReason());
 
         List<HistoryEntry> history = staff ? List.of() : history(steps, assignments, names);
         String storeName = stores.findById(order.getStoreId()).map(Store::getStoreName).orElse(null);
@@ -828,8 +864,40 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 order.getConfirmedBy(), names.get(order.getConfirmedBy()), order.getConfirmedAt(),
                 delivered ? "DELIVERED" : "REQUESTED", staff ? null : totals.referenceTotal(),
                 staff ? null : totals.discountAmount(), staff ? null : totals.total(),
-                staff ? null : totals.invoiceDiscountRate(), staff ? null : pricing.discountThreshold(now), rows,
-                actions, history);
+                staff ? null : totals.invoiceDiscountRate(), staff ? null : pricing.discountThreshold(now), money,
+                closing, rows, actions, history);
+    }
+
+    /** Screen 8.2.2: what the order holds of the customer's money, its payments and refunds, credit and receivable. */
+    private SalesOrderDetail.Money money(SalesOrder order, long total, OrderCollections.Money held,
+                                         Map<Long, String> names) {
+        boolean unfinished = order.isUnfinished();
+        long net = held.netCollected();
+        Map<Long, List<AttachmentResponse>> evidence = held.rows().isEmpty()
+                ? Map.of() : attachments.list(OwnerType.PAYMENT, held.rows().stream().map(Payment::getId).toList());
+        List<SalesOrderDetail.PaymentRow> rows = held.rows().stream().map(row -> {
+            Long change = row.getPaymentType() == PaymentType.ORDER_PAYMENT && row.getTenderedAmount() != null
+                    ? row.getTenderedAmount() - row.getAmount() : null;
+            return new SalesOrderDetail.PaymentRow(row.getId(), row.getPaymentType(), row.getPaymentMethod(),
+                    held.amountOf(row), row.getTenderedAmount(), change, row.getTransactionReference(),
+                    row.getStatus(), row.getRecordedBy(), names.get(row.getRecordedBy()), row.getRecordedAt(),
+                    row.getVerifiedBy(), names.get(row.getVerifiedBy()), row.getVerifiedAt(),
+                    row.getRejectionReason(), evidence.getOrDefault(row.getId(), List.of()));
+        }).toList();
+        SalesOrderDetail.Credit credit = order.getCreditDecision() == null ? null
+                : new SalesOrderDetail.Credit(order.getCreditDecision(), order.getApprovedCreditAmount(),
+                order.getCreditDecidedBy(), names.get(order.getCreditDecidedBy()), order.getCreditDecidedAt());
+        SalesOrderDetail.Debt debt = receivables.findWithRemainingBySalesOrderId(order.getId()).stream()
+                .findFirst().map(found -> {
+                    Receivable receivable = (Receivable) found[0];
+                    return new SalesOrderDetail.Debt(receivable.getId(), receivable.getOriginalAmount(),
+                            ((Number) found[1]).longValue(), receivable.getDueDate(), receivable.getSettledAt());
+                }).orElse(null);
+        boolean confirmed = order.getStatus() == SalesOrderStatus.CONFIRMED;
+        return new SalesOrderDetail.Money(total, held.verifiedPaid(), held.verifiedRefunded(), net,
+                unfinished ? Math.max(0, total - net) : 0, unfinished ? Math.max(0, net - total) : 0,
+                unfinished ? held.refundable() : 0, confirmed ? held.payable(total) : 0, held.unverifiedCount(),
+                rows, credit, debt);
     }
 
     /** The picker's reasons for the lines still short since the last picking result. */
