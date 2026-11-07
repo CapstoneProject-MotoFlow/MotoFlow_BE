@@ -29,4 +29,12 @@ public class PaymentAllocation {
 
     @Column(name = "allocated_amount", nullable = false)
     private long allocatedAmount;
+
+    public static PaymentAllocation of(long paymentId, long receivableId, long amount) {
+        PaymentAllocation allocation = new PaymentAllocation();
+        allocation.paymentId = paymentId;
+        allocation.receivableId = receivableId;
+        allocation.allocatedAmount = amount;
+        return allocation;
+    }
 }

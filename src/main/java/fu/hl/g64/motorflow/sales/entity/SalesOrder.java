@@ -102,4 +102,149 @@ public class SalesOrder {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /**
+     * UC-53: a new order of the store, waiting for picking (version 1). {@code customerId} is null for a walk-in sale;
+     * the snapshot keeps what the customer was called when the order was taken.
+     */
+    public static SalesOrder create(long storeId, Customer customer, PriceType priceType, BigDecimal discountRate,
+                                    long createdBy, LocalDateTime now) {
+        SalesOrder order = new SalesOrder();
+        order.storeId = storeId;
+        order.status = SalesOrderStatus.AWAITING_PICKING;
+        order.setCustomer(customer);
+        order.priceType = priceType;
+        order.discountRate = discountRate;
+        order.createdBy = createdBy;
+        order.createdAt = now;
+        order.updatedAt = now;
+        return order;
+    }
+
+    /**
+     * UC-55: the order moves to a new version with this customer and pricing (BR-36). Its price and credit decision
+     * must be confirmed again, so the confirmation and any credit decision are dropped.
+     */
+    public void revise(Customer customer, PriceType priceType, BigDecimal discountRate, LocalDateTime now) {
+        requireUnfinished();
+        setCustomer(customer);
+        this.priceType = priceType;
+        this.discountRate = discountRate;
+        dropConfirmation(now);
+    }
+
+    /** The parts or requested quantities changed: the goods must be picked again for the new content (UC-58). */
+    public void backToPicking(LocalDateTime now) {
+        requireUnfinished();
+        status = SalesOrderStatus.AWAITING_PICKING;
+        dropConfirmation(now);
+    }
+
+    /** UC-57: the picker sent the picked quantities; the order waits for the seller's confirmation. */
+    public void picked(LocalDateTime now) {
+        if (status != SalesOrderStatus.AWAITING_PICKING && status != SalesOrderStatus.PICKED) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not waiting for picking");
+        }
+        status = SalesOrderStatus.PICKED;
+        updatedAt = now;
+    }
+
+    /** UC-58: delivered quantities and price are agreed for this version; the order waits for payment or credit. */
+    public void confirm(long confirmedBy, LocalDateTime now) {
+        if (status != SalesOrderStatus.PICKED && status != SalesOrderStatus.CONFIRMED) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not picked");
+        }
+        status = SalesOrderStatus.CONFIRMED;
+        this.confirmedBy = confirmedBy;
+        confirmedAt = now;
+        creditDecision = null;
+        approvedCreditAmount = null;
+        creditDecidedBy = null;
+        creditDecidedAt = null;
+        updatedAt = now;
+    }
+
+    /**
+     * UC-61 step 4: the seller allows the unpaid balance of the confirmed version on credit (BR-41, BR-42). A later
+     * change of the order drops the decision with the confirmation (BR-36).
+     */
+    public void approveCredit(long amount, long decidedBy, LocalDateTime now) {
+        requireConfirmed();
+        creditDecision = CreditDecision.APPROVED;
+        approvedCreditAmount = amount;
+        creditDecidedBy = decidedBy;
+        creditDecidedAt = now;
+        updatedAt = now;
+    }
+
+    /**
+     * UC-60 step 8, UC-61 step 8: the confirmed version is handed over, paid in full or on the approved credit
+     * (BR-38, BR-51). A completed order is never reopened (BR-35).
+     */
+    public void complete(CompletionType type, long completedBy, LocalDateTime now) {
+        requireConfirmed();
+        if (type == CompletionType.CREDIT && creditDecision != CreditDecision.APPROVED) {
+            throw new IllegalStateException("order " + id + " has no credit approved");
+        }
+        status = SalesOrderStatus.COMPLETED;
+        completionType = type;
+        this.completedBy = completedBy;
+        completedAt = now;
+        updatedAt = now;
+    }
+
+    /** UC-56 step 6: the unfinished order is cancelled with its reason; its history stays (BR-39). */
+    public void cancel(long cancelledBy, String reason, LocalDateTime now) {
+        requireUnfinished();
+        status = SalesOrderStatus.CANCELLED;
+        this.cancelledBy = cancelledBy;
+        cancelledAt = now;
+        cancellationReason = reason;
+        updatedAt = now;
+    }
+
+    /** Neither completed nor cancelled. */
+    public boolean isUnfinished() {
+        return status != SalesOrderStatus.COMPLETED && status != SalesOrderStatus.CANCELLED;
+    }
+
+    /** A confirmed order whose content changes waits for confirmation again; earlier stages stay where they are. */
+    private void dropConfirmation(LocalDateTime now) {
+        if (status == SalesOrderStatus.CONFIRMED) {
+            status = SalesOrderStatus.PICKED;
+        }
+        confirmedBy = null;
+        confirmedAt = null;
+        creditDecision = null;
+        approvedCreditAmount = null;
+        creditDecidedBy = null;
+        creditDecidedAt = null;
+        updatedAt = now;
+    }
+
+    private void setCustomer(Customer customer) {
+        customerId = customer.id();
+        customerNameSnapshot = customer.name();
+        customerPhoneSnapshot = customer.phone();
+        customerAddressSnapshot = customer.address();
+    }
+
+    private void requireUnfinished() {
+        if (!isUnfinished()) {
+            throw new IllegalStateException("order " + id + " is " + status);
+        }
+    }
+
+    private void requireConfirmed() {
+        if (status != SalesOrderStatus.CONFIRMED) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not confirmed");
+        }
+    }
+
+    /**
+     * Who the order is for: a customer profile ({@code id} set) or a walk-in sale, whose name and phone may be
+     * recorded or left empty.
+     */
+    public record Customer(Long id, String name, String phone, String address) {
+    }
 }
