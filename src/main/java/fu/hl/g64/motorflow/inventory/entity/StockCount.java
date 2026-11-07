@@ -92,4 +92,93 @@ public class StockCount {
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
+
+    /** UC-91: a year-end or cycle count waiting for its counter; {@code inventoryPeriodId} is the period of the count date. */
+    public static StockCount create(Long storeId, Long inventoryPeriodId, Long stockCountRequestId, CountType countType,
+                                    LocalDate countDate, ScopeType scopeType, String scopeNote, Long createdBy,
+                                    LocalDateTime now) {
+        StockCount count = new StockCount();
+        count.storeId = storeId;
+        count.inventoryPeriodId = inventoryPeriodId;
+        count.stockCountRequestId = stockCountRequestId;
+        count.countType = countType;
+        count.countDate = countDate;
+        count.scopeType = scopeType;
+        count.scopeNote = scopeNote;
+        count.status = StockCountStatus.DRAFT;
+        count.createdBy = createdBy;
+        count.createdAt = now;
+        return count;
+    }
+
+    /** Draft, counting or waiting for the Owner: the warehouse cannot start another count (SC-1). */
+    public boolean isUnfinished() {
+        return status == StockCountStatus.DRAFT || status == StockCountStatus.COUNTING
+                || status == StockCountStatus.AWAITING_APPROVAL;
+    }
+
+    /**
+     * Book quantities still have to be taken: the count was never started, or lines came back for a recount
+     * (UC-93, BR-79). {@link #startCounting} clears it.
+     */
+    public boolean needsBookQuantities() {
+        return countingStartedAt == null;
+    }
+
+    /** UC-93: book quantities were just taken; the counter records from now on. */
+    public void startCounting(LocalDateTime now) {
+        requireStatus(StockCountStatus.DRAFT, StockCountStatus.COUNTING);
+        status = StockCountStatus.COUNTING;
+        countingStartedAt = now;
+    }
+
+    /**
+     * UC-94: lines go back to the counter, from COUNTING (Branch Manager) or AWAITING_APPROVAL (Owner). The count waits
+     * for new book quantities of those lines; {@code confirmedAt} is kept, so lines can no longer be removed (SC-14).
+     */
+    public void returnForRecount() {
+        requireStatus(StockCountStatus.COUNTING, StockCountStatus.AWAITING_APPROVAL);
+        status = StockCountStatus.COUNTING;
+        countingStartedAt = null;
+    }
+
+    /** UC-94: the Branch Manager confirmed the result; with a difference the Owner approves it, otherwise it is done. */
+    public void confirm(Long confirmedBy, boolean hasDifference, LocalDateTime now) {
+        requireStatus(StockCountStatus.COUNTING);
+        this.confirmedBy = confirmedBy;
+        confirmedAt = now;
+        status = hasDifference ? StockCountStatus.AWAITING_APPROVAL : StockCountStatus.COMPLETED;
+    }
+
+    /** Sent to the Owner at least once; an Owner recount keeps it so (SC-14). */
+    public boolean wasConfirmed() {
+        return confirmedAt != null;
+    }
+
+    /** UC-95: the Owner approved the differences, which are posted in the same transaction. */
+    public void approve(Long approvedBy, String decisionReason, LocalDateTime now) {
+        requireStatus(StockCountStatus.AWAITING_APPROVAL);
+        this.approvedBy = approvedBy;
+        this.decisionReason = decisionReason;
+        approvedAt = now;
+        status = StockCountStatus.COMPLETED;
+    }
+
+    /** UC-94: the Branch Manager cancelled the count before it went to the Owner. */
+    public void cancel(Long cancelledBy, String reason, LocalDateTime now) {
+        requireStatus(StockCountStatus.DRAFT, StockCountStatus.COUNTING);
+        this.cancelledBy = cancelledBy;
+        cancellationReason = reason;
+        cancelledAt = now;
+        status = StockCountStatus.CANCELLED;
+    }
+
+    private void requireStatus(StockCountStatus... allowed) {
+        for (StockCountStatus s : allowed) {
+            if (status == s) {
+                return;
+            }
+        }
+        throw new IllegalStateException("stock count " + id + " is " + status);
+    }
 }

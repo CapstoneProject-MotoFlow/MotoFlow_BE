@@ -18,7 +18,7 @@ import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
-import fu.hl.g64.motorflow.inventory.repository.InventoryPeriodRepository;
+import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -35,7 +35,6 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
@@ -56,7 +55,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private final LotBalanceRepository lotBalances;
     private final StockBalanceRepository stockBalances;
     private final StockMovementRepository movements;
-    private final InventoryPeriodRepository periods;
+    private final InventoryPeriods inventoryPeriods;
     private final Clock clock;
     private final EntityManager em;
 
@@ -64,7 +63,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Override
     public Lot receiveNewLot(NewLotPosting p) {
         LocalDateTime now = LocalDateTime.now(clock);
-        InventoryPeriod period = openPeriod(now.toLocalDate());
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
         // Lock order everywhere: stock_balance, then product, then lot_balance.
         StockBalance balance = lockBalance(p.storeId(), p.productId(), now);
         Product product = fresh(products.findByIdForUpdate(p.productId())
@@ -97,7 +96,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Override
     public List<LotQuantity> takeOut(OutPosting p) {
         LocalDateTime now = LocalDateTime.now(clock);
-        InventoryPeriod period = openPeriod(now.toLocalDate());
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
         StockBalance balance = lockBalance(p.storeId(), p.productId(), now);
         Product product = product(p.productId());
         List<Pick> picks = pick(p.storeId(), product, p.fromStatus(), p.quantity(), p.lots(), p.movementType(),
@@ -116,7 +115,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Override
     public List<LotQuantity> move(MovePosting p) {
         LocalDateTime now = LocalDateTime.now(clock);
-        InventoryPeriod period = openPeriod(now.toLocalDate());
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
         boolean sameStore = p.fromStoreId().equals(p.toStoreId());
         if (sameStore && p.fromStatus() == p.toStatus()) {
             throw new IllegalArgumentException("a move must change the status or the warehouse");
@@ -155,7 +154,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             return;
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        InventoryPeriod period = openPeriod(now.toLocalDate());
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
         Lot lot = lots.findById(p.lotId()).orElseThrow(() -> new IllegalArgumentException("unknown lot " + p.lotId()));
         StockBalance balance = lockBalance(p.storeId(), lot.getProductId(), now);
         Product product = product(lot.getProductId());
@@ -174,7 +173,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Override
     public void receiveIntoLot(LotReceiptPosting p) {
         LocalDateTime now = LocalDateTime.now(clock);
-        InventoryPeriod period = openPeriod(now.toLocalDate());
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
         Lot lot = lots.findById(p.lotId()).orElseThrow(() -> new IllegalArgumentException("unknown lot " + p.lotId()));
         if (lot.getSourceType() != LotSourceType.RECEIPT) {
             throw new IllegalArgumentException("lot " + lot.getId() + " did not come from a supplier receipt");
@@ -300,16 +299,6 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private void refreshDepletion(Lot lot) {
         lotBalances.flush();
         lot.refreshDepletion((int) lotBalances.sumQuantityOfLot(lot.getId()));
-    }
-
-    private InventoryPeriod openPeriod(LocalDate today) {
-        LocalDate month = today.withDayOfMonth(1);
-        periods.openIfMissing(month, month.plusMonths(1).minusDays(1));
-        InventoryPeriod period = periods.findByPeriodMonth(month).orElseThrow();
-        if (!period.isOpen()) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG85", month.format(DateTimeFormatter.ofPattern("MM/yyyy")));
-        }
-        return period;
     }
 
     private Product product(Long productId) {
