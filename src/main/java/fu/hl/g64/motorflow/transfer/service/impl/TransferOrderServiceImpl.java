@@ -14,14 +14,27 @@ import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
+import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
+import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
+import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
+import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
+import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
+import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
+import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
+import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
+import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
+import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
+import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse.Person;
@@ -32,6 +45,7 @@ import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequestLine;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrderLine;
 import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
+import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.helper.RequestedParts;
 import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepository;
@@ -47,10 +61,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Stream;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -76,6 +94,10 @@ public class TransferOrderServiceImpl implements TransferOrderService {
     private final UserAccountRepository users;
     private final AuditLogRepository auditLog;
     private final NotificationService notifications;
+    private final InventoryPostingService posting;
+    private final WarehouseTaskRepository tasks;
+    private final WarehouseTaskService warehouseTasks;
+    private final PickingGuide guide;
     private final Clock clock;
 
     // UC-71
@@ -148,6 +170,120 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         return detail(user, order);
+    }
+
+    // UC-74
+    @Transactional(readOnly = true)
+    @Override
+    public DispatchPreviewResponse dispatchPreview(AuthenticatedUser user, long id) {
+        TransferOrder order = orders.findById(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+        boolean sourceManager = isManagerOf(user, order.getSourceStoreId());
+        if (!sourceManager && !storeScope.seesEveryStore(user)) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        List<TransferOrderLine> orderLines = lines.findByTransferOrderIdOrderByProductId(id);
+        Map<Long, Product> parts = products.findAllById(orderLines.stream().map(TransferOrderLine::getProductId)
+                .toList()).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        boolean open = order.getStatus() == TransferOrderStatus.AWAITING_DISPATCH;
+        Map<Long, PickingGuide.Part> stock = open
+                ? guide.parts(order.getSourceStoreId(), parts.keySet(), LocalDate.now(clock)) : Map.of();
+        Optional<WarehouseTask> preparer = tasks.findHistory(TaskType.DISPATCH_PREPARATION, id).stream()
+                .filter(task -> task.getStatus() != WarehouseTaskStatus.CANCELLED).findFirst();
+        boolean ready = open && preparer.filter(task -> task.getStatus() == WarehouseTaskStatus.RESULT_SUBMITTED)
+                .isPresent();
+        boolean canConfirm = ready && sourceManager && preparer.get().getAssignedTo() != user.id();
+        return new DispatchPreviewResponse(id, order.getStatus(), preparer.map(WarehouseTask::getAssignedTo).orElse(null),
+                ready, canConfirm, orderLines.stream().map(line -> {
+                    Product part = parts.get(line.getProductId());
+                    PickingGuide.Part held = stock.get(line.getProductId());
+                    int needed = line.getPreparedQty() != null ? line.getPreparedQty() : line.getPlannedQty();
+                    return new DispatchPreviewResponse.Line(part.getId(), part.getSku(), part.getPartName(),
+                            part.getBaseUnit(), line.getPlannedQty(), line.getPreparedQty(),
+                            line.getPreparedQty() == null ? null : line.getPlannedQty() - line.getPreparedQty(),
+                            held == null ? 0 : held.sellableQty(), held == null ? List.of() : held.pickFirst(needed));
+                }).toList());
+    }
+
+    // UC-74
+    @Transactional
+    @Override
+    public TransferOrderDetailResponse dispatch(AuthenticatedUser user, long id, TransferDispatchRequest body) {
+        TransferOrder order = orders.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+        if (!isManagerOf(user, order.getSourceStoreId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        if (order.getDispatchedAt() != null) {
+            return detail(user, order);
+        }
+        boolean submitted = tasks.findOpenForUpdate(TaskType.DISPATCH_PREPARATION, id)
+                .filter(task -> task.getStatus() == WarehouseTaskStatus.RESULT_SUBMITTED).isPresent();
+        if (!submitted) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG207");
+        }
+        warehouseTasks.confirmResult(user, TaskType.DISPATCH_PREPARATION, id);
+
+        List<TransferOrderLine> orderLines = lines.findByTransferOrderIdOrderByProductId(id);
+        Map<Long, Product> parts = products.findAllById(orderLines.stream().map(TransferOrderLine::getProductId)
+                .toList()).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<Long, Integer> sent = sentQuantities(body, orderLines, parts);
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<Map<String, Object>> recorded = new ArrayList<>();
+        for (TransferOrderLine line : orderLines) {
+            int quantity = sent.get(line.getProductId());
+            if (quantity > 0) {
+                posting.move(new MovePosting(line.getProductId(), order.getSourceStoreId(), StockStatus.AVAILABLE,
+                        order.getDestStoreId(), StockStatus.IN_TRANSIT, quantity, null, MovementType.TRANSFER_DISPATCH,
+                        SourceRef.transferOrder(id), user.id(), null));
+            }
+            line.recordDispatched(quantity);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("product_id", line.getProductId());
+            row.put("prepared_qty", line.getPreparedQty());
+            row.put("dispatched_qty", quantity);
+            recorded.add(row);
+        }
+        order.dispatch(user.id(), now);
+        auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_DISPATCHED", user.id(), null, null,
+                Map.of("lines", recorded), now));
+        String sourceName = stores.findById(order.getSourceStoreId()).orElseThrow().getStoreName();
+        notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_DISPATCHED",
+                "Phiếu chuyển kho #%d đã xuất từ %s, chờ nhận hàng".formatted(id, sourceName), ENTITY, id);
+        return detail(user, order);
+    }
+
+    /** UC-74 step 3: one line per part of the order, each equal to what was prepared, not all zero. */
+    private static Map<Long, Integer> sentQuantities(TransferDispatchRequest body, List<TransferOrderLine> orderLines,
+                                                     Map<Long, Product> parts) {
+        Map<Long, TransferOrderLine> byProduct = orderLines.stream()
+                .collect(Collectors.toMap(TransferOrderLine::getProductId, Function.identity()));
+        Map<Long, Integer> sent = new LinkedHashMap<>();
+        for (int i = 0; i < body.lines().size(); i++) {
+            TransferDispatchRequest.Line line = body.lines().get(i);
+            if (!byProduct.containsKey(line.productId()) || sent.putIfAbsent(line.productId(), line.dispatchedQty()) != null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG166", i + 1);
+            }
+        }
+        String missing = orderLines.stream().filter(line -> !sent.containsKey(line.getProductId()))
+                .map(line -> parts.get(line.getProductId()).getSku()).collect(Collectors.joining(", "));
+        if (!missing.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG167", missing);
+        }
+        for (TransferOrderLine line : orderLines) {
+            if (!sent.get(line.getProductId()).equals(line.getPreparedQty())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG208", parts.get(line.getProductId()).getSku(),
+                        line.getPreparedQty());
+            }
+        }
+        if (sent.values().stream().allMatch(quantity -> quantity == 0)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG209");
+        }
+        return sent;
+    }
+
+    private static boolean isManagerOf(AuthenticatedUser user, long storeId) {
+        return user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), storeId);
     }
 
     private TransferOrderDetailResponse detail(AuthenticatedUser user, TransferOrder order) {

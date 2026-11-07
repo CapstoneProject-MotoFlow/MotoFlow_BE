@@ -75,4 +75,14 @@ public class TransferOrder {
         order.createdAt = now;
         return order;
     }
+
+    /** UC-74: the goods left the source and are on the road (BR-58). */
+    public void dispatch(Long by, LocalDateTime now) {
+        if (status != TransferOrderStatus.AWAITING_DISPATCH) {
+            throw new IllegalStateException("transfer order " + id + " is " + status);
+        }
+        status = TransferOrderStatus.IN_TRANSIT;
+        dispatchedBy = by;
+        dispatchedAt = now;
+    }
 }

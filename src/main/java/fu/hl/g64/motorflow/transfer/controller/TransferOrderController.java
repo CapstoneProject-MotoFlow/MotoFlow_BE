@@ -2,6 +2,8 @@ package fu.hl.g64.motorflow.transfer.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
+import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderRowResponse;
@@ -70,5 +72,23 @@ public class TransferOrderController {
     @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER', 'STAFF')")
     public TransferOrderDetailResponse detail(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id) {
         return service.detail(user, id);
+    }
+
+    @Operation(summary = "What the dispatch would post (UC-74): prepared quantities and the lots it would take, FEFO "
+            + "then FIFO, skipping expired lots. Owner, central warehouse Branch Manager, source Branch Manager")
+    @GetMapping("/{id}/dispatch-preview")
+    @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
+    public DispatchPreviewResponse dispatchPreview(@AuthenticationPrincipal AuthenticatedUser user,
+                                                   @PathVariable long id) {
+        return service.dispatchPreview(user, id);
+    }
+
+    @Operation(summary = "Confirm the dispatch (UC-74). Only a source Branch Manager who did not prepare the goods; "
+            + "every line, each equal to its prepared quantity. Sent again after it succeeded, returns the order")
+    @PostMapping("/{id}/dispatch")
+    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    public TransferOrderDetailResponse dispatch(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id,
+                                                @Valid @RequestBody TransferDispatchRequest request) {
+        return service.dispatch(user, id, request);
     }
 }

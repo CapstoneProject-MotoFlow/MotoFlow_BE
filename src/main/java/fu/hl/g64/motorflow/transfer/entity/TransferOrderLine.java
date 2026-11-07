@@ -52,6 +52,14 @@ public class TransferOrderLine {
         return line;
     }
 
+    /** UC-74: confirmed once and never changed afterwards (BR-58, BR-68). */
+    public void recordDispatched(int quantity) {
+        if (dispatchedQty != null) {
+            throw new IllegalStateException("line " + id + " was already dispatched");
+        }
+        dispatchedQty = quantity;
+    }
+
     /** UC-57: what the person preparing the dispatch actually took out; never more than planned. */
     public void recordPrepared(int preparedQty) {
         if (preparedQty < 0 || preparedQty > plannedQty) {
