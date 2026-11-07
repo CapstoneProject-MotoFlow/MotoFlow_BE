@@ -1170,7 +1170,7 @@
           ]
         },
         {
-          "name": "Cấp quyền danh mục cho Branch Manager chi nhánh",
+          "name": "Admin không cấp được quyền danh mục",
           "request": {
             "method": "PUT",
             "header": [
@@ -1207,51 +1207,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Có quyền CATALOG_EDIT', () => pm.expect(pm.response.json().permissions).to.include('CATALOG_EDIT'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Không cấp quyền danh mục cho Staff",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/accounts/{{staffId}}/permissions",
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{adminToken}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"role\": \"STAFF\",\n  \"storeId\": {{branchStoreId}},\n  \"catalogEdit\": true\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
-                  "pm.test('Mã lỗi MSG17', () => pm.expect(pm.response.json().code).to.eql('MSG17'));"
+                  "pm.test('catalogEdit bị bỏ qua, chưa có CATALOG_EDIT', () => pm.expect(pm.response.json().permissions).to.not.include('CATALOG_EDIT'));"
                 ]
               }
             }
@@ -1280,7 +1236,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"role\": \"ADMIN\",\n  \"catalogEdit\": false\n}",
+              "raw": "{\n  \"role\": \"ADMIN\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1831,6 +1787,50 @@
                 "exec": [
                   "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "pm.test('Hết mật khẩu tạm', () => pm.expect(pm.response.json().mustChangePassword).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner cấp quyền danh mục cho Branch Manager chi nhánh",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/branch-managers/{{bmId}}/permissions",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"catalogEdit\": true,\n  \"retailPriceEdit\": false,\n  \"reason\": \"Phụ trách danh mục\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Có quyền danh mục', () => pm.expect(pm.response.json().catalogEdit).to.eql(true));"
                 ]
               }
             }

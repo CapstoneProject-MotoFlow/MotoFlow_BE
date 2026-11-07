@@ -1,0 +1,20 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=100"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      const bmStore = Number(pm.collectionVariables.get('bmStoreId'));
+      const inBmStore = b.page.items.find(row => row.storeId === bmStore);
+      pm.test('Có lô tại kho của Branch Manager', () => pm.expect(inBmStore).to.be.an('object'));
+      pm.collectionVariables.set('lotId', inBmStore.lotId);
+      pm.test('Thấy lô của nhiều kho', () => pm.expect(new Set(b.page.items.map(row => row.storeId)).size).to.be.above(1));
+      pm.test('Danh sách không có giá', () => pm.expect(pm.response.text().toLowerCase()).to.not.match(/price|cost/));
+    language: text/javascript
+order: 1000

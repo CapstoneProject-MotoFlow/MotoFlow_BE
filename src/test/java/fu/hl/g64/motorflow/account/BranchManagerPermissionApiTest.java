@@ -19,7 +19,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** UC-38 Manage Branch Manager Permissions (Owner). */
+/** UC-37 Manage Branch Manager Permissions (Owner). */
 class BranchManagerPermissionApiTest extends ApiTestUsers {
 
     private long store;

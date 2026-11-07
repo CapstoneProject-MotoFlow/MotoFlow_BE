@@ -1,0 +1,27 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests/{{requestId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có ghi chú và người tạo', () => {
+          pm.expect(b.note).to.eql('Sắp hết hàng');
+          pm.expect(b.createdByName).to.be.a('string');
+      });
+      pm.test('Số còn thiếu bằng số yêu cầu', () => {
+          pm.expect(b.lines[0].fulfilledQty).to.eql(0);
+          pm.expect(b.lines[0].toPurchaseQty).to.eql(0);
+          pm.expect(b.lines[0].remainingQty).to.eql(b.lines[0].requestedQty);
+      });
+      pm.test('Có danh sách lệnh và PO', () => {
+          pm.expect(b.transferOrders).to.be.an('array');
+          pm.expect(b.purchaseOrders).to.be.an('array');
+      });
+    language: text/javascript
+order: 9000

@@ -1,0 +1,29 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeId": {{plannedStoreId}},
+      "note": "Nhập hàng ban đầu",
+      "lines": [
+        { "productId": {{partId}}, "requestedQty": 10 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('plannedRequestId', b.id);
+      pm.test('Đúng cửa hàng đã chọn', () =>
+          pm.expect(b.requestingStoreId).to.eql(Number(pm.collectionVariables.get('plannedStoreId'))));
+    language: text/javascript
+order: 5000

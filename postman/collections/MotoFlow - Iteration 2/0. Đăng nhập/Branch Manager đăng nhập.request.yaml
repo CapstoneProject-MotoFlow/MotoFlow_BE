@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "{{bmUsername}}",
+      "password": "{{password}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.collectionVariables.set('bmToken', b.accessToken);
+      pm.collectionVariables.set('bmStoreId', b.user.storeId);
+      // Any other id is refused with MSG05, whether or not that store exists.
+      pm.collectionVariables.set('otherStoreId', b.user.storeId + 1);
+      pm.test('Vai trò BRANCH_MANAGER', () => pm.expect(b.user.role).to.eql('BRANCH_MANAGER'));
+    language: text/javascript
+order: 2000

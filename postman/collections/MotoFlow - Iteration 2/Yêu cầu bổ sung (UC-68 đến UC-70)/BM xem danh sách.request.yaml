@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests?size=100"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const items = pm.response.json().items;
+      const store = Number(pm.collectionVariables.get('branchStoreId'));
+      pm.test('Chỉ có yêu cầu của cửa hàng mình', () => items.forEach(row => pm.expect(row.requestingStoreId).to.eql(store)));
+      const mine = items.find(row => row.id === Number(pm.collectionVariables.get('requestId')));
+      pm.test('Có yêu cầu vừa tạo với đúng tổng', () => {
+          pm.expect(mine.lineCount).to.eql(2);
+          pm.expect(mine.totalRequestedQty).to.eql(7);
+      });
+    language: text/javascript
+order: 7000

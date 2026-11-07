@@ -1,0 +1,22 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/expiry-warning"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "days": 45,
+      "effectiveDate": "2099-01-01"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 403', () => pm.response.to.have.status(403));
+    language: text/javascript
+order: 3000

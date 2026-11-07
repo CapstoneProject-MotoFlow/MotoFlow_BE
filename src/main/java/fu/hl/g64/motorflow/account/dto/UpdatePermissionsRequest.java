@@ -5,8 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * UC-09. The whole new state: role, store and the catalog permission. The retail price permission is
- * granted by the Owner (BR-08), so it is not here; it is revoked when the account stops being a Branch Manager.
+ * UC-09. The whole new state: role and store. The catalog and retail price permissions are granted by the
+ * Owner (BR-01, BR-08, UC-37), so they are not here; both are revoked when the account stops being a Branch Manager.
  * Send {@code releaseAssignedTasks = true} after the user agrees to MSG18.
  */
 public record UpdatePermissionsRequest(
@@ -14,8 +14,6 @@ public record UpdatePermissionsRequest(
         Role role,
 
         Long storeId,
-
-        boolean catalogEdit,
 
         @Size(max = 255, message = "Lý do tối đa 255 ký tự.")
         String reason,

@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/auth/login"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "username": "{{staffUsername}}",
+      "password": "{{password}}"
+    }
+auth:
+  type: noauth
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.collectionVariables.set('staffToken', b.accessToken);
+      pm.test('Vai trò STAFF', () => pm.expect(b.user.role).to.eql('STAFF'));
+    language: text/javascript
+order: 4000

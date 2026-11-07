@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stores"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeName": "Cửa hàng mới {{$timestamp}}",
+      "address": "Số 1 Thử Nghiệm, Hà Nội"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.test('Cửa hàng mới ở trạng thái PLANNED', () => pm.expect(b.status).to.eql('PLANNED'));
+      pm.collectionVariables.set('plannedStoreId', b.id);
+    language: text/javascript
+order: 2000

@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/expiry-warning"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "days": 45,
+      "effectiveDate": "2099-01-01"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Phiên bản chờ là 45 ngày', () => pm.expect(b.waiting.days).to.eql(45));
+      pm.test('Áp dụng từ 2099-01-01', () => pm.expect(b.waiting.effectiveFrom).to.match(/^2099-01-01/));
+    language: text/javascript
+order: 2000
