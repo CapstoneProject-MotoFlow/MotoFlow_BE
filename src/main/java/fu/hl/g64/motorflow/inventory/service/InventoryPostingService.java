@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotReceiptPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
+import fu.hl.g64.motorflow.inventory.dto.SplitMovePosting;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 
 import java.util.List;
@@ -50,6 +51,12 @@ public interface InventoryPostingService {
      * @return the lots and quantities moved
      */
     List<LotQuantity> move(MovePosting posting);
+
+    /**
+     * {@link #move} of exactly the given lots into several statuses at once (a transfer receipt: passed into AVAILABLE,
+     * damaged into DAMAGED). The statuses are filled in enum order from the lots in the given order.
+     */
+    void moveToStatuses(SplitMovePosting posting);
 
     /** Plus or minus on one known lot; never below zero (MSG84). */
     void adjustLot(LotAdjustPosting posting);

@@ -41,4 +41,38 @@ public class TransferOrderLine {
 
     @Column(name = "makeup_for_case_id")
     private Long makeupForCaseId;
+
+    /** UC-71: {@code makeupForCaseId} is set on a make-up shipment (BR-62). */
+    public static TransferOrderLine create(Long transferOrderId, Long productId, int plannedQty, Long makeupForCaseId) {
+        TransferOrderLine line = new TransferOrderLine();
+        line.transferOrderId = transferOrderId;
+        line.productId = productId;
+        line.plannedQty = plannedQty;
+        line.makeupForCaseId = makeupForCaseId;
+        return line;
+    }
+
+    /** UC-74: confirmed once and never changed afterwards (BR-58, BR-68). */
+    public void recordDispatched(int quantity) {
+        if (dispatchedQty != null) {
+            throw new IllegalStateException("line " + id + " was already dispatched");
+        }
+        dispatchedQty = quantity;
+    }
+
+    /** UC-75: adds to what the source confirmed it sent above the dispatch; the dispatch itself never changes. */
+    public void confirmExtraDispatch(int quantity) {
+        if (quantity < 0) {
+            throw new IllegalArgumentException("extra quantity must not be negative");
+        }
+        extraDispatchedQty += quantity;
+    }
+
+    /** UC-57: what the person preparing the dispatch actually took out; never more than planned. */
+    public void recordPrepared(int preparedQty) {
+        if (preparedQty < 0 || preparedQty > plannedQty) {
+            throw new IllegalArgumentException("prepared quantity must be 0.." + plannedQty);
+        }
+        this.preparedQty = preparedQty;
+    }
 }

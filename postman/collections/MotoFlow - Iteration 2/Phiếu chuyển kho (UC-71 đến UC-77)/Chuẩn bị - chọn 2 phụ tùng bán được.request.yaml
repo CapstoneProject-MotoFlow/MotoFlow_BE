@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/availability?productIds={{candidateIds}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const central = pm.response.json().filter(row => row.central && row.sellableQty >= 3);
+      pm.test('Có 2 phụ tùng bán được từ 3 cái', () => pm.expect(central.length).to.be.at.least(2));
+      pm.collectionVariables.set('shortPartId', central[0].productId);
+      pm.collectionVariables.set('excessPartId', central[1].productId);
+    language: text/javascript
+order: 4000

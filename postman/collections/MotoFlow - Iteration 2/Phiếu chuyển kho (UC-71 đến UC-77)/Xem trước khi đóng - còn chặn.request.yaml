@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/closing-preview"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Chặn vì còn thiếu và thừa chưa xác nhận', () => {
+          pm.expect(b.canClose).to.eql(false);
+          pm.expect(b.blockedBy).to.eql(['MSG221', 'MSG222']);
+      });
+    language: text/javascript
+order: 17000
