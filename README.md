@@ -94,7 +94,8 @@ src/main/java/fu/hl/g64/motorflow/
 ├── pricing/             PricingPolicy; UC-34..36 bảng giá, sửa giá, lịch sử giá, UC-38 ngưỡng chiết khấu và biên lợi nhuận, UC-101 quy tắc giá gợi ý (BR-69)
 ├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
 ├── sales/               SalesOrder, SalesOrderLine (phiên bản cũ của đơn nằm trong audit_log)
-├── receivable/          Receivable, Payment, PaymentAllocation
+├── receivable/          Receivable, Payment, PaymentAllocation; UC-62, UC-63 cấp và thu hồi quyền mua nợ, UC-64 danh sách công nợ,
+│                        UC-65 chi tiết công nợ, UC-66 thu nợ (phân bổ theo BR-70), UC-67 nợ đầu kỳ
 ├── receiving/           PurchaseOrder(+Line), GoodsReceiptNote(+Line); UC-39..42 yêu cầu nhập hàng (lịch sử sửa nằm trong audit_log),
 │                        danh sách lượt giao Staff đang kiểm nhận; UC-106 tạo phiếu nhận hàng (cả phiếu giao bù), UC-43 ghi kết quả
 │                        kiểm nhận, UC-44 xác nhận hoặc trả kiểm lại, UC-45 quyết định hàng thừa (BR-67)

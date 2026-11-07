@@ -6,6 +6,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.List;
+
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     /**
@@ -28,4 +30,12 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
                    or p.id in (select a.paymentId from PaymentAllocation a join Receivable r on r.id = a.receivableId
                                where r.storeId = :storeId))""")
     long countUnverifiedAtStore(Long storeId);
+
+    /** BR-45: a payment with the same transaction reference that was not rejected, so the money is not counted twice. */
+    @Query("""
+            select p from Payment p
+            where lower(p.transactionReference) = lower(:reference)
+              and p.status <> fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus.REJECTED
+            order by p.id""")
+    List<Payment> findByTransactionReference(String reference);
 }
