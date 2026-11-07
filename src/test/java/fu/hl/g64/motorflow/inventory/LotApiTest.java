@@ -164,6 +164,16 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void searchMatchesSupplierName() throws Exception {
+        lots("bm", "?tab=IN_STOCK&q=yAmA").andExpect(jsonPath("$.page.items[*].lotId", contains((int) c)));
+        lots("bm", "?tab=IN_STOCK&q=hon")
+                .andExpect(jsonPath("$.page.items[*].lotId", containsInAnyOrder((int) a, (int) b, (int) d)));
+        // Opening lots have no supplier; they are still found by the other fields.
+        lots("bm", "?tab=IN_STOCK&q=ma-phanh&source=OPENING")
+                .andExpect(jsonPath("$.page.items[*].lotId", contains((int) f)));
+    }
+
+    @Test
     void rowCarriesPartStoreSupplierAndDaysToExpiry() throws Exception {
         lots("bm", "?tab=IN_STOCK&size=100")
                 .andExpect(jsonPath("$.page.items[0].daysToExpiry").value(-1))
