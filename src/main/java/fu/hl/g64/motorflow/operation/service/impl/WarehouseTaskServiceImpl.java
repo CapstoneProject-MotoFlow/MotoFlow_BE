@@ -139,6 +139,17 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         heldTask(user, type, documentId).submitResult(LocalDateTime.now(clock));
     }
 
+    // UC-57
+    @Transactional
+    @Override
+    public void reopenOwnResult(AuthenticatedUser user, TaskType type, long documentId) {
+        tasks.findOpenForUpdate(type, documentId)
+                .filter(task -> task.getStatus() == WarehouseTaskStatus.RESULT_SUBMITTED
+                        && task.getAssignedTo() == user.id())
+                .orElseThrow(() -> new BusinessException(HttpStatus.FORBIDDEN, "MSG05"))
+                .reopen();
+    }
+
     @Transactional
     @Override
     public long returnForRecount(TaskType type, long documentId) {
@@ -153,13 +164,20 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     @Transactional
     @Override
     public void confirmResult(AuthenticatedUser confirmer, TaskType type, long documentId) {
-        WarehouseTask task = tasks.findOpenForUpdate(type, documentId)
-                .orElseThrow(() -> new IllegalStateException("no open " + type + " task for " + documentId));
+        Optional<WarehouseTask> open = tasks.findOpenForUpdate(type, documentId);
+        // Only a sales order is confirmed again after a change (UC-58); its picking task is then already done.
+        WarehouseTask task = open
+                .or(() -> type != TaskType.PICKING ? Optional.empty()
+                        : tasks.findHistory(type, documentId).stream().findFirst()
+                        .filter(latest -> latest.getStatus() == WarehouseTaskStatus.DONE))
+                .orElseThrow(() -> new IllegalStateException("no " + type + " result to confirm for " + documentId));
         // BR-26: whoever recorded the result, a Branch Manager who took the task included (MSG40), cannot confirm it.
         if (task.getAssignedTo() == confirmer.id()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, type == TaskType.INSPECTION ? "MSG32" : "MSG124");
         }
-        task.complete();
+        if (open.isPresent()) {
+            task.complete();
+        }
     }
 
     @Transactional

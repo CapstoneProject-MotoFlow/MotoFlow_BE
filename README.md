@@ -93,13 +93,14 @@ src/main/java/fu/hl/g64/motorflow/
 ├── catalog/             PartCategory, VehicleModel, Product, ProductIdentifier, ProductImage, ProductVehicleModel
 ├── pricing/             PricingPolicy; UC-34..36 bảng giá, sửa giá, lịch sử giá, UC-38 ngưỡng chiết khấu và biên lợi nhuận, UC-101 quy tắc giá gợi ý (BR-69)
 ├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
-├── sales/               SalesOrder, SalesOrderLine (phiên bản cũ của đơn nằm trong audit_log)
+├── sales/               SalesOrder, SalesOrderLine; UC-52 danh sách đơn bán, UC-53 lập đơn, UC-54 chi tiết đơn, UC-55 sửa đơn
+│                        (mỗi phiên bản nằm trong audit_log), UC-57 ghi số đã lấy, UC-58 xác nhận đơn (BR-16, BR-76, BR-88)
 ├── receivable/          Receivable, Payment, PaymentAllocation; UC-62, UC-63 cấp và thu hồi quyền mua nợ, UC-64 danh sách công nợ,
 │                        UC-65 chi tiết công nợ, UC-66 thu nợ (phân bổ theo BR-70), UC-67 nợ đầu kỳ
 ├── receiving/           PurchaseOrder(+Line), GoodsReceiptNote(+Line); UC-39..42 yêu cầu nhập hàng (lịch sử sửa nằm trong audit_log),
 │                        danh sách lượt giao Staff đang kiểm nhận; UC-106 tạo phiếu nhận hàng (cả phiếu giao bù), UC-43 ghi kết quả
 │                        kiểm nhận, UC-44 xác nhận hoặc trả kiểm lại, UC-45 quyết định hàng thừa (BR-67)
-├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line)
+├── transfer/            ReplenishmentRequest(+Line), TransferOrder(+Line); UC-57 ghi số đã chuẩn bị của phiếu chuyển kho đi
 ├── discrepancy/         DiscrepancyCase, DiscrepancyResolutionEvent; UC-46 xử lý sai lệch với nhà cung cấp: số phải trả, trả hàng,
 │                        giao bù, Owner miễn giao bù (BR-27)
 ├── inventory/           StockBalance, StockMovement, Lot, LotBalance, InventoryPeriod, StockCount(+Line), StockCountRequest(+Product),
