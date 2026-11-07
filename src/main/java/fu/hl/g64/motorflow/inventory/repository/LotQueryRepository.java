@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.inventory.repository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -88,4 +89,25 @@ public interface LotQueryRepository extends Repository<Lot, Long> {
             having sum(b.quantity) > 0 or l.id = :lotId
             order by l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
     List<IssueLine> issueOrder(Long productId, Long storeId, Long lotId, Limit limit);
+
+    /** UC-98: a lot's stock in one warehouse and status. */
+    interface HoldingRow {
+        long getStoreId();
+
+        String getStoreName();
+
+        StockStatus getStockStatus();
+
+        long getQuantity();
+    }
+
+    /** UC-98: a lot's stock by warehouse and status; {@code storeId} null means every warehouse. */
+    @Query("""
+            select b.storeId as storeId, s.storeName as storeName, b.stockStatus as stockStatus,
+                   sum(b.quantity) as quantity
+            from LotBalance b
+            join Store s on s.id = b.storeId
+            where b.lotId = :lotId and (:storeId is null or b.storeId = :storeId)
+            group by b.storeId, s.storeName, b.stockStatus""")
+    List<HoldingRow> holdings(Long lotId, Long storeId);
 }

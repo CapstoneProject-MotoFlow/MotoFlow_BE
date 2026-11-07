@@ -306,6 +306,52 @@ class LotApiTest extends ApiTestUsers {
     }
 
     @Test
+    void byStoreListsEveryWarehouseForTheOwnerOnly() throws Exception {
+        long moved = transferTwoToBranch();
+        lot("owner", moved, "").andExpect(jsonPath("$.byStore", hasSize(2)))
+                .andExpect(jsonPath("$.byStore[0].storeId").value(central))
+                .andExpect(jsonPath("$.byStore[0].storeName").value("Kho tổng"))
+                .andExpect(jsonPath("$.byStore[0].availableQty").value(1))
+                .andExpect(jsonPath("$.byStore[1].storeId").value(branch))
+                .andExpect(jsonPath("$.byStore[1].storeName").value("Long Biên"))
+                .andExpect(jsonPath("$.byStore[1].availableQty").value(2))
+                .andExpect(jsonPath("$.byStore[1].otherQty").value(0))
+                .andExpect(jsonPath("$.byStore[1].inTransitQty").value(0));
+        lot("bm", moved, "").andExpect(jsonPath("$.byStore", hasSize(1)))
+                .andExpect(jsonPath("$.byStore[0].storeId").value(branch))
+                .andExpect(jsonPath("$.byStore[0].availableQty").value(2));
+        lot("bmkt", moved, "").andExpect(jsonPath("$.byStore", hasSize(1)))
+                .andExpect(jsonPath("$.byStore[0].storeId").value(central))
+                .andExpect(jsonPath("$.byStore[0].availableQty").value(1));
+    }
+
+    @Test
+    void byStoreCountsOtherStatusesAndStockInTransit() throws Exception {
+        long onItsWay = dispatchTwoToBranch().lot();
+        // IN_TRANSIT stock is booked to the destination warehouse.
+        lot("owner", onItsWay, "").andExpect(jsonPath("$.byStore", hasSize(2)))
+                .andExpect(jsonPath("$.byStore[0].storeId").value(central))
+                .andExpect(jsonPath("$.byStore[0].availableQty").value(1))
+                .andExpect(jsonPath("$.byStore[0].inTransitQty").value(0))
+                .andExpect(jsonPath("$.byStore[1].storeId").value(branch))
+                .andExpect(jsonPath("$.byStore[1].availableQty").value(0))
+                .andExpect(jsonPath("$.byStore[1].inTransitQty").value(2));
+
+        jdbc.update("INSERT INTO lot_balance (lot_id, store_id, stock_status, quantity) VALUES (?, ?, 'DAMAGED', 2)",
+                a, branch);
+        lot("bm", a, "").andExpect(jsonPath("$.byStore", hasSize(1)))
+                .andExpect(jsonPath("$.byStore[0].availableQty").value(3))
+                .andExpect(jsonPath("$.byStore[0].otherQty").value(2))
+                .andExpect(jsonPath("$.byStore[0].inTransitQty").value(0));
+    }
+
+    @Test
+    void byStoreIsEmptyForASoldOutLot() throws Exception {
+        lot("owner", e, "").andExpect(jsonPath("$.byStore", empty()));
+        lot("bm", e, "").andExpect(jsonPath("$.byStore", empty()));
+    }
+
+    @Test
     void branchManagerNeverViewsAnotherWarehouse() throws Exception {
         lot("bm", a, "?storeId=" + central).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         lot("bmkt", a, "?storeId=" + branch).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
@@ -401,6 +447,18 @@ class LotApiTest extends ApiTestUsers {
 
     /** A central warehouse lot of 3 units, 2 of them dispatched to and received by the branch; returns the lot. */
     private long transferTwoToBranch() {
+        Dispatch dispatch = dispatchTwoToBranch();
+        tx.execute(s -> posting.move(new MovePosting(dispatch.product(), branch, StockStatus.IN_TRANSIT, branch,
+                StockStatus.AVAILABLE, 2, null, MovementType.TRANSFER_RECEIPT, SourceRef.transferOrder(dispatch.transfer()),
+                owner.getId(), null)));
+        return dispatch.lot();
+    }
+
+    private record Dispatch(long lot, long product, long transfer) {
+    }
+
+    /** A central warehouse lot of 3 units, 2 of them dispatched to the branch and not yet received. */
+    private Dispatch dispatchTwoToBranch() {
         long part = jdbc.queryForObject("SELECT category_id FROM product WHERE id = ?", Long.class, brake);
         long mirror = product("GUONG-XE", "Gương chiếu hậu", part);
         long lot = receive(central, mirror, honda, today.minusDays(3), null, null);
@@ -408,9 +466,7 @@ class LotApiTest extends ApiTestUsers {
                 + "VALUES (?, ?, ?) RETURNING id", Long.class, central, branch, owner.getId());
         tx.execute(s -> posting.move(new MovePosting(mirror, central, StockStatus.AVAILABLE, branch, StockStatus.IN_TRANSIT,
                 2, null, MovementType.TRANSFER_DISPATCH, SourceRef.transferOrder(transfer), owner.getId(), null)));
-        tx.execute(s -> posting.move(new MovePosting(mirror, branch, StockStatus.IN_TRANSIT, branch, StockStatus.AVAILABLE,
-                2, null, MovementType.TRANSFER_RECEIPT, SourceRef.transferOrder(transfer), owner.getId(), null)));
-        return lot;
+        return new Dispatch(lot, mirror, transfer);
     }
 
     private long product(String sku, String name, long category) {

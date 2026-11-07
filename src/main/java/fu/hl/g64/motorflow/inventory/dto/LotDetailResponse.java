@@ -17,6 +17,8 @@ import java.util.List;
  * @param movements         the latest 10 movements of the lot in {@code viewStoreId}, newest first
  * @param issueOrder        up to 20 lots of the same part in {@code viewStoreId}, in picking order (BR-75)
  * @param purchaseUnitPrice filled for the Owner only (BR-72)
+ * @param byStore           every warehouse holding some of the lot for the Owner, only the Branch Manager's own
+ *                          warehouse otherwise; warehouses holding nothing are left out; by warehouse name
  */
 public record LotDetailResponse(long lotId, String state, Integer daysToExpiry, long productId, String sku,
                                 String partName, String baseUnit, LotSourceType sourceType, Long supplierId,
@@ -24,7 +26,8 @@ public record LotDetailResponse(long lotId, String state, Integer daysToExpiry, 
                                 String firstStoreName, LocalDate receivedDate, String manufacturerLotNo,
                                 LocalDate manufactureDate, LocalDate expiryDate, long receivedQty, long viewStoreId,
                                 int remainingQty, List<StatusQty> byStatus, List<StockMovementResponse> movements,
-                                List<IssueOrderLine> issueOrder, Long purchaseUnitPrice) {
+                                List<IssueOrderLine> issueOrder, Long purchaseUnitPrice,
+                                List<StoreHolding> byStore) {
 
     /** The document that created the lot: GOODS_RECEIPT_NOTE or STOCK_COUNT. */
     public record SourceDocument(String type, long id) {
@@ -39,5 +42,12 @@ public record LotDetailResponse(long lotId, String state, Integer daysToExpiry, 
      */
     public record IssueOrderLine(long lotId, LocalDate expiryDate, LocalDate receivedDate, int availableQty,
                                  boolean current, boolean skipped) {
+    }
+
+    /**
+     * @param otherQty     awaiting inspection + wrong item + damaged + awaiting supplier return
+     * @param inTransitQty IN_TRANSIT stock booked to that warehouse (on its way there)
+     */
+    public record StoreHolding(long storeId, String storeName, int availableQty, int otherQty, int inTransitQty) {
     }
 }

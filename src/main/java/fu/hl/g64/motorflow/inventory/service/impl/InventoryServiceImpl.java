@@ -14,6 +14,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.IssueOrderLine;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.SourceDocument;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.StatusQty;
+import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.StoreHolding;
 import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotRowResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotSearch;
@@ -38,6 +39,7 @@ import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository;
+import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.HoldingRow;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.LotStock;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -317,7 +319,25 @@ public class InventoryServiceImpl implements InventoryService {
                                 line.getLot().getReceivedDate(), line.getAvailable(), line.getLot().getId().equals(lotId),
                                 line.getLot().isExpiredOn(today) || line.getAvailable() == 0))
                         .toList(),
-                owner ? lot.getPurchaseUnitPrice() : null);
+                owner ? lot.getPurchaseUnitPrice() : null,
+                storeHoldings(lotQueries.holdings(lotId, owner ? null : scoped)));
+    }
+
+    /** UC-98: folds the rows of one lot into one line per warehouse, dropping empty ones, by warehouse name. */
+    private static List<StoreHolding> storeHoldings(List<HoldingRow> rows) {
+        return rows.stream().collect(Collectors.groupingBy(HoldingRow::getStoreId)).values().stream()
+                .map(store -> new StoreHolding(store.getFirst().getStoreId(), store.getFirst().getStoreName(),
+                        quantity(store, st -> st == StockStatus.AVAILABLE),
+                        quantity(store, st -> st != StockStatus.AVAILABLE && st != StockStatus.IN_TRANSIT),
+                        quantity(store, st -> st == StockStatus.IN_TRANSIT)))
+                .filter(h -> h.availableQty() + h.otherQty() + h.inTransitQty() > 0)
+                .sorted(Comparator.comparing(StoreHolding::storeName).thenComparingLong(StoreHolding::storeId))
+                .toList();
+    }
+
+    private static int quantity(List<HoldingRow> rows, java.util.function.Predicate<StockStatus> status) {
+        return Math.toIntExact(rows.stream().filter(r -> status.test(r.getStockStatus()))
+                .mapToLong(HoldingRow::getQuantity).sum());
     }
 
     // ------------------------------------------------------------------------------------------------------------
