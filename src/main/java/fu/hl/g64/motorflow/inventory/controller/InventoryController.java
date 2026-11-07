@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.inventory.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
+import fu.hl.g64.motorflow.inventory.dto.ExpiryWarningRequest;
+import fu.hl.g64.motorflow.inventory.dto.ExpiryWarningResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotSearch;
@@ -15,6 +17,7 @@ import fu.hl.g64.motorflow.inventory.dto.StockSearch;
 import fu.hl.g64.motorflow.inventory.dto.StorageLocationRequest;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
+import fu.hl.g64.motorflow.inventory.service.ExpiryWarningService;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,7 +38,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-@Tag(name = "Inventory", description = "UC-47 to UC-51, UC-97, UC-98 (Owner, Branch Manager)")
+@Tag(name = "Inventory", description = "UC-47 to UC-51, UC-97, UC-98 (Owner, Branch Manager), UC-104 (Owner)")
 @RestController
 @RequestMapping("/api/v1/inventory")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
@@ -43,6 +46,7 @@ import java.util.List;
 public class InventoryController {
 
     private final InventoryService inventoryService;
+    private final ExpiryWarningService expiryWarningService;
 
     @Operation(summary = "Stock by part and status with low-stock and near-expiry warnings; stock value for the Owner "
             + "only (UC-47). Without storeId: own warehouse, or every warehouse for the Owner")
@@ -127,5 +131,20 @@ public class InventoryController {
                                                     @PathVariable long storeId, @PathVariable long productId,
                                                     @Valid @RequestBody LowStockThresholdRequest request) {
         return inventoryService.updateLowStockThreshold(user, storeId, productId, request);
+    }
+
+    @Operation(summary = "The expiry warning days in effect, the version waiting and the history (UC-104, Owner)")
+    @GetMapping("/expiry-warning")
+    @PreAuthorize("hasRole('OWNER')")
+    public ExpiryWarningResponse expiryWarning() {
+        return expiryWarningService.expiryWarning();
+    }
+
+    @Operation(summary = "Set the expiry warning days from a date, today or later (UC-104, Owner)")
+    @PutMapping("/expiry-warning")
+    @PreAuthorize("hasRole('OWNER')")
+    public ExpiryWarningResponse setExpiryWarning(@AuthenticationPrincipal AuthenticatedUser user,
+                                                  @Valid @RequestBody ExpiryWarningRequest request) {
+        return expiryWarningService.setExpiryWarning(user, request);
     }
 }

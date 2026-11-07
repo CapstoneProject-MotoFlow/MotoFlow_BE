@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/expiry-warning"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có đủ 3 phần', () => pm.expect(b).to.have.all.keys('inEffect', 'waiting', 'history'));
+      pm.test('Lịch sử tối đa 20 dòng', () => pm.expect(b.history.length).to.be.at.most(20));
+    language: text/javascript
+order: 1000

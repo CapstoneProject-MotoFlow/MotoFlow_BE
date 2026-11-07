@@ -6,6 +6,7 @@ description: |-
   - Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.
   - bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.
   - bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.
+  - Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.
 variables:
   baseUrl: http://localhost:8080
   ownerUsername: owner

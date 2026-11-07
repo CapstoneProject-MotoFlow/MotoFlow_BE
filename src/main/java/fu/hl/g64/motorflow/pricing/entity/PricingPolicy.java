@@ -118,6 +118,16 @@ public class PricingPolicy {
         return limit;
     }
 
+    /** UC-104: how many days before expiry a lot counts as near expiry (BR-76). */
+    public static PricingPolicy expiryWarning(int days, LocalDateTime effectiveFrom, long setBy, LocalDateTime now) {
+        if (days <= 0) {
+            throw new IllegalArgumentException("expiry warning days must be greater than 0");
+        }
+        PricingPolicy warning = version(PolicyType.EXPIRY_WARNING, effectiveFrom, setBy, now);
+        warning.expiryWarningDays = days;
+        return warning;
+    }
+
     /** True while the version waits for its effective date. */
     public boolean isPending(LocalDateTime now) {
         return effectiveFrom.isAfter(now);
