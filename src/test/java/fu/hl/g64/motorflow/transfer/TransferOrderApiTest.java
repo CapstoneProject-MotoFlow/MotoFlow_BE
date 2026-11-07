@@ -65,7 +65,7 @@ class TransferOrderApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.status").value("AWAITING_DISPATCH"))
                 .andExpect(jsonPath("$.replenishmentRequestId").value(request))
                 .andExpect(jsonPath("$.sourceStoreId").value(source))
-                .andExpect(jsonPath("$.createdBy").value(centralManager.getId()))
+                .andExpect(jsonPath("$.createdBy.id").value(centralManager.getId()))
                 .andExpect(jsonPath("$.lines[0].plannedQty").value(5));
 
         long order = lastOrder();

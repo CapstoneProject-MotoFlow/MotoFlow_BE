@@ -9,6 +9,8 @@ import java.util.List;
 
 public interface TransferOrderLineRepository extends JpaRepository<TransferOrderLine, Long> {
 
+    List<TransferOrderLine> findByTransferOrderIdOrderByProductId(Long transferOrderId);
+
     interface ProductQty {
         long getProductId();
 
@@ -41,4 +43,40 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             group by l.productId
             """)
     List<ProductQty> fulfilledByProduct(@Param("requestId") long requestId);
+
+    /** BR-60: passed plus damaged per part on the order's confirmed receipts, at the destination and back at the source. */
+    interface ReceiptTotals {
+        long getProductId();
+
+        long getReceived();
+
+        long getReturned();
+    }
+
+    @Query("""
+            select l.productId as productId,
+                   sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
+                            then l.passedQty + l.damagedQty else 0 end) as received,
+                   sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.RETURN_TO_SOURCE
+                            then l.passedQty + l.damagedQty else 0 end) as returned
+            from GoodsReceiptNoteLine l
+            join GoodsReceiptNote g on g.id = l.goodsReceiptNoteId
+            where g.transferOrderId = :id
+              and g.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.CONFIRMED
+            group by l.productId
+            """)
+    List<ReceiptTotals> confirmedReceipts(@Param("id") long transferOrderId);
+
+    /** BR-66: a loss settles transit goods only once its adjustment has been applied. */
+    @Query("""
+            select c.productId as productId, sum(e.quantity) as qty
+            from DiscrepancyResolutionEvent e
+            join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            join AdjustmentRequest a on a.id = e.adjustmentRequestId
+            where c.transferOrderId = :id
+              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.APPROVED_LOSS
+              and a.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED
+            group by c.productId
+            """)
+    List<ProductQty> appliedLoss(@Param("id") long transferOrderId);
 }
