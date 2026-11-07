@@ -19,6 +19,8 @@ import fu.hl.g64.motorflow.inventory.dto.LotRowResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
+import fu.hl.g64.motorflow.inventory.dto.PastDateStockResponse;
+import fu.hl.g64.motorflow.inventory.dto.PastDateStockRow;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse.ExpiryState;
@@ -28,14 +30,17 @@ import fu.hl.g64.motorflow.inventory.dto.StockRowResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockSearch;
 import fu.hl.g64.motorflow.inventory.dto.StockSummaryResponse;
 import fu.hl.g64.motorflow.inventory.dto.StorageLocationRequest;
+import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.LotBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement;
+import fu.hl.g64.motorflow.inventory.entity.enums.InventoryPeriodStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.repository.InventoryPeriodRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.helper.ExpiryWarning;
 import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository;
@@ -43,6 +48,7 @@ import fu.hl.g64.motorflow.inventory.repository.LotQueryRepository.LotStock;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockMovementRepository;
+import fu.hl.g64.motorflow.inventory.repository.StockMovementRepository.PastDateLine;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
@@ -70,6 +76,7 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -98,6 +105,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final LotQueryRepository lotQueries;
     private final LotRepository lots;
     private final StockMovementRepository movements;
+    private final InventoryPeriodRepository periods;
     private final ProductRepository products;
     private final PartCategoryService categories;
     private final StoreRepository stores;
@@ -395,6 +403,44 @@ public class InventoryServiceImpl implements InventoryService {
     /** Last expiry date in the warning window; without a configured period the window is empty. */
     private static LocalDate warnUntil(LocalDate today, Integer warnDays) {
         return warnDays == null ? today.minusDays(1) : today.plusDays(warnDays);
+    }
+
+    // UC-103
+    /**
+     * Closing stock of a part at the end of day D = sum of quantity_change of its stock_movement rows at that store with
+     * stock_status other than IN_TRANSIT and occurred_at before 00:00 of D+1 (Vietnam time): goods physically in the
+     * warehouse, available or not, matching {@link StockBalance#onHandQty()}.
+     * <p>
+     * Speed-up: start from period_stock_balance.closing_qty of the latest CLOSED period ending before D and add only
+     * the later movements. This is correct only if Close Inventory Period (UC-100) computes closing_qty with this same
+     * definition (excluding IN_TRANSIT, up to the end of to_date); otherwise UC-103 drifts. The team decided on 29/10
+     * not to keep a daily closing table (no JOB-04).
+     */
+    @Transactional(readOnly = true)
+    @Override
+    public PastDateStockResponse pastDateStock(AuthenticatedUser user, LocalDate date, Long storeId, String q,
+                                               Long categoryId, boolean includeZero, int page, int size) {
+        if (!date.isBefore(LocalDate.now(clock))) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG92");
+        }
+        if (user.role() == Role.OWNER && storeId == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        long store = scopeStoreId(user, storeId);
+        String storeName = stores.findById(store).orElseThrow().getStoreName();
+        InventoryPeriod period = periods.findFirstByStatusAndToDateBeforeOrderByToDateDesc(
+                InventoryPeriodStatus.CLOSED, date).orElse(null);
+        LocalDateTime from = period == null ? LocalDateTime.of(1970, 1, 1, 0, 0)
+                : period.getToDate().plusDays(1).atStartOfDay();
+        List<Long> categoryIds = categoryId == null ? List.of(-1L) : categories.withDescendants(categoryId);
+        Page<PastDateLine> found = movements.pastDateStock(period == null ? null : period.getId(), store, from,
+                date.plusDays(1).atStartOfDay(), StringUtils.hasText(q) ? q.trim() : null, categoryId != null,
+                categoryIds.isEmpty() ? List.of(-1L) : categoryIds, includeZero,
+                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
+        return new PastDateStockResponse(date, store, storeName,
+                period == null ? null : period.getPeriodMonth().format(DateTimeFormatter.ofPattern("yyyy-MM")),
+                PageResponse.of(found, found.getContent().stream().map(l -> new PastDateStockRow(l.getProductId(),
+                        l.getSku(), l.getPartName(), l.getBaseUnit(), l.getClosingQty())).toList()));
     }
 
     /**
