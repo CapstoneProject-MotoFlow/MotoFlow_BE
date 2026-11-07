@@ -165,8 +165,10 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     @Override
     public void confirmResult(AuthenticatedUser confirmer, TaskType type, long documentId) {
         Optional<WarehouseTask> open = tasks.findOpenForUpdate(type, documentId);
+        // Only a sales order is confirmed again after a change (UC-58); its picking task is then already done.
         WarehouseTask task = open
-                .or(() -> tasks.findHistory(type, documentId).stream().findFirst()
+                .or(() -> type != TaskType.PICKING ? Optional.empty()
+                        : tasks.findHistory(type, documentId).stream().findFirst()
                         .filter(latest -> latest.getStatus() == WarehouseTaskStatus.DONE))
                 .orElseThrow(() -> new IllegalStateException("no " + type + " result to confirm for " + documentId));
         // BR-26: whoever recorded the result, a Branch Manager who took the task included (MSG40), cannot confirm it.
