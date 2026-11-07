@@ -19,4 +19,7 @@ public interface SalesOrderLineRepository extends JpaRepository<SalesOrderLine, 
             where l.salesOrderId in :orderIds
             group by l.salesOrderId""")
     List<Object[]> currentTotals(Collection<Long> orderIds);
+
+    /** The lines of one order in the order they were added. */
+    List<SalesOrderLine> findBySalesOrderIdOrderByLineNoAsc(Long salesOrderId);
 }

@@ -55,7 +55,7 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class CustomerServiceImpl implements CustomerService {
 
-    /** Credit grants and revocations by Owner (UC-63, UC-64) are kept in audit_log as CREDIT_ + event type. */
+    /** Credit grants and revocations by Owner (UC-62, UC-63) are kept in audit_log as CREDIT_ + event type. */
     private static final String CREDIT_PREFIX = "CREDIT_";
     private static final Set<String> CREDIT_ACTIONS = Set.of(CREDIT_PREFIX + EventType.GRANTED, CREDIT_PREFIX + EventType.REVOKED);
 

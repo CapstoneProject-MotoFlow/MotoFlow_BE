@@ -57,4 +57,26 @@ public class Receivable {
 
     @Column(name = "settled_at")
     private LocalDateTime settledAt;
+
+    /** UC-67: a debt from before MotoFlow, recorded by Owner for one store. Its due date may be in the past. */
+    public static Receivable openingBalance(long customerId, long storeId, long amount, LocalDate dueDate, String note,
+                                            long recordedBy, LocalDateTime now) {
+        Receivable debt = new Receivable();
+        debt.originType = OriginType.OPENING_BALANCE;
+        debt.customerId = customerId;
+        debt.storeId = storeId;
+        debt.originalAmount = amount;
+        debt.dueDate = dueDate;
+        debt.note = note;
+        debt.recognizedBy = recordedBy;
+        debt.recognizedAt = now;
+        return debt;
+    }
+
+    /** UC-66 step 7: nothing is owed on it any more. Settled receivables are kept. */
+    public void settle(LocalDateTime now) {
+        if (settledAt == null) {
+            settledAt = now;
+        }
+    }
 }
