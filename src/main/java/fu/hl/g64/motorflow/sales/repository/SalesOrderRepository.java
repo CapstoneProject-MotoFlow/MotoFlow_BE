@@ -4,10 +4,20 @@ import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
-public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
+import java.util.Optional;
+
+public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, JpaSpecificationExecutor<SalesOrder> {
+
+    /** Row lock: updating, picking and confirming one order happen one after another (UC-55, UC-57, UC-58). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select o from SalesOrder o where o.id = :id")
+    Optional<SalesOrder> findByIdForUpdate(long id);
 
     /** Orders for the customer, at one store or at every store when {@code storeId} is null. */
     @Query("""
