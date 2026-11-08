@@ -26,6 +26,7 @@ import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.entity.Receivable;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentMethod;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
+import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
 import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
 import fu.hl.g64.motorflow.sales.dto.CancelSalesOrderRequest;
@@ -57,7 +58,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.util.StringUtils;
 
 import java.text.NumberFormat;
 import java.time.Clock;
@@ -86,6 +86,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     private final ProductRepository products;
     private final CustomerRepository customers;
     private final PaymentRepository payments;
+    private final TransactionReferences references;
     private final ReceivableRepository receivables;
     private final AuditLogRepository auditLog;
     private final WarehouseTaskRepository tasks;
@@ -124,7 +125,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG182");
             }
             String reference = reference(request.paymentMethod(), request.transactionReference());
-            Payment payment = payments.save(Payment.orderPayment(orderId, request.amount(), tendered,
+            Payment payment = references.save(Payment.orderPayment(orderId, request.amount(), tendered,
                     request.paymentMethod(), reference, request.verified(), seller.id(), LocalDateTime.now(clock)));
             if (request.evidence() != null && !request.evidence().isEmpty()) {
                 attachments.attach(OwnerType.PAYMENT, payment.getId(), request.evidence(), seller.id());
@@ -393,7 +394,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG183", money(refundable));
         }
         String reference = reference(method, transactionReference);
-        return payments.save(Payment.refund(orderId, amount, method, reference, verified, seller.id(), now));
+        return references.save(Payment.refund(orderId, amount, method, reference, verified, seller.id(), now));
     }
 
     /**
@@ -401,16 +402,11 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
      * that was not rejected (MSG151, BR-45).
      */
     private String reference(PaymentMethod method, String value) {
-        String reference = StringUtils.hasText(value) ? value.strip() : null;
+        String reference = TransactionReferences.clean(value);
         if (method == PaymentMethod.BANK_TRANSFER && reference == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG154");
         }
-        if (reference != null) {
-            payments.findByTransactionReference(reference).stream().findFirst().ifPresent(existing -> {
-                throw new BusinessException(HttpStatus.CONFLICT, "MSG151", reference,
-                        String.valueOf(existing.getId()));
-            });
-        }
+        references.requireUnused(reference);
         return reference;
     }
 
