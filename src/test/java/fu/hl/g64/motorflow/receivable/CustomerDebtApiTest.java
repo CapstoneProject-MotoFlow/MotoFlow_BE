@@ -540,6 +540,62 @@ class CustomerDebtApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.allocations[*].allocatedAmount", contains(500_000)));
     }
 
+    @Test
+    void aTransferSavedByAnotherRequestAtTheSameMomentIsCountedOnce() throws Exception {
+        long sale = receivableOf(creditSale(hung, giaLam, 1_000_000, at(3), LocalDate.of(2026, 11, 3)));
+        Map<String, Object> ours = payment("BANK_TRANSFER", 200_000, null, List.of(sale),
+                line(sale, 1_000_000, 200_000));
+        ours.put("transactionReference", "FT2610130777");
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        long theirs;
+        try (Connection other = dataSource.getConnection()) {
+            // Another collector saves the same transfer and has not committed yet, so our check cannot see it.
+            other.setAutoCommit(false);
+            try (PreparedStatement insert = other.prepareStatement("INSERT INTO payment (payment_type, amount, "
+                    + "payment_method, transaction_reference, status, recorded_by, recorded_at, verified_by, "
+                    + "verified_at) VALUES ('DEBT_PAYMENT', 200000, 'BANK_TRANSFER', 'ft2610130777', 'VERIFIED', ?, ?, "
+                    + "?, ?) RETURNING id")) {
+                insert.setLong(1, owner.getId());
+                insert.setObject(2, LocalDateTime.now(clock));
+                insert.setLong(3, owner.getId());
+                insert.setObject(4, LocalDateTime.now(clock));
+                try (ResultSet created = insert.executeQuery()) {
+                    created.next();
+                    theirs = created.getLong(1);
+                }
+            }
+            Future<MvcResult> sent = executor.submit(() ->
+                    send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, ours).andReturn());
+            // Our insert waits on ux_payment_reference until the other payment commits.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (!sent.isDone() && System.nanoTime() < deadline && jdbc.queryForObject(
+                    "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'", Long.class) == 0) {
+                Thread.sleep(20);
+            }
+            assertThat(sent.isDone()).as("our payment waits for the other one").isFalse();
+            other.commit();
+
+            MvcResult result = sent.get(30, TimeUnit.SECONDS);
+            String body = result.getResponse().getContentAsString();
+            assertThat(result.getResponse().getStatus()).as(body).isEqualTo(409);
+            assertThat(JsonPath.<String>read(body, "$.code")).isEqualTo("MSG151");
+            assertThat(JsonPath.<String>read(body, "$.message"))
+                    .isEqualTo("Mã giao dịch FT2610130777 đã được ghi ở phiếu thu số " + theirs + ".");
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(jdbc.queryForList("SELECT id FROM payment", Long.class)).containsExactly(theirs);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment_allocation", Long.class)).isZero();
+
+        // A rejected transfer leaves the index, so its reference can be recorded again.
+        jdbc.update("UPDATE payment SET status = 'REJECTED', rejection_reason = 'Không thấy tiền về' WHERE id = ?",
+                theirs);
+        send(post("/api/v1/customers/{id}/debt-payments", hung), managerToken, ours)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.transactionReference").value("FT2610130777"));
+    }
+
     private long customer(String name, String phone) {
         return jdbc.queryForObject("INSERT INTO customer (customer_name, phone, created_by) VALUES (?, ?, ?) RETURNING id",
                 Long.class, name, phone, owner.getId());

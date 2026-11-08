@@ -2,13 +2,23 @@ package fu.hl.g64.motorflow.sales;
 
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
@@ -20,6 +30,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** UC-60 Record Order Payment, UC-61 Record Order Credit, UC-56 Cancel Sales Order. */
 class SalesOrderSettlementApiTest extends SalesOrderTestData {
+
+    @Autowired
+    private DataSource dataSource;
 
     @Test
     void verifiedPaymentsCompleteTheOrderAndTakeTheGoodsOutByLot() throws Exception {
@@ -249,6 +262,82 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void verifyingARefundLargerThanWhatTheOrderNowHoldsIsRefused() throws Exception {
+        long order = confirmedOrder(pad, 2);   // 200,000 đ
+        String body = pay(managerToken, order, 100_000, null, "CASH", null, true).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long paid = ((Number) JsonPath.read(body, "$.paymentId")).longValue();
+        body = refund(managerToken, order, 60_000, "CASH", false).andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.money.refundable").value(40_000))
+                .andReturn().getResponse().getContentAsString();
+        long refund = ((Number) JsonPath.read(body, "$.paymentId")).longValue();
+
+        // BR-49: an applied correction finds that only 50,000 đ was taken, so the order holds less than the refund.
+        long correction = jdbc.queryForObject("INSERT INTO adjustment_request (adjustment_type, store_id, payment_id, "
+                + "reason, status, requested_by, decided_by, decided_at, applied_at) VALUES ('DOCUMENT_CORRECTION', ?, "
+                + "?, 'Ghi nhầm số tiền', 'APPLIED', ?, ?, ?, ?) RETURNING id", Long.class, store, paid, owner.getId(),
+                owner.getId(), LocalDateTime.now(clock), LocalDateTime.now(clock));
+        jdbc.update("INSERT INTO adjustment_amount_line (adjustment_request_id, payment_id, amount_change) "
+                + "VALUES (?, ?, -50000)", correction, paid);
+
+        verify(managerToken, order, refund)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG183"))
+                .andExpect(jsonPath("$.message").value("Số tiền hoàn không được lớn hơn 50.000 đ, là số đơn bán đang "
+                        + "giữ của khách."));
+        assertThat(jdbc.queryForObject("SELECT status FROM payment WHERE id = ?", String.class, refund))
+                .isEqualTo("UNVERIFIED");
+    }
+
+    @Test
+    void aVerificationAndACompletionAtTheSameMomentTakeTheGoodsOutOnce() throws Exception {
+        long order = confirmedOrder(pad, 2, oil, 1);   // 285,000 đ, two lots
+        String body = pay(managerToken, order, 285_000, null, "BANK_TRANSFER", "FT26101300777", false)
+                .andExpect(status().isOk()).andExpect(jsonPath("$.completed").value(false))
+                .andReturn().getResponse().getContentAsString();
+        long payment = ((Number) JsonPath.read(body, "$.paymentId")).longValue();
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        MvcResult verified;
+        MvcResult completed;
+        try (Connection other = dataSource.getConnection()) {
+            // Hold the order, so that both requests are waiting for it when it is let go.
+            other.setAutoCommit(false);
+            try (PreparedStatement lock = other.prepareStatement("SELECT id FROM sales_order WHERE id = ? FOR UPDATE")) {
+                lock.setLong(1, order);
+                lock.executeQuery().close();
+            }
+            Future<MvcResult> verifying = executor.submit(() -> verify(managerToken, order, payment).andReturn());
+            awaitLockWaiters(1, verifying);
+            Future<MvcResult> completing = executor.submit(() -> complete(ownerToken, order, 1).andReturn());
+            awaitLockWaiters(2, completing);
+            other.commit();
+            verified = verifying.get(30, TimeUnit.SECONDS);
+            completed = completing.get(30, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        // Whichever request completes the order, the other one finds it completed (MSG164) or still unverified
+        // (MSG184); the goods leave once.
+        assertThat(verified.getResponse().getStatus()).as(verified.getResponse().getContentAsString()).isEqualTo(200);
+        String completion = completed.getResponse().getContentAsString();
+        if (completed.getResponse().getStatus() != 200) {
+            assertThat(completed.getResponse().getStatus()).as(completion).isEqualTo(409);
+            assertThat(JsonPath.<String>read(completion, "$.code")).isIn("MSG164", "MSG184");
+        }
+        assertThat(jdbc.queryForObject("SELECT status FROM sales_order WHERE id = ?", String.class, order))
+                .isEqualTo("COMPLETED");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE movement_type = 'SALE_ISSUE' "
+                + "AND sales_order_id = ?", Integer.class, order)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT sum(-quantity_change) FROM stock_movement WHERE sales_order_id = ?",
+                Integer.class, order)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT quantity FROM lot_balance WHERE lot_id = ? AND stock_status = "
+                + "'AVAILABLE'", Integer.class, padSoon)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_type = 'SALES_ORDER' "
+                + "AND entity_id = ? AND action = 'SALES_ORDER_COMPLETED'", Integer.class, order)).isEqualTo(1);
+    }
+
+    @Test
     void creditCompletesTheOrderWithOneReceivable() throws Exception {
         long order = confirmedOrder(pad, 2, oil, 1);   // 285,000 đ
         pay(managerToken, order, 85_000, null, "CASH", null, true).andExpect(status().isOk());
@@ -421,6 +510,16 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
     private ResultActions send(String token, String path, Map<String, Object> body) throws Exception {
         return mvc.perform(post(path).header(HttpHeaders.AUTHORIZATION, token)
                 .contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    /** Waits until {@code count} sessions wait for a lock, or the request has finished without waiting. */
+    private void awaitLockWaiters(int count, Future<?> request) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (!request.isDone() && System.nanoTime() < deadline && jdbc.queryForObject(
+                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'", Integer.class) < count) {
+            Thread.sleep(20);
+        }
+        assertThat(request.isDone()).as("the request waits for the order").isFalse();
     }
 
     private int saleIssues() {
