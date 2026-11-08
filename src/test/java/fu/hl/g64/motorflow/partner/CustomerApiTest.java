@@ -103,6 +103,20 @@ class CustomerApiTest extends IntegrationTest {
     }
 
     @Test
+    void aProfileEditDuringACreditRevocationDoesNotGrantCreditBack() throws Exception {
+        long id = createdId(send(post("/api/v1/customers"), bmToken, customer("Garage Hùng", "0912345678")));
+        jdbc.update("UPDATE customer SET credit_status = 'ELIGIBLE' WHERE id = ?", id);
+
+        whileAnotherTransactionHoldsTheRow("UPDATE customer SET credit_status = 'REVOKED' WHERE id = ?",
+                () -> send(put("/api/v1/customers/{id}", id), bmToken, customer("Garage Hùng Thịnh", "0912345678"))
+                        .andExpect(status().isOk()), id);
+
+        assertThat(jdbc.queryForMap("SELECT customer_name, credit_status FROM customer WHERE id = ?", id))
+                .containsEntry("customer_name", "Garage Hùng Thịnh")
+                .containsEntry("credit_status", "REVOKED");
+    }
+
+    @Test
     void anUpdateChangesTheProfileButNotWhatOrdersRecorded() throws Exception {
         long id = createdId(send(post("/api/v1/customers"), bmToken, customer("Garage Hùng", "0912345678")));
         long order = order(branch, "COMPLETED", "PAID");
