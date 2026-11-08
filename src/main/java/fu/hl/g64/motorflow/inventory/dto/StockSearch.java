@@ -9,13 +9,14 @@ package fu.hl.g64.motorflow.inventory.dto;
  * @param unavailableOnly only parts with stock awaiting inspection, wrong, damaged or awaiting supplier return
  * @param expiryAlertOnly only parts with available stock in lots expired or in the warning window (BR-76)
  * @param includeZero     keep rows without available stock, which the list hides unless one of the "only" filters is on
+ * @param productId       one part only
  */
 public record StockSearch(Long storeId, String q, Long categoryId, String storageArea, boolean lowStockOnly,
-                          boolean unavailableOnly, boolean expiryAlertOnly, boolean includeZero) {
+                          boolean unavailableOnly, boolean expiryAlertOnly, boolean includeZero, Long productId) {
 
     /** Scope only, for what is counted over the whole filter. */
     public static StockSearch scope(Long storeId, String q, Long categoryId, String storageArea) {
-        return new StockSearch(storeId, q, categoryId, storageArea, false, false, false, false);
+        return new StockSearch(storeId, q, categoryId, storageArea, false, false, false, false, null);
     }
 
     /** A row with no available stock still matters when the user asked for low, unavailable or expiring stock. */

@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/receipts/{{receiptId}}/result"
+method: PUT
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "lines": [
+        { "productId": {{shortPartId}}, "passedQty": 1, "damagedQty": 0 },
+        { "productId": {{excessPartId}}, "passedQty": 3, "damagedQty": 0 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{destStaffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const excess = pm.response.json().lines.find(line => line.productId === Number(pm.collectionVariables.get('excessPartId')));
+      pm.test('Ghi thừa 1', () => pm.expect(excess.excessQty).to.eql(1));
+    language: text/javascript
+order: 14000

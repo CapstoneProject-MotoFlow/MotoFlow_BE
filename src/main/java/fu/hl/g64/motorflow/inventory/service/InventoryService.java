@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
+import fu.hl.g64.motorflow.inventory.dto.StockByProductResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockMovementResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockRowResponse;
@@ -27,6 +28,12 @@ public interface InventoryService {
 
     /** UC-47: stock by part with low-stock and near-expiry warnings, ordered by store then part. */
     PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size);
+
+    /**
+     * UC-47, Owner: one row per part with totals over every warehouse in scope, ordered by SKU. A part is listed when
+     * at least one warehouse matches the filters; the totals still cover all its warehouses.
+     */
+    PageResponse<StockByProductResponse> stockByProduct(AuthenticatedUser user, StockSearch filter, int page, int size);
 
     /** UC-47: the counts above the list, over everything in scope and not only the current page. */
     StockSummaryResponse stockSummary(AuthenticatedUser user, StockSearch scope);

@@ -1,0 +1,21 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      const bmStore = Number(pm.collectionVariables.get('bmStoreId'));
+      pm.test('Chỉ có kho của mình', () => {
+          pm.expect(b.byStore.length).to.be.at.most(1);
+          b.byStore.forEach(s => pm.expect(s.storeId).to.eql(bmStore));
+      });
+      pm.test('Khớp số còn lại của kho', () => pm.expect(b.byStore
+          .reduce((t, s) => t + s.availableQty + s.otherQty, 0)).to.eql(b.remainingQty));
+    language: text/javascript
+order: 6300

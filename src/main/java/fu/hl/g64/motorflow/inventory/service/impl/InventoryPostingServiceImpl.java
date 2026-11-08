@@ -9,6 +9,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotReceiptPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
+import fu.hl.g64.motorflow.inventory.dto.SplitMovePosting;
 import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.LotBalance;
@@ -38,8 +39,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -155,6 +158,60 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             moved.add(new LotQuantity(pick.lot.getId(), pick.quantity));
         }
         return moved;
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void moveToStatuses(SplitMovePosting p) {
+        if (p.lots() == null || p.lots().isEmpty()) {
+            throw new IllegalArgumentException("the lots to move must be given");
+        }
+        Map<StockStatus, Integer> wanted = new EnumMap<>(StockStatus.class);
+        p.toQuantities().forEach((status, quantity) -> {
+            if (quantity < 0 || (p.fromStoreId().equals(p.toStoreId()) && status == p.fromStatus())) {
+                throw new IllegalArgumentException("cannot move " + quantity + " into " + status);
+            }
+            if (quantity > 0) {
+                wanted.put(status, quantity);
+            }
+        });
+        int total = wanted.values().stream().mapToInt(Integer::intValue).sum();
+        LocalDateTime now = LocalDateTime.now(clock);
+        InventoryPeriod period = openPeriod(now.toLocalDate());
+        boolean sameStore = p.fromStoreId().equals(p.toStoreId());
+        StockBalance from;
+        StockBalance to;
+        if (sameStore) {
+            from = to = lockBalance(p.fromStoreId(), p.productId(), now);
+        } else if (p.fromStoreId() < p.toStoreId()) {
+            from = lockBalance(p.fromStoreId(), p.productId(), now);
+            to = lockBalance(p.toStoreId(), p.productId(), now);
+        } else {
+            to = lockBalance(p.toStoreId(), p.productId(), now);
+            from = lockBalance(p.fromStoreId(), p.productId(), now);
+        }
+        Product product = product(p.productId());
+        List<Pick> picks = pick(p.fromStoreId(), product, p.fromStatus(), total, p.lots(), p.movementType(), now);
+        Iterator<Map.Entry<StockStatus, Integer>> statuses = wanted.entrySet().iterator();
+        Map.Entry<StockStatus, Integer> filling = statuses.next();
+        int left = filling.getValue();
+        for (Pick pick : picks) {
+            BigDecimal unitCost = costOf(product, pick.lot);
+            post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
+                    p.performedBy(), period, now);
+            int lotLeft = pick.quantity;
+            while (lotLeft > 0) {
+                if (left == 0) {
+                    filling = statuses.next();
+                    left = filling.getValue();
+                }
+                int part = Math.min(lotLeft, left);
+                post(to, pick.lot, filling.getKey(), part, unitCost, p.movementType(), p.source(), p.reason(),
+                        p.performedBy(), period, now);
+                lotLeft -= part;
+                left -= part;
+            }
+        }
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/extra-dispatch"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "lines": [
+        { "productId": {{excessPartId}}, "extraQty": 1 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const line = pm.response.json().lines.find(row => row.productId === Number(pm.collectionVariables.get('excessPartId')));
+      pm.test('Đã xác nhận xuất thêm 1', () => pm.expect(line.extraDispatchedQty).to.eql(1));
+    language: text/javascript
+order: 18000

@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotReceiptPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
+import fu.hl.g64.motorflow.inventory.dto.SplitMovePosting;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 
 import java.util.List;
@@ -59,6 +60,12 @@ public interface InventoryPostingService {
      * be OPEN (MSG85). Naming them for any other movement type, or only one of them, is an
      * {@link IllegalArgumentException}; naming neither posts into the current month as always.
      */
+     * {@link #move} of exactly the given lots into several statuses at once (a transfer receipt: passed into AVAILABLE,
+     * damaged into DAMAGED). The statuses are filled in enum order from the lots in the given order.
+     */
+    void moveToStatuses(SplitMovePosting posting);
+
+    /** Plus or minus on one known lot; never below zero (MSG84). */
     void adjustLot(LotAdjustPosting posting);
 
     /**

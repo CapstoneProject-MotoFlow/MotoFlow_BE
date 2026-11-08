@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=100&q={{lotSupplierQuery}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      const q = (pm.collectionVariables.get('lotSupplierQuery') || '').toLowerCase();
+      if (!q) {
+          pm.test.skip('Lô đang xem là lô không có NCC, bỏ qua', () => {});
+      } else {
+          pm.test('Có lô đang xem', () => pm.expect(b.page.items.map(r => r.lotId))
+              .to.include(Number(pm.collectionVariables.get('lotId'))));
+          pm.test('Mọi dòng khớp mã lô, SKU, tên phụ tùng, số lô hãng hoặc NCC', () => b.page.items.forEach(r =>
+              pm.expect([String(r.lotId), r.sku, r.partName, r.manufacturerLotNo, r.supplierName]
+                  .some(v => v && String(v).toLowerCase().includes(q))).to.be.true));
+      }
+    language: text/javascript
+order: 6100

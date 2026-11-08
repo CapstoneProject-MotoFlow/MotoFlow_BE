@@ -97,6 +97,22 @@ public class GoodsReceiptNote {
         return receipt;
     }
 
+    /**
+     * Transferred goods that arrived at the destination (TRANSFER_IN) or came back to the source (RETURN_TO_SOURCE),
+     * waiting for a Staff member to inspect them. They carry no delivery document of their own.
+     */
+    public static GoodsReceiptNote transfer(ReceiptType receiptType, long transferOrderId, LocalDateTime arrivedAt) {
+        if (receiptType == ReceiptType.SUPPLIER_DELIVERY) {
+            throw new IllegalArgumentException("a supplier delivery has no transfer order");
+        }
+        GoodsReceiptNote receipt = new GoodsReceiptNote();
+        receipt.receiptType = receiptType;
+        receipt.transferOrderId = transferOrderId;
+        receipt.arrivedAt = arrivedAt;
+        receipt.status = GoodsReceiptNoteStatus.AWAITING_INSPECTION;
+        return receipt;
+    }
+
     /** Waiting for its inspection result, the first one or a recount (UC-43). */
     public boolean awaitsResult() {
         return status == GoodsReceiptNoteStatus.AWAITING_INSPECTION || status == GoodsReceiptNoteStatus.AWAITING_RECOUNT;

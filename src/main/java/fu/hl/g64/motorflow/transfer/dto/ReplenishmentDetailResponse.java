@@ -15,7 +15,7 @@ public record ReplenishmentDetailResponse(long id, long requestingStoreId, Strin
                                           List<PurchaseOrderRef> purchaseOrders) {
 
     /**
-     * @param plannedQty   on the transfer orders of this request
+     * @param plannedQty   on the transfer orders of this request, the dispatched quantity once dispatched
      * @param fulfilledQty received and passed at the destination, on confirmed transfer receipts
      * @param remainingQty requested less fulfilled and to purchase, never below 0
      */
