@@ -403,7 +403,124 @@
                   "pm.test('Biến động không có giá vốn', () => b.movements.forEach(m => {",
                   "    pm.expect(m.unitCost).to.eql(null);",
                   "    pm.expect(m.value).to.eql(null);",
-                  "}));"
+                  "}));",
+                  "// Phần đầu tên NCC, viết hoa, để request tìm lô theo NCC dùng; lô đầu kỳ không có NCC thì để trống.",
+                  "pm.collectionVariables.set('lotSupplierQuery', b.supplierName ? b.supplierName.slice(0, 4).toUpperCase() : '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tìm lô theo tên NCC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=100&q={{lotSupplierQuery}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const q = (pm.collectionVariables.get('lotSupplierQuery') || '').toLowerCase();",
+                  "if (!q) {",
+                  "    pm.test.skip('Lô đang xem là lô không có NCC, bỏ qua', () => {});",
+                  "} else {",
+                  "    pm.test('Có lô đang xem', () => pm.expect(b.page.items.map(r => r.lotId))",
+                  "        .to.include(Number(pm.collectionVariables.get('lotId'))));",
+                  "    pm.test('Mọi dòng khớp mã lô, SKU, tên phụ tùng, số lô hãng hoặc NCC', () => b.page.items.forEach(r =>",
+                  "        pm.expect([String(r.lotId), r.sku, r.partName, r.manufacturerLotNo, r.supplierName]",
+                  "            .some(v => v && String(v).toLowerCase().includes(q))).to.be.true));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem lô theo từng kho (byStore)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "pm.test('byStore có kho của Branch Manager', () => pm.expect(b.byStore.map(s => s.storeId)).to.include(bmStore));",
+                  "pm.test('Mọi kho trong byStore còn giữ lô', () => b.byStore.forEach(s =>",
+                  "    pm.expect(s.availableQty + s.otherQty + s.inTransitQty).to.be.above(0)));",
+                  "pm.test('Sắp theo tên kho', () => {",
+                  "    const names = b.byStore.map(s => s.storeName);",
+                  "    pm.expect(names).to.eql([...names].sort());",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM chỉ thấy kho mình trong byStore",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "pm.test('Chỉ có kho của mình', () => {",
+                  "    pm.expect(b.byStore.length).to.be.at.most(1);",
+                  "    b.byStore.forEach(s => pm.expect(s.storeId).to.eql(bmStore));",
+                  "});",
+                  "pm.test('Khớp số còn lại của kho', () => pm.expect(b.byStore",
+                  "    .reduce((t, s) => t + s.availableQty + s.otherQty, 0)).to.eql(b.remainingQty));"
                 ]
               }
             }
@@ -1153,6 +1270,109 @@
                 {
                   "key": "token",
                   "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem tồn mọi kho theo phụ tùng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock/by-product?size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có phụ tùng', () => pm.expect(b.items).to.not.be.empty);",
+                  "pm.test('totalItems đếm phụ tùng', () => pm.expect(b.totalItems).to.be.at.least(b.items.length));",
+                  "pm.test('Mỗi phụ tùng một dòng', () =>",
+                  "    pm.expect(new Set(b.items.map(r => r.productId)).size).to.eql(b.items.length));",
+                  "pm.test('Tồn thực có = tổng các trạng thái trong kho', () => b.items.forEach(r =>",
+                  "    pm.expect(r.onHandQty).to.eql(r.availableQty + r.awaitingInspectionQty + r.wrongItemQty",
+                  "        + r.damagedQty + r.awaitingSupplierReturnQty)));",
+                  "pm.test('Có giá trị tồn cho Owner', () => b.items.forEach(r => pm.expect(r).to.have.property('stockValue')));",
+                  "pm.collectionVariables.set('byProductId', b.items[0].productId);",
+                  "pm.collectionVariables.set('byProductAvailable', b.items[0].availableQty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner mở một phụ tùng ra từng kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock?productId={{byProductId}}&includeZero=true&size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const id = Number(pm.collectionVariables.get('byProductId'));",
+                  "pm.test('Chỉ có phụ tùng đã chọn', () => b.items.forEach(r => pm.expect(r.productId).to.eql(id)));",
+                  "pm.test('Cộng khả dụng các kho khớp dòng Mọi kho', () => pm.expect(b.items",
+                  "    .reduce((t, r) => t + r.availableQty, 0)).to.eql(Number(pm.collectionVariables.get('byProductAvailable'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem tồn mọi kho bị 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock/by-product",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
                   "type": "string"
                 }
               ]
