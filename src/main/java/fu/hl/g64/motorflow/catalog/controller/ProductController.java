@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.catalog.controller;
 
+import fu.hl.g64.motorflow.catalog.dto.BarcodeLookupResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductRequest;
 import fu.hl.g64.motorflow.catalog.dto.ProductResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductSearch;
@@ -49,6 +50,13 @@ public class ProductController {
     public ProductResponse detail(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id,
                                   @RequestParam(required = false) Long storeId) {
         return productService.detail(user, id, storeId);
+    }
+
+    @Operation(summary = "The one part a scanned barcode belongs to, with available stock of the viewed store (BR-77)")
+    @GetMapping("/barcode/{code}")
+    public BarcodeLookupResponse byBarcode(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable String code,
+                                           @RequestParam(required = false) Long storeId) {
+        return productService.findByBarcode(user, code, storeId);
     }
 
     @Operation(summary = "Create a part (UC-15)")

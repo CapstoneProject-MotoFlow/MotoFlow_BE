@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,4 +28,11 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     int markAllRead(Long recipientId, LocalDateTime now);
 
     List<Notification> findTop5ByRecipientIdAndIsReadFalseOrderByCreatedAtDescIdDesc(Long recipientId);
+
+    /** Daily jobs: what the recipients were already told about, so a job does not repeat it (JOB-02, JOB-03). */
+    @Query("""
+            select n from Notification n
+            where n.notificationType = :type and n.refType = :refType and n.recipientId in :recipientIds
+              and (:unreadOnly = false or n.isRead = false)""")
+    List<Notification> findSent(String type, String refType, Collection<Long> recipientIds, boolean unreadOnly);
 }

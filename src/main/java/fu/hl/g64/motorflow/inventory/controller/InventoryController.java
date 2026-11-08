@@ -9,6 +9,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LotTab;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
+import fu.hl.g64.motorflow.inventory.dto.PastDateStockResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockByProductResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse;
@@ -40,7 +41,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.List;
 
-@Tag(name = "Inventory", description = "UC-47 to UC-51, UC-97, UC-98 (Owner, Branch Manager), UC-104 (Owner)")
+@Tag(name = "Inventory", description = "UC-47 to UC-51, UC-97, UC-98, UC-103 (Owner, Branch Manager), UC-104 (Owner)")
 @RestController
 @RequestMapping("/api/v1/inventory")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
@@ -134,6 +135,21 @@ public class InventoryController {
             @RequestParam(defaultValue = "20") int size) {
         return inventoryService.movements(user, new MovementSearch(storeId, productId, lotId, movementType, from, to),
                 page, size);
+    }
+
+    @Operation(summary = "Closing quantity of each part in one warehouse at the end of a past date (UC-103). The Owner "
+            + "must give storeId; a Branch Manager sees their own warehouse")
+    @GetMapping("/past-date-stock")
+    public PastDateStockResponse pastDateStock(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) Long storeId,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(defaultValue = "false") boolean includeZero,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return inventoryService.pastDateStock(user, date, storeId, q, categoryId, includeZero, page, size);
     }
 
     @Operation(summary = "Lots of a warehouse by tab, without prices (UC-97). Without storeId: own warehouse, or every "

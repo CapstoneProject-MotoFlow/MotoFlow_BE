@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotListResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotSearch;
 import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
+import fu.hl.g64.motorflow.inventory.dto.PastDateStockResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockByProductResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse;
@@ -16,6 +17,7 @@ import fu.hl.g64.motorflow.inventory.dto.StockSummaryResponse;
 import fu.hl.g64.motorflow.inventory.dto.StorageLocationRequest;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 
@@ -65,4 +67,11 @@ public interface InventoryService {
      * it the warehouse that first received the lot.
      */
     LotDetailResponse lotDetail(AuthenticatedUser user, long lotId, Long storeId);
+
+    /**
+     * UC-103: closing stock of each part in one warehouse at the end of a past date. The Owner must name the warehouse;
+     * a Branch Manager sees their own only.
+     */
+    PastDateStockResponse pastDateStock(AuthenticatedUser user, LocalDate date, Long storeId, String q, Long categoryId,
+                                        boolean includeZero, int page, int size);
 }

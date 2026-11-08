@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.catalog.service;
 
+import fu.hl.g64.motorflow.catalog.dto.BarcodeLookupResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductRequest;
 import fu.hl.g64.motorflow.catalog.dto.ProductResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductSearch;
@@ -14,6 +15,12 @@ public interface ProductService {
     PageResponse<ProductSummaryResponse> search(AuthenticatedUser user, ProductSearch filter, int page, int size);
 
     ProductResponse detail(AuthenticatedUser user, long id, Long storeId);
+
+    /**
+     * BR-77: exact match on a barcode, trimmed. Branch Manager and Staff always see their own store; the Owner sees
+     * {@code storeId}, or no stock when it is null. Discontinued parts are returned too, with their status.
+     */
+    BarcodeLookupResponse findByBarcode(AuthenticatedUser user, String code, Long storeId);
 
     /** UC-15. Creates no stock (DBR-02); prices are set afterwards in SCR-25. */
     ProductResponse create(AuthenticatedUser actor, ProductRequest request);

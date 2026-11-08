@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "MotoFlow - Iteration 2",
-    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.\n- bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.\n- Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.\n- Thư mục Phiếu chuyển kho ghi dữ liệu và tồn kho: mỗi lần chạy chuyển 2 phụ tùng từ kho tổng (bm.kho, nv.kho1) tới Cầu Giấy (bm.cg, nv.cg1), nhận thiếu 1 ở phụ tùng đầu, thừa 1 ở phụ tùng sau, trả phần thiếu về kho tổng rồi đóng phiếu. Cần kho tổng còn ít nhất 3 cái bán được của 2 phụ tùng; chạy lại nhiều lần được tới khi hết hàng.\n- Thư mục Kiểm kê ghi dữ liệu vào kho của bm.kho: mỗi lần chạy tạo 2 yêu cầu kiểm kê (1 được trả lời, 1 bị hủy), 2 phiếu kiểm (1 được duyệt, 1 bị hủy) và cộng 1 vào tồn của 1 phụ tùng. Trước khi chạy, kho này không được có phiếu kiểm DRAFT, COUNTING hay AWAITING_APPROVAL (SC-1); nv.kho1 phải là Staff của kho đó.",
+    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.\n- bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.\n- Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.\n- Thư mục Phiếu chuyển kho ghi dữ liệu và tồn kho: mỗi lần chạy chuyển 2 phụ tùng từ kho tổng (bm.kho, nv.kho1) tới Cầu Giấy (bm.cg, nv.cg1), nhận thiếu 1 ở phụ tùng đầu, thừa 1 ở phụ tùng sau, trả phần thiếu về kho tổng rồi đóng phiếu. Cần kho tổng còn ít nhất 3 cái bán được của 2 phụ tùng; chạy lại nhiều lần được tới khi hết hàng.\n- Thư mục Kiểm kê ghi dữ liệu vào kho của bm.kho: mỗi lần chạy tạo 2 yêu cầu kiểm kê (1 được trả lời, 1 bị hủy), 2 phiếu kiểm (1 được duyệt, 1 bị hủy) và cộng 1 vào tồn của 1 phụ tùng. Trước khi chạy, kho này không được có phiếu kiểm DRAFT, COUNTING hay AWAITING_APPROVAL (SC-1); nv.kho1 phải là Staff của kho đó.\n- Thư mục Mã vạch chỉ đọc dữ liệu: quét mã 8936012340011 (BUG-NGK-CPR8) của dữ liệu demo; Admin dùng tài khoản admin2.\n- Thư mục Tồn kho ngày đã qua chỉ đọc, cần dữ liệu demo; ngày hôm nay và hôm qua tính theo giờ Việt Nam (UTC+7) trong script chạy trước request đầu tiên.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -28,6 +28,11 @@
     {
       "key": "staffUsername",
       "value": "nv.kho1",
+      "type": "string"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin2",
       "type": "string"
     },
     {
@@ -3806,6 +3811,395 @@
                 "exec": [
                   "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
                   "pm.test('Mã MSG245', () => pm.expect(pm.response.json().code).to.eql('MSG245'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mã vạch (BR-77)",
+      "item": [
+        {
+          "name": "BM quét mã đúng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/8936012340011",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Đúng phụ tùng', () => pm.expect(b.sku).to.eql('BUG-NGK-CPR8'));",
+                  "pm.test('Tồn của kho mình', () => {",
+                  "    pm.expect(b.storeId).to.eql(Number(pm.collectionVariables.get('bmStoreId')));",
+                  "    pm.expect(b.availableQty).to.be.a('number');",
+                  "});",
+                  "pm.test('Không có giá', () => pm.expect(b).to.not.have.any.keys('retailPrice', 'movingAvgCost'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quét mã có khoảng trắng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/%20%208936012340011%20",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Khoảng trắng bị bỏ', () => pm.expect(pm.response.json().barcode).to.eql('8936012340011'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mã không tồn tại trả MSG91",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/0000000000000",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG91', () => pm.expect(pm.response.json().code).to.eql('MSG91'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner không chọn kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/8936012340011",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Không có kho và tồn', () => {",
+                  "    pm.expect(b.storeId).to.eql(null);",
+                  "    pm.expect(b.availableQty).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('adminToken', b.accessToken);",
+                  "pm.test('Vai trò ADMIN', () => pm.expect(b.user.role).to.eql('ADMIN'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin bị 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products/barcode/8936012340011",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{adminToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tồn kho ngày đã qua (UC-103)",
+      "item": [
+        {
+          "name": "BM tra tồn kho hôm qua",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/past-date-stock?date={{yesterday}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Vietnam time (UTC+7), as yyyy-MM-dd; later requests of this folder reuse the variables.",
+                  "const vn = ms => new Date(Date.now() + 7 * 3600 * 1000 + ms).toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('today', vn(0));",
+                  "pm.collectionVariables.set('yesterday', vn(-24 * 3600 * 1000));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Đúng kho của Branch Manager', () =>",
+                  "    pm.expect(b.storeId).to.eql(Number(pm.collectionVariables.get('bmStoreId'))));",
+                  "pm.test('Đúng ngày đã hỏi', () => pm.expect(b.date).to.eql(pm.collectionVariables.get('yesterday')));",
+                  "pm.test('Có khóa basedOnPeriod', () => pm.expect(b).to.have.property('basedOnPeriod'));",
+                  "pm.test('Tồn cuối ngày là số, không âm và mặc định bỏ dòng bằng 0', () => b.page.items.forEach(row => {",
+                  "    pm.expect(row.closingQty).to.be.a('number');",
+                  "    pm.expect(row.closingQty).to.be.above(0);",
+                  "}));",
+                  "pm.test('Xếp theo SKU', () => {",
+                  "    const skus = b.page.items.map(row => row.sku);",
+                  "    pm.expect(skus).to.eql([...skus].sort());",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner tra một kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/past-date-stock?date={{yesterday}}&storeId={{branchStoreId}}&includeZero=true",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Đúng kho đã chọn', () =>",
+                  "    pm.expect(b.storeId).to.eql(Number(pm.collectionVariables.get('branchStoreId'))));",
+                  "pm.test('Tồn cuối ngày là số không âm', () => b.page.items.forEach(row => {",
+                  "    pm.expect(row.closingQty).to.be.a('number');",
+                  "    pm.expect(row.closingQty).to.be.at.least(0);",
+                  "}));",
+                  "pm.test('Không có giá', () => pm.expect(pm.response.text().toLowerCase()).to.not.match(/price|cost|value/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner không chọn kho bị MSG02",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/past-date-stock?date={{yesterday}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tra hôm nay bị MSG92",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/past-date-stock?date={{today}}&storeId={{bmStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG92', () => pm.expect(pm.response.json().code).to.eql('MSG92'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tra kho khác bị MSG05",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/past-date-stock?date={{yesterday}}&storeId={{otherStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
                 ]
               }
             }

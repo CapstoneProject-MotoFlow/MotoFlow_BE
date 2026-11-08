@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.inventory.repository;
 
 import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
+import fu.hl.g64.motorflow.inventory.entity.enums.InventoryPeriodStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -11,6 +12,10 @@ import java.util.Optional;
 public interface InventoryPeriodRepository extends JpaRepository<InventoryPeriod, Long> {
 
     Optional<InventoryPeriod> findByPeriodMonth(LocalDate periodMonth);
+
+    /** UC-103: the latest closed period that ended before the date. */
+    Optional<InventoryPeriod> findFirstByStatusAndToDateBeforeOrderByToDateDesc(InventoryPeriodStatus status,
+                                                                               LocalDate date);
 
     /**
      * Opens the calendar month as a period if it does not exist yet, chained to the latest earlier period.
