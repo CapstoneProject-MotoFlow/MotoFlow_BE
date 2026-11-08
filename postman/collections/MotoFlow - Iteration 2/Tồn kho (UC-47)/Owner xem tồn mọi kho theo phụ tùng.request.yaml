@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/stock/by-product?size=100"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có phụ tùng', () => pm.expect(b.items).to.not.be.empty);
+      pm.test('totalItems đếm phụ tùng', () => pm.expect(b.totalItems).to.be.at.least(b.items.length));
+      pm.test('Mỗi phụ tùng một dòng', () =>
+          pm.expect(new Set(b.items.map(r => r.productId)).size).to.eql(b.items.length));
+      pm.test('Tồn thực có = tổng các trạng thái trong kho', () => b.items.forEach(r =>
+          pm.expect(r.onHandQty).to.eql(r.availableQty + r.awaitingInspectionQty + r.wrongItemQty
+              + r.damagedQty + r.awaitingSupplierReturnQty)));
+      pm.test('Có giá trị tồn cho Owner', () => b.items.forEach(r => pm.expect(r).to.have.property('stockValue')));
+      pm.collectionVariables.set('byProductId', b.items[0].productId);
+      pm.collectionVariables.set('byProductAvailable', b.items[0].availableQty);
+    language: text/javascript
+order: 5000

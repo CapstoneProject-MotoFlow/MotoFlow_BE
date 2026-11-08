@@ -1,0 +1,19 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/start"
+method: POST
+auth:
+  type: bearer
+  credentials:
+    token: "{{staffToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Phiếu COUNTING', () => pm.expect(b.status).to.eql('COUNTING'));
+      pm.test('Staff không thấy số sổ và chênh lệch', () => b.lines.forEach(l => {
+          pm.expect(l.bookQty == null).to.be.true;
+          pm.expect(l.difference == null).to.be.true;
+      }));
+    language: text/javascript
+order: 13000

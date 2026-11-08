@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "countType": "CYCLE",
+      "countDate": "{{countDate}}",
+      "scopeType": "WHOLE"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã MSG230', () => pm.expect(pm.response.json().code).to.eql('MSG230'));
+    language: text/javascript
+order: 10000

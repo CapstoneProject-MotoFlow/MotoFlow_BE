@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/stock?size=100"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const ids = pm.response.json().items.filter(row => row.productStatus === 'ACTIVE' && row.availableQty >= 3)
+          .map(row => row.productId);
+      pm.test('Có ít nhất 2 phụ tùng còn hàng', () => pm.expect(ids.length).to.be.at.least(2));
+      pm.collectionVariables.set('candidateIds', ids.slice(0, 50).join(','));
+    language: text/javascript
+order: 3000

@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có yêu cầu vừa tạo', () => pm.expect(b.pendingRequests.map(r => r.id))
+          .to.include(Number(pm.collectionVariables.get('countRequestId'))));
+    language: text/javascript
+order: 6000

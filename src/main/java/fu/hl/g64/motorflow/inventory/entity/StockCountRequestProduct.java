@@ -26,4 +26,11 @@ public class StockCountRequestProduct {
 
     @Column(name = "product_id", nullable = false)
     private Long productId;
+
+    public static StockCountRequestProduct create(Long stockCountRequestId, Long productId) {
+        StockCountRequestProduct product = new StockCountRequestProduct();
+        product.stockCountRequestId = stockCountRequestId;
+        product.productId = productId;
+        return product;
+    }
 }

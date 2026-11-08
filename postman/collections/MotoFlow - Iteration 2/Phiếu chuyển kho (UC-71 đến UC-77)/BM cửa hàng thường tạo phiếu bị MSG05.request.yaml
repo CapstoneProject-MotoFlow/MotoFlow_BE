@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "sourceStoreId": {{bmStoreId}},
+      "destStoreId": {{branchStoreId}},
+      "lines": [
+        { "productId": {{shortPartId}}, "plannedQty": 2 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 403', () => pm.response.to.have.status(403));
+      pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));
+    language: text/javascript
+order: 5000

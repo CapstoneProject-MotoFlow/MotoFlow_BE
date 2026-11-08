@@ -62,4 +62,64 @@ public class StockCountLine {
 
     @Column(name = "previous_counted_qty")
     private Integer previousCountedQty;
+
+    /** UC-91: a line to count; the book quantity is taken when counting starts (BR-79). */
+    public static StockCountLine create(Long stockCountId, Long productId, Long lotId, LocalDate expiryDate) {
+        StockCountLine line = new StockCountLine();
+        line.stockCountId = stockCountId;
+        line.productId = productId;
+        line.lotId = lotId;
+        line.expiryDate = expiryDate;
+        return line;
+    }
+
+    /** UC-93: the book quantity when counting starts. */
+    public void takeBookQty(int bookQty) {
+        this.bookQty = bookQty;
+    }
+
+    /**
+     * UC-93, BR-79: counting again after a recount request keeps the earlier book and counted quantities, takes a new
+     * book quantity and clears the count.
+     */
+    public void restartRecount(int newBookQty) {
+        previousBookQty = bookQty;
+        previousCountedQty = countedQty;
+        bookQty = newBookQty;
+        countedQty = null;
+        countedBy = null;
+        countedAt = null;
+    }
+
+    /** UC-93: the counted quantity, or null to leave the line uncounted. */
+    public void record(Integer countedQty, Long countedBy, LocalDateTime now) {
+        this.countedQty = countedQty;
+        this.countedBy = countedQty == null ? null : countedBy;
+        this.countedAt = countedQty == null ? null : now;
+    }
+
+    /** UC-94: why the counted quantity differs from the book. */
+    public void explain(String reason) {
+        this.reason = reason;
+    }
+
+    /** UC-94: the line goes back to the counter. */
+    public void requestRecount(String reason) {
+        recountRequested = true;
+        recountReason = reason;
+    }
+
+    /** UC-94: the recount was confirmed. */
+    public void clearRecount() {
+        recountRequested = false;
+    }
+
+    public boolean isCounted() {
+        return countedQty != null;
+    }
+
+    /** Counted minus book, or null while uncounted. */
+    public Integer difference() {
+        return countedQty == null ? null : countedQty - bookQty;
+    }
 }

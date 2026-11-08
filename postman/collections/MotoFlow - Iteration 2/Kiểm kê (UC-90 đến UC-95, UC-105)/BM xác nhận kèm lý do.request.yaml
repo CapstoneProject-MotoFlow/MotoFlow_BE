@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/confirm"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "reasons": [{ "lineId": {{firstLineId}}, "reason": "Hàng khách trả chưa nhập" }]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Chờ Owner duyệt', () => pm.expect(b.status).to.eql('AWAITING_APPROVAL'));
+      pm.test('Dòng đầu chênh +1', () => pm.expect(b.lines.find(l => l.id === Number(pm.collectionVariables.get('firstLineId')))
+          .difference).to.eql(1));
+    language: text/javascript
+order: 18000

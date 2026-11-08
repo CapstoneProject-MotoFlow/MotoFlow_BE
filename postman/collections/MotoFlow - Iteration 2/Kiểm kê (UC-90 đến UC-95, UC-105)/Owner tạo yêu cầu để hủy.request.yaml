@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-count-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeId": {{bmStoreId}},
+      "scopeType": "PRODUCTS",
+      "reason": "Kiểm định kỳ từ Postman",
+      "productIds": [{{countPartId}}]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('cancelRequestId', pm.response.json().id);
+    language: text/javascript
+order: 29000

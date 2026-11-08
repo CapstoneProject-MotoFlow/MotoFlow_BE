@@ -1,0 +1,17 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts/prefill?requestId={{countRequestId}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Phạm vi PRODUCTS', () => pm.expect(b.scopeType).to.eql('PRODUCTS'));
+      pm.test('Đúng phụ tùng', () => pm.expect(b.products[0].productId)
+          .to.eql(Number(pm.collectionVariables.get('countPartId'))));
+    language: text/javascript
+order: 7000

@@ -11,6 +11,7 @@ import fu.hl.g64.motorflow.inventory.dto.LowStockThresholdRequest;
 import fu.hl.g64.motorflow.inventory.dto.MovementSearch;
 import fu.hl.g64.motorflow.inventory.dto.PastDateStockResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
+import fu.hl.g64.motorflow.inventory.dto.StockByProductResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockMovementResponse;
 import fu.hl.g64.motorflow.inventory.dto.StockRowResponse;
@@ -62,10 +63,29 @@ public class InventoryController {
                                                     @RequestParam(defaultValue = "false") boolean unavailableOnly,
                                                     @RequestParam(defaultValue = "false") boolean expiryAlertOnly,
                                                     @RequestParam(defaultValue = "false") boolean includeZero,
+                                                    @RequestParam(required = false) Long productId,
                                                     @RequestParam(defaultValue = "0") int page,
                                                     @RequestParam(defaultValue = "20") int size) {
         return inventoryService.listStock(user, new StockSearch(storeId, q, categoryId, storageArea, lowStockOnly,
-                unavailableOnly, expiryAlertOnly, includeZero), page, size);
+                unavailableOnly, expiryAlertOnly, includeZero, productId), page, size);
+    }
+
+    @Operation(summary = "Stock per part across every warehouse, one row per part (UC-47, Owner). A part is listed "
+            + "when at least one warehouse matches the filters; its totals cover all warehouses in scope")
+    @GetMapping("/stock/by-product")
+    @PreAuthorize("hasRole('OWNER')")
+    public PageResponse<StockByProductResponse> stockByProduct(@AuthenticationPrincipal AuthenticatedUser user,
+                                                               @RequestParam(required = false) String q,
+                                                               @RequestParam(required = false) Long categoryId,
+                                                               @RequestParam(required = false) String storageArea,
+                                                               @RequestParam(defaultValue = "false") boolean lowStockOnly,
+                                                               @RequestParam(defaultValue = "false") boolean unavailableOnly,
+                                                               @RequestParam(defaultValue = "false") boolean expiryAlertOnly,
+                                                               @RequestParam(defaultValue = "false") boolean includeZero,
+                                                               @RequestParam(defaultValue = "0") int page,
+                                                               @RequestParam(defaultValue = "20") int size) {
+        return inventoryService.stockByProduct(user, new StockSearch(null, q, categoryId, storageArea, lowStockOnly,
+                unavailableOnly, expiryAlertOnly, includeZero, null), page, size);
     }
 
     @Operation(summary = "Counts for the stock screen over the whole filter (UC-47). Without storeId: own warehouse, or "

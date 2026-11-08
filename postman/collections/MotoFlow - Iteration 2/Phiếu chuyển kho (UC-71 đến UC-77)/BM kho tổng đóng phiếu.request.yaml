@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/close"
+method: POST
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Phiếu đã đóng', () => pm.expect(b.status).to.eql('CLOSED'));
+      const short = b.lines.find(row => row.productId === Number(pm.collectionVariables.get('shortPartId')));
+      pm.test('Phần thiếu đã trả về nguồn', () => {
+          pm.expect(short.returnedQty).to.eql(1);
+          pm.expect(short.unresolvedQty).to.eql(0);
+      });
+      pm.test('Hồ sơ sai lệch đã đóng, có sự kiện trả về', () => {
+          pm.expect(b.discrepancies[0].status).to.eql('CLOSED');
+          pm.expect(b.discrepancies[0].events.map(e => e.resolutionType)).to.include('RECEIVED_BACK_AT_SOURCE');
+      });
+    language: text/javascript
+order: 25000

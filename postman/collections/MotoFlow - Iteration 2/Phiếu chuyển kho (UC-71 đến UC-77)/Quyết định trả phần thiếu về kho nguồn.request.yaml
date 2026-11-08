@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/discrepancy/decisions"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "productId": {{shortPartId}},
+      "decision": "RETURN_TO_SOURCE",
+      "quantity": 1,
+      "reason": "Kho đích không nhận được, xe còn hàng"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const line = pm.response.json().lines.find(row => row.productId === Number(pm.collectionVariables.get('shortPartId')));
+      pm.test('Quyết định chưa giảm số chưa có kết quả', () => pm.expect(line.unresolvedQty).to.eql(1));
+    language: text/javascript
+order: 19000

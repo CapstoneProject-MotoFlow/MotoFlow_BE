@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "MotoFlow - Iteration 2",
-    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.\n- bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.\n- Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.\n- Thư mục Mã vạch chỉ đọc dữ liệu: quét mã 8936012340011 (BUG-NGK-CPR8) của dữ liệu demo; Admin dùng tài khoản admin2.\n- Thư mục Tồn kho ngày đã qua chỉ đọc, cần dữ liệu demo; ngày hôm nay và hôm qua tính theo giờ Việt Nam (UTC+7) trong script chạy trước request đầu tiên.",
+    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026).\n- Thư mục Lô hàng chỉ đọc dữ liệu. Thư mục Yêu cầu bổ sung ghi dữ liệu: mỗi lần chạy tạo 1 cửa hàng PLANNED và 2 yêu cầu mới, chạy lại nhiều lần được.\n- bm.kho là Branch Manager kho tổng: cố ý dùng tài khoản này vì UC-97, UC-98 không cho cả BM kho tổng xem kho khác.\n- bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.\n- Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.\n- Thư mục Phiếu chuyển kho ghi dữ liệu và tồn kho: mỗi lần chạy chuyển 2 phụ tùng từ kho tổng (bm.kho, nv.kho1) tới Cầu Giấy (bm.cg, nv.cg1), nhận thiếu 1 ở phụ tùng đầu, thừa 1 ở phụ tùng sau, trả phần thiếu về kho tổng rồi đóng phiếu. Cần kho tổng còn ít nhất 3 cái bán được của 2 phụ tùng; chạy lại nhiều lần được tới khi hết hàng.\n- Thư mục Kiểm kê ghi dữ liệu vào kho của bm.kho: mỗi lần chạy tạo 2 yêu cầu kiểm kê (1 được trả lời, 1 bị hủy), 2 phiếu kiểm (1 được duyệt, 1 bị hủy) và cộng 1 vào tồn của 1 phụ tùng. Trước khi chạy, kho này không được có phiếu kiểm DRAFT, COUNTING hay AWAITING_APPROVAL (SC-1); nv.kho1 phải là Staff của kho đó.\n- Thư mục Mã vạch chỉ đọc dữ liệu: quét mã 8936012340011 (BUG-NGK-CPR8) của dữ liệu demo; Admin dùng tài khoản admin2.\n- Thư mục Tồn kho ngày đã qua chỉ đọc, cần dữ liệu demo; ngày hôm nay và hôm qua tính theo giờ Việt Nam (UTC+7) trong script chạy trước request đầu tiên.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -33,6 +33,11 @@
     {
       "key": "adminUsername",
       "value": "admin2",
+      "type": "string"
+    },
+    {
+      "key": "destStaffUsername",
+      "value": "nv.cg1",
       "type": "string"
     },
     {
@@ -199,6 +204,7 @@
                   "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('staffToken', b.accessToken);",
+                  "pm.collectionVariables.set('staffUserId', b.user.id);",
                   "pm.test('Vai trò STAFF', () => pm.expect(b.user.role).to.eql('STAFF'));"
                 ]
               }
@@ -408,7 +414,124 @@
                   "pm.test('Biến động không có giá vốn', () => b.movements.forEach(m => {",
                   "    pm.expect(m.unitCost).to.eql(null);",
                   "    pm.expect(m.value).to.eql(null);",
-                  "}));"
+                  "}));",
+                  "// Phần đầu tên NCC, viết hoa, để request tìm lô theo NCC dùng; lô đầu kỳ không có NCC thì để trống.",
+                  "pm.collectionVariables.set('lotSupplierQuery', b.supplierName ? b.supplierName.slice(0, 4).toUpperCase() : '');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tìm lô theo tên NCC",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=100&q={{lotSupplierQuery}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const q = (pm.collectionVariables.get('lotSupplierQuery') || '').toLowerCase();",
+                  "if (!q) {",
+                  "    pm.test.skip('Lô đang xem là lô không có NCC, bỏ qua', () => {});",
+                  "} else {",
+                  "    pm.test('Có lô đang xem', () => pm.expect(b.page.items.map(r => r.lotId))",
+                  "        .to.include(Number(pm.collectionVariables.get('lotId'))));",
+                  "    pm.test('Mọi dòng khớp mã lô, SKU, tên phụ tùng, số lô hãng hoặc NCC', () => b.page.items.forEach(r =>",
+                  "        pm.expect([String(r.lotId), r.sku, r.partName, r.manufacturerLotNo, r.supplierName]",
+                  "            .some(v => v && String(v).toLowerCase().includes(q))).to.be.true));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem lô theo từng kho (byStore)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "pm.test('byStore có kho của Branch Manager', () => pm.expect(b.byStore.map(s => s.storeId)).to.include(bmStore));",
+                  "pm.test('Mọi kho trong byStore còn giữ lô', () => b.byStore.forEach(s =>",
+                  "    pm.expect(s.availableQty + s.otherQty + s.inTransitQty).to.be.above(0)));",
+                  "pm.test('Sắp theo tên kho', () => {",
+                  "    const names = b.byStore.map(s => s.storeName);",
+                  "    pm.expect(names).to.eql([...names].sort());",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM chỉ thấy kho mình trong byStore",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots/{{lotId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const bmStore = Number(pm.collectionVariables.get('bmStoreId'));",
+                  "pm.test('Chỉ có kho của mình', () => {",
+                  "    pm.expect(b.byStore.length).to.be.at.most(1);",
+                  "    b.byStore.forEach(s => pm.expect(s.storeId).to.eql(bmStore));",
+                  "});",
+                  "pm.test('Khớp số còn lại của kho', () => pm.expect(b.byStore",
+                  "    .reduce((t, s) => t + s.availableQty + s.otherQty, 0)).to.eql(b.remainingQty));"
                 ]
               }
             }
@@ -1170,6 +1293,2524 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem tồn mọi kho theo phụ tùng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock/by-product?size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có phụ tùng', () => pm.expect(b.items).to.not.be.empty);",
+                  "pm.test('totalItems đếm phụ tùng', () => pm.expect(b.totalItems).to.be.at.least(b.items.length));",
+                  "pm.test('Mỗi phụ tùng một dòng', () =>",
+                  "    pm.expect(new Set(b.items.map(r => r.productId)).size).to.eql(b.items.length));",
+                  "pm.test('Tồn thực có = tổng các trạng thái trong kho', () => b.items.forEach(r =>",
+                  "    pm.expect(r.onHandQty).to.eql(r.availableQty + r.awaitingInspectionQty + r.wrongItemQty",
+                  "        + r.damagedQty + r.awaitingSupplierReturnQty)));",
+                  "pm.test('Có giá trị tồn cho Owner', () => b.items.forEach(r => pm.expect(r).to.have.property('stockValue')));",
+                  "pm.collectionVariables.set('byProductId', b.items[0].productId);",
+                  "pm.collectionVariables.set('byProductAvailable', b.items[0].availableQty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner mở một phụ tùng ra từng kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock?productId={{byProductId}}&includeZero=true&size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "const id = Number(pm.collectionVariables.get('byProductId'));",
+                  "pm.test('Chỉ có phụ tùng đã chọn', () => b.items.forEach(r => pm.expect(r.productId).to.eql(id)));",
+                  "pm.test('Cộng khả dụng các kho khớp dòng Mọi kho', () => pm.expect(b.items",
+                  "    .reduce((t, r) => t + r.availableQty, 0)).to.eql(Number(pm.collectionVariables.get('byProductAvailable'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem tồn mọi kho bị 403",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock/by-product",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Phiếu chuyển kho (UC-71 đến UC-77)",
+      "item": [
+        {
+          "name": "Staff kho tổng đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{staffUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('staffToken', b.accessToken);",
+                  "pm.collectionVariables.set('staffId', b.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff Cầu Giấy đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{destStaffUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('destStaffToken', b.accessToken);",
+                  "pm.collectionVariables.set('destStaffId', b.user.id);",
+                  "pm.test('Cùng cửa hàng với bm.cg', () =>",
+                  "    pm.expect(b.user.storeId).to.eql(Number(pm.collectionVariables.get('branchStoreId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chuẩn bị - tồn kho của kho tổng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock?size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().items.filter(row => row.productStatus === 'ACTIVE' && row.availableQty >= 3)",
+                  "    .map(row => row.productId);",
+                  "pm.test('Có ít nhất 2 phụ tùng còn hàng', () => pm.expect(ids.length).to.be.at.least(2));",
+                  "pm.collectionVariables.set('candidateIds', ids.slice(0, 50).join(','));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chuẩn bị - chọn 2 phụ tùng bán được",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/availability?productIds={{candidateIds}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const central = pm.response.json().filter(row => row.central && row.sellableQty >= 3);",
+                  "pm.test('Có 2 phụ tùng bán được từ 3 cái', () => pm.expect(central.length).to.be.at.least(2));",
+                  "pm.collectionVariables.set('shortPartId', central[0].productId);",
+                  "pm.collectionVariables.set('excessPartId', central[1].productId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM cửa hàng thường tạo phiếu bị MSG05",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceStoreId\": {{bmStoreId}},\n  \"destStoreId\": {{branchStoreId}},\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"plannedQty\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho tổng tạo phiếu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceStoreId\": {{bmStoreId}},\n  \"destStoreId\": {{branchStoreId}},\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"plannedQty\": 2 },\n    { \"productId\": {{excessPartId}}, \"plannedQty\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('transferId', b.id);",
+                  "pm.test('Chờ xuất, chưa giữ hàng', () => {",
+                  "    pm.expect(b.status).to.eql('AWAITING_DISPATCH');",
+                  "    pm.expect(b.lines.length).to.eql(2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho nguồn giao chuẩn bị cho Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/warehouse-tasks",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"taskType\": \"DISPATCH_PREPARATION\",\n  \"documentId\": {{transferId}},\n  \"assigneeId\": {{staffId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff ghi số đã chuẩn bị",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/prepared-lines",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"preparedQty\": 2 },\n    { \"productId\": {{excessPartId}}, \"preparedQty\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Người chuẩn bị tự xác nhận xuất bị 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/dispatch",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"dispatchedQty\": 2 },\n    { \"productId\": {{excessPartId}}, \"dispatchedQty\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho nguồn xem trước khi xuất",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/dispatch-preview",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Đã sẵn sàng và được xác nhận', () => pm.expect(b.canConfirm).to.eql(true));",
+                  "pm.test('Có lô sẽ lấy', () => b.lines.forEach(line => pm.expect(line.lots.length).to.be.above(0)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho nguồn xác nhận xuất",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/dispatch",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"dispatchedQty\": 2 },\n    { \"productId\": {{excessPartId}}, \"dispatchedQty\": 2 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Đang vận chuyển', () => pm.expect(pm.response.json().status).to.eql('IN_TRANSIT'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho đích ghi hàng đến",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/receipts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('receiptId', b.id);",
+                  "pm.test('Chờ nhận đủ số đã xuất', () => b.lines.forEach(line => pm.expect(line.documentQty).to.eql(2)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho đích giao kiểm cho Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/warehouse-tasks",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"taskType\": \"INSPECTION\",\n  \"documentId\": {{receiptId}},\n  \"assigneeId\": {{destStaffId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff kho đích ghi thiếu 1, thừa 1",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/receipts/{{receiptId}}/result",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{destStaffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"passedQty\": 1, \"damagedQty\": 0 },\n    { \"productId\": {{excessPartId}}, \"passedQty\": 3, \"damagedQty\": 0 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const excess = pm.response.json().lines.find(line => line.productId === Number(pm.collectionVariables.get('excessPartId')));",
+                  "pm.test('Ghi thừa 1', () => pm.expect(excess.excessQty).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho đích xác nhận nhận hàng",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/receipts/{{receiptId}}/confirm",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Phiếu nhận đã xác nhận', () => pm.expect(pm.response.json().status).to.eql('CONFIRMED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đóng phiếu khi còn thiếu bị MSG221",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/close",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG221', () => pm.expect(pm.response.json().code).to.eql('MSG221'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem trước khi đóng - còn chặn",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/closing-preview",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Chặn vì còn thiếu và thừa chưa xác nhận', () => {",
+                  "    pm.expect(b.canClose).to.eql(false);",
+                  "    pm.expect(b.blockedBy).to.eql(['MSG221', 'MSG222']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kho nguồn xác nhận xuất thêm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/extra-dispatch",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{excessPartId}}, \"extraQty\": 1 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const line = pm.response.json().lines.find(row => row.productId === Number(pm.collectionVariables.get('excessPartId')));",
+                  "pm.test('Đã xác nhận xuất thêm 1', () => pm.expect(line.extraDispatchedQty).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quyết định trả phần thiếu về kho nguồn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/discrepancy/decisions",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{shortPartId}},\n  \"decision\": \"RETURN_TO_SOURCE\",\n  \"quantity\": 1,\n  \"reason\": \"Kho đích không nhận được, xe còn hàng\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const line = pm.response.json().lines.find(row => row.productId === Number(pm.collectionVariables.get('shortPartId')));",
+                  "pm.test('Quyết định chưa giảm số chưa có kết quả', () => pm.expect(line.unresolvedQty).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kho nguồn ghi hàng trả về",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/returns",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"quantity\": 1 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('returnReceiptId', b.id);",
+                  "pm.test('Phiếu trả về nguồn', () => pm.expect(b.receiptType).to.eql('RETURN_TO_SOURCE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kho nguồn giao kiểm hàng trả về",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/warehouse-tasks",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"taskType\": \"INSPECTION\",\n  \"documentId\": {{returnReceiptId}},\n  \"assigneeId\": {{staffId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff kho nguồn ghi hàng trả về",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/receipts/{{returnReceiptId}}/result",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": {{shortPartId}}, \"passedQty\": 1, \"damagedQty\": 0 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Kho nguồn xác nhận hàng trả về",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/receipts/{{returnReceiptId}}/confirm",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Phiếu trả về đã xác nhận', () => pm.expect(pm.response.json().status).to.eql('CONFIRMED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem trước khi đóng - đóng được",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/closing-preview",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Không còn gì chặn', () => {",
+                  "    pm.expect(b.canClose).to.eql(true);",
+                  "    pm.expect(b.blockedBy).to.eql([]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho tổng đóng phiếu",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/close",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Phiếu đã đóng', () => pm.expect(b.status).to.eql('CLOSED'));",
+                  "const short = b.lines.find(row => row.productId === Number(pm.collectionVariables.get('shortPartId')));",
+                  "pm.test('Phần thiếu đã trả về nguồn', () => {",
+                  "    pm.expect(short.returnedQty).to.eql(1);",
+                  "    pm.expect(short.unresolvedQty).to.eql(0);",
+                  "});",
+                  "pm.test('Hồ sơ sai lệch đã đóng, có sự kiện trả về', () => {",
+                  "    pm.expect(b.discrepancies[0].status).to.eql('CLOSED');",
+                  "    pm.expect(b.discrepancies[0].events.map(e => e.resolutionType)).to.include('RECEIVED_BACK_AT_SOURCE');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Xem biến động xuất thêm",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/movements?storeId={{branchStoreId}}&productId={{excessPartId}}&movementType=TRANSFER_EXTRA_DISPATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "pm.test('Kho đích có dòng nhận phần xuất thêm', () => pm.expect(items.some(m => m.quantityChange > 0)).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Kiểm kê (UC-90 đến UC-95, UC-105)",
+      "item": [
+        {
+          "name": "Chuẩn bị - BM lấy phụ tùng còn hàng trong kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=1",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().page.items;",
+                  "pm.test('Kho của BM còn hàng', () => pm.expect(items.length).to.be.above(0));",
+                  "pm.collectionVariables.set('countPartId', items[0].productId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem cửa hàng có thể yêu cầu kiểm kê",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-count-requests/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const stores = pm.response.json();",
+                  "pm.test('Có kho của BM', () =>",
+                  "    pm.expect(stores.map(s => s.id)).to.include(Number(pm.collectionVariables.get('bmStoreId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem cửa hàng có thể yêu cầu bị MSG05",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-count-requests/stores",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner yêu cầu kiểm kê một phụ tùng",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-count-requests",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeId\": {{bmStoreId}},\n  \"scopeType\": \"PRODUCTS\",\n  \"reason\": \"Kiểm định kỳ từ Postman\",\n  \"productIds\": [{{countPartId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('Yêu cầu PENDING', () => pm.expect(b.status).to.eql('PENDING'));",
+                  "pm.test('Đúng phụ tùng', () => pm.expect(b.products.map(p => p.productId))",
+                  "    .to.eql([Number(pm.collectionVariables.get('countPartId'))]));",
+                  "pm.collectionVariables.set('countRequestId', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner yêu cầu phụ tùng không tồn tại bị MSG242",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-count-requests",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeId\": {{bmStoreId}},\n  \"scopeType\": \"PRODUCTS\",\n  \"reason\": \"Phụ tùng không tồn tại\",\n  \"productIds\": [999999999]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã MSG242', () => pm.expect(pm.response.json().code).to.eql('MSG242'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem danh sách phiếu và yêu cầu chờ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có yêu cầu vừa tạo', () => pm.expect(b.pendingRequests.map(r => r.id))",
+                  "    .to.include(Number(pm.collectionVariables.get('countRequestId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem dữ liệu điền sẵn từ yêu cầu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/prefill?requestId={{countRequestId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Phạm vi PRODUCTS', () => pm.expect(b.scopeType).to.eql('PRODUCTS'));",
+                  "pm.test('Đúng phụ tùng', () => pm.expect(b.products[0].productId)",
+                  "    .to.eql(Number(pm.collectionVariables.get('countPartId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tạo phiếu đầu kỳ bị MSG244",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countType\": \"OPENING\",\n  \"countDate\": \"{{countDate}}\",\n  \"scopeType\": \"WHOLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The count date is today in Vietnam time (UTC+7), inside the open period.",
+                  "pm.collectionVariables.set('countDate', new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã MSG244', () => pm.expect(pm.response.json().code).to.eql('MSG244'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tạo phiếu theo yêu cầu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countType\": \"CYCLE\",\n  \"countDate\": \"{{countDate}}\",\n  \"scopeType\": \"PRODUCTS\",\n  \"productIds\": [{{countPartId}}],\n  \"stockCountRequestId\": {{countRequestId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The count date is today in Vietnam time (UTC+7), inside the open period.",
+                  "pm.collectionVariables.set('countDate', new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.test('Phiếu DRAFT', () => pm.expect(b.status).to.eql('DRAFT'));",
+                  "pm.test('Có dòng kiểm', () => pm.expect(b.lines.length).to.be.above(0));",
+                  "pm.test('Gắn với yêu cầu', () => pm.expect(b.request.id).to.eql(Number(pm.collectionVariables.get('countRequestId'))));",
+                  "pm.collectionVariables.set('stockCountId', b.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tạo phiếu thứ hai khi còn phiếu mở bị MSG230",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countType\": \"CYCLE\",\n  \"countDate\": \"{{countDate}}\",\n  \"scopeType\": \"WHOLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã MSG230', () => pm.expect(pm.response.json().code).to.eql('MSG230'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM giao việc đếm cho Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/warehouse-tasks",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"taskType\": \"COUNTING\",\n  \"documentId\": {{stockCountId}},\n  \"assigneeId\": {{staffUserId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tự bắt đầu đếm bị MSG238",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/start",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã MSG238', () => pm.expect(pm.response.json().code).to.eql('MSG238'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff bắt đầu đếm (không thấy số sổ)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/start",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Phiếu COUNTING', () => pm.expect(b.status).to.eql('COUNTING'));",
+                  "pm.test('Staff không thấy số sổ và chênh lệch', () => b.lines.forEach(l => {",
+                  "    pm.expect(l.bookQty == null).to.be.true;",
+                  "    pm.expect(l.difference == null).to.be.true;",
+                  "}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem chi tiết (thấy số sổ, không có giá trị)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const lines = pm.response.json().lines;",
+                  "pm.test('BM thấy số sổ', () => lines.forEach(l => pm.expect(l.bookQty).to.be.a('number')));",
+                  "pm.test('BM không thấy giá trị chênh lệch', () => lines.forEach(l => pm.expect(l.differenceValue == null).to.be.true));",
+                  "// The first line is counted one more than the book, so the count has a difference to approve.",
+                  "pm.collectionVariables.set('firstLineId', lines[0].id);",
+                  "pm.collectionVariables.set('firstLineCounted', lines[0].bookQty + 1);",
+                  "pm.collectionVariables.set('submitLines', JSON.stringify(lines.map((l, i) =>",
+                  "    ({ lineId: l.id, countedQty: i === 0 ? l.bookQty + 1 : l.bookQty }))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff lưu số đếm âm bị MSG237",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/lines",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [{ \"lineId\": {{firstLineId}}, \"countedQty\": -1 }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã MSG237', () => pm.expect(pm.response.json().code).to.eql('MSG237'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff gửi kết quả (dòng đầu thừa 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/submit",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": {{submitLines}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Phiếu vẫn COUNTING chờ BM xác nhận', () => pm.expect(b.status).to.eql('COUNTING'));",
+                  "pm.test('Mọi dòng đã đếm', () => b.lines.forEach(l => pm.expect(l.countedQty).to.be.a('number')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xác nhận thiếu lý do chênh lệch bị MSG236",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/confirm",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã MSG236', () => pm.expect(pm.response.json().code).to.eql('MSG236'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xác nhận kèm lý do",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/confirm",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reasons\": [{ \"lineId\": {{firstLineId}}, \"reason\": \"Hàng khách trả chưa nhập\" }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Chờ Owner duyệt', () => pm.expect(b.status).to.eql('AWAITING_APPROVAL'));",
+                  "pm.test('Dòng đầu chênh +1', () => pm.expect(b.lines.find(l => l.id === Number(pm.collectionVariables.get('firstLineId')))",
+                  "    .difference).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner trả dòng đầu về đếm lại",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/recount",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lineIds\": [{{firstLineId}}],\n  \"reason\": \"Kiểm tra lại dòng thừa\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Phiếu về COUNTING', () => pm.expect(b.status).to.eql('COUNTING'));",
+                  "pm.test('Chờ chụp lại số sổ', () => pm.expect(b.awaitingBookQuantities).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff bắt đầu đếm lại",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/start",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const line = pm.response.json().lines.find(l => l.id === Number(pm.collectionVariables.get('firstLineId')));",
+                  "pm.test('Dòng đầu cần đếm lại', () => pm.expect(line.recountRequested).to.be.true);",
+                  "pm.test('Số đếm cũ đã được xóa', () => pm.expect(line.countedQty == null).to.be.true);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff gửi lại dòng đếm lại",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/submit",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [{ \"lineId\": {{firstLineId}}, \"countedQty\": {{firstLineCounted}} }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xác nhận lần hai (thấy số lần trước)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/confirm",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reasons\": [{ \"lineId\": {{firstLineId}}, \"reason\": \"Hàng khách trả chưa nhập\" }]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Chờ Owner duyệt', () => pm.expect(b.status).to.eql('AWAITING_APPROVAL'));",
+                  "const line = b.lines.find(l => l.id === Number(pm.collectionVariables.get('firstLineId')));",
+                  "pm.test('Giữ số đếm lần trước', () =>",
+                  "    pm.expect(line.previousCountedQty).to.eql(Number(pm.collectionVariables.get('firstLineCounted'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM duyệt bị MSG05",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/approve",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner duyệt chênh lệch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/approve",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decisionReason\": \"Đồng ý điều chỉnh\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Phiếu COMPLETED', () => pm.expect(b.status).to.eql('COMPLETED'));",
+                  "pm.test('Có người duyệt', () => pm.expect(b.approvedBy).to.be.a('number'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem chi tiết (có giá trị chênh lệch)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const line = pm.response.json().lines.find(l => l.id === Number(pm.collectionVariables.get('firstLineId')));",
+                  "pm.test('Chênh lệch +1', () => pm.expect(line.difference).to.eql(1));",
+                  "pm.test('Owner thấy giá trị chênh lệch', () => pm.expect(line).to.have.property('differenceValue'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff xem phiếu mình đã đếm",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().counts.items;",
+                  "pm.test('Có phiếu vừa duyệt', () =>",
+                  "    pm.expect(items.map(c => c.id)).to.include(Number(pm.collectionVariables.get('stockCountId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM tạo phiếu không theo yêu cầu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countType\": \"CYCLE\",\n  \"countDate\": \"{{plannedCountDate}}\",\n  \"scopeType\": \"PRODUCTS\",\n  \"productIds\": [{{countPartId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// A planned count dated tomorrow in Vietnam time (UTC+7), so starting it early shows MSG247.",
+                  "// On the last day of the month tomorrow is in the next period: today is used and the MSG247 requests are skipped.",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000);",
+                  "const today = vnNow.toISOString().slice(0, 10);",
+                  "const tomorrow = new Date(vnNow.getTime() + 24 * 3600 * 1000).toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('countToday', today);",
+                  "pm.collectionVariables.set('plannedCountDate', tomorrow.slice(0, 7) === today.slice(0, 7) ? tomorrow : today);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('cancelCountId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM giao việc đếm phiếu ngày mai cho Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/warehouse-tasks",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"taskType\": \"COUNTING\",\n  \"documentId\": {{cancelCountId}},\n  \"assigneeId\": {{staffUserId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('plannedCountDate') === pm.collectionVariables.get('countToday')) {",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff bắt đầu đếm trước ngày kiểm bị MSG247",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{cancelCountId}}/start",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('plannedCountDate') === pm.collectionVariables.get('countToday')) {",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã MSG247', () => pm.expect(pm.response.json().code).to.eql('MSG247'));",
+                  "const [y, m, d] = pm.collectionVariables.get('plannedCountDate').split('-');",
+                  "pm.test('Báo ngày kiểm dd/MM/yyyy', () => pm.expect(pm.response.json().message).to.include(`${d}/${m}/${y}`));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM hủy phiếu chưa đếm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{cancelCountId}}/cancel",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Tạo nhầm\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Phiếu CANCELLED', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner tạo yêu cầu để hủy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-count-requests",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"storeId\": {{bmStoreId}},\n  \"scopeType\": \"PRODUCTS\",\n  \"reason\": \"Kiểm định kỳ từ Postman\",\n  \"productIds\": [{{countPartId}}]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('cancelRequestId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner hủy yêu cầu",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-count-requests/{{cancelRequestId}}/cancel",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Yêu cầu CANCELLED', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner hủy lại yêu cầu đã hủy bị MSG233",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-count-requests/{{cancelRequestId}}/cancel",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã MSG233', () => pm.expect(pm.response.json().code).to.eql('MSG233'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Phiếu không tồn tại trả MSG245",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/999999999",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã MSG245', () => pm.expect(pm.response.json().code).to.eql('MSG245'));"
                 ]
               }
             }

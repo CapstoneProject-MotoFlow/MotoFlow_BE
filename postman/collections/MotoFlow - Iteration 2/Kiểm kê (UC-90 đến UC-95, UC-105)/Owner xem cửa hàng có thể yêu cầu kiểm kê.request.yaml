@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-count-requests/stores"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const stores = pm.response.json();
+      pm.test('Có kho của BM', () =>
+          pm.expect(stores.map(s => s.id)).to.include(Number(pm.collectionVariables.get('bmStoreId'))));
+    language: text/javascript
+order: 2000

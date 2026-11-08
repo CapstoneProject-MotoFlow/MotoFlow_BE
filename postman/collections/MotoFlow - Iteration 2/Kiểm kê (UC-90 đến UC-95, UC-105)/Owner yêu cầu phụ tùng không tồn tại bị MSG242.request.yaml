@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-count-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeId": {{bmStoreId}},
+      "scopeType": "PRODUCTS",
+      "reason": "Phụ tùng không tồn tại",
+      "productIds": [999999999]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      pm.test('Mã MSG242', () => pm.expect(pm.response.json().code).to.eql('MSG242'));
+    language: text/javascript
+order: 5000

@@ -15,5 +15,7 @@ scripts:
           pm.expect(m.unitCost).to.eql(null);
           pm.expect(m.value).to.eql(null);
       }));
+      // Phần đầu tên NCC, viết hoa, để request tìm lô theo NCC dùng; lô đầu kỳ không có NCC thì để trống.
+      pm.collectionVariables.set('lotSupplierQuery', b.supplierName ? b.supplierName.slice(0, 4).toUpperCase() : '');
     language: text/javascript
 order: 6000

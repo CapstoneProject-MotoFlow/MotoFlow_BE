@@ -81,6 +81,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -133,18 +134,27 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 pickerId = user.id();
             }
         }
-        SalesOrderView view = search.view() == null ? SalesOrderView.OPEN : search.view();
+        SalesOrderView view = search.view() != null ? search.view()
+                : search.status() != null ? SalesOrderView.ALL : SalesOrderView.OPEN;
+        Set<SalesOrderStatus> statuses = EnumSet.copyOf(view.statuses());
+        if (search.status() != null) {
+            statuses.retainAll(EnumSet.of(search.status()));
+        }
+        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+        if (statuses.isEmpty()) {
+            return PageResponse.of(Page.empty(pageable), List.of());
+        }
         LocalDate from = search.createdFrom();
         LocalDate to = search.createdTo();
-        if (view != SalesOrderView.OPEN) {
-            // Screen 8.1.1: the other tabs show the chosen creation days, today by default.
+        if (!SalesOrderView.OPEN.statuses().containsAll(statuses)) {
+            // Screen 8.1.1: only unfinished orders show every day; finished ones the chosen creation days, today by
+            // default.
             LocalDate today = LocalDate.now(clock);
             to = to != null ? to : (from != null && from.isAfter(today) ? from : today);
             from = from != null ? from : to;
         }
-        Page<SalesOrder> found = orders.findAll(matching(search.q(), storeId, pickerId, view, from, to),
-                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
-                        Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
+        Page<SalesOrder> found = orders.findAll(matching(search.q(), storeId, pickerId, statuses, from, to), pageable);
         return PageResponse.of(found, summaries(user, found.getContent()));
     }
 
@@ -945,11 +955,11 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
     }
 
-    private static Specification<SalesOrder> matching(String q, Long storeId, Long pickerId, SalesOrderView view,
-                                                      LocalDate from, LocalDate to) {
+    private static Specification<SalesOrder> matching(String q, Long storeId, Long pickerId,
+                                                      Set<SalesOrderStatus> statuses, LocalDate from, LocalDate to) {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
-            where.add(root.get("status").in(view.statuses()));
+            where.add(root.get("status").in(statuses));
             if (storeId != null) {
                 where.add(cb.equal(root.get("storeId"), storeId));
             }

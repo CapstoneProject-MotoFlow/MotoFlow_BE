@@ -63,3 +63,7 @@ replay_pid*
 
 ### Local secrets ###
 .env
+.claude
+docs/*
+!docs/CICD.md
+*.docx

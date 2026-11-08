@@ -1,0 +1,18 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/stock?productId={{byProductId}}&includeZero=true&size=100"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      const id = Number(pm.collectionVariables.get('byProductId'));
+      pm.test('Chỉ có phụ tùng đã chọn', () => b.items.forEach(r => pm.expect(r.productId).to.eql(id)));
+      pm.test('Cộng khả dụng các kho khớp dòng Mọi kho', () => pm.expect(b.items
+          .reduce((t, r) => t + r.availableQty, 0)).to.eql(Number(pm.collectionVariables.get('byProductAvailable'))));
+    language: text/javascript
+order: 6000

@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts/{{stockCountId}}/recount"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "lineIds": [{{firstLineId}}],
+      "reason": "Kiểm tra lại dòng thừa"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Phiếu về COUNTING', () => pm.expect(b.status).to.eql('COUNTING'));
+      pm.test('Chờ chụp lại số sổ', () => pm.expect(b.awaitingBookQuantities).to.be.true);
+    language: text/javascript
+order: 19000
