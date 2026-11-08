@@ -1,0 +1,32 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "sourceStoreId": {{bmStoreId}},
+      "destStoreId": {{branchStoreId}},
+      "lines": [
+        { "productId": {{shortPartId}}, "plannedQty": 2 },
+        { "productId": {{excessPartId}}, "plannedQty": 2 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('transferId', b.id);
+      pm.test('Chờ xuất, chưa giữ hàng', () => {
+          pm.expect(b.status).to.eql('AWAITING_DISPATCH');
+          pm.expect(b.lines.length).to.eql(2);
+      });
+    language: text/javascript
+order: 6000

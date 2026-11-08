@@ -87,6 +87,41 @@ public class DiscrepancyResolutionEvent {
         return event;
     }
 
+    /**
+     * UC-76 Step 3_Loss or damage: transfer goods to be written off by the STOCK_LOSS adjustment
+     * {@code adjustmentRequestId}; they count as lost only once it is applied (BR-66).
+     */
+    public static DiscrepancyResolutionEvent transferLoss(long caseId, int quantity, long adjustmentRequestId,
+                                                          String reason, long by, LocalDateTime occurredAt) {
+        DiscrepancyResolutionEvent event = pending(caseId, ResolutionType.APPROVED_LOSS, quantity, null, reason, by,
+                occurredAt);
+        event.adjustmentRequestId = adjustmentRequestId;
+        return event;
+    }
+
+    /**
+     * UC-76 Step 3_Return to source: the coordinator decided that {@code quantity} goes back to the source. It stays
+     * pending, with no GRN, until the return receipt that brings the goods is confirmed ({@link #settle}).
+     */
+    public static DiscrepancyResolutionEvent returnDecision(long caseId, int quantity, String reason, long by,
+                                                            LocalDateTime occurredAt) {
+        return pending(caseId, ResolutionType.RECEIVED_BACK_AT_SOURCE, quantity, null, reason, by, occurredAt);
+    }
+
+    /** A pending return decision settled by the confirmed return receipt {@code goodsReceiptNoteId}. */
+    public void settle(long goodsReceiptNoteId, long by, LocalDateTime now) {
+        this.goodsReceiptNoteId = goodsReceiptNoteId;
+        confirm(quantity, by, now);
+    }
+
+    /** A pending return decision of which only {@code remaining} is still to come back (partial return). */
+    public void reduceTo(int remaining) {
+        if (isConfirmed() || remaining <= 0 || remaining > quantity) {
+            throw new IllegalArgumentException("cannot reduce resolution event " + id + " to " + remaining);
+        }
+        quantity = remaining;
+    }
+
     public boolean isConfirmed() {
         return confirmedAt != null;
     }

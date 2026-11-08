@@ -1,0 +1,26 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/transfer-orders/{{transferId}}/returns"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "lines": [
+        { "productId": {{shortPartId}}, "quantity": 1 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('returnReceiptId', b.id);
+      pm.test('Phiếu trả về nguồn', () => pm.expect(b.receiptType).to.eql('RETURN_TO_SOURCE'));
+    language: text/javascript
+order: 20000

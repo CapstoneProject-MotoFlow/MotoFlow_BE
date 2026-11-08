@@ -40,4 +40,9 @@ public class ReplenishmentRequestLine {
         line.requestedQty = requestedQty;
         return line;
     }
+
+    /** BR-55: what no warehouse can supply goes to the Owner to purchase. */
+    public void passToPurchase(int quantity) {
+        toPurchaseQty = quantity;
+    }
 }

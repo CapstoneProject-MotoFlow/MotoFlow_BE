@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.transfer.dto.ReplenishmentCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentRowResponse;
 import fu.hl.g64.motorflow.transfer.dto.ReplenishmentSearch;
+import fu.hl.g64.motorflow.transfer.dto.ToPurchaseRequest;
 
 import java.util.List;
 
@@ -24,4 +25,7 @@ public interface ReplenishmentRequestService {
 
     /** UC-70: same scope as the list. */
     ReplenishmentDetailResponse detail(AuthenticatedUser user, long id);
+
+    /** BR-55: sets per part what goes to the Owner for purchasing, and tells the Owner. */
+    ReplenishmentDetailResponse toPurchase(AuthenticatedUser user, long id, ToPurchaseRequest request);
 }
