@@ -451,4 +451,45 @@ class SalesOrderApiTest extends SalesOrderTestData {
         detail(ownerToken, elsewhere).andExpect(status().isOk());
         detail(managerToken, 999).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG156"));
     }
+
+    @Test
+    void listFiltersByStatusInsideTheTab() throws Exception {
+        long waiting = createOrder(pad, 1);
+        long notAssigned = createOrder(pad, 1);
+        long picked = createOrder(pad, 1);
+        long completed = createOrder(oil, 1);
+        long cancelled = createOrder(oil, 1);
+        jdbc.update("UPDATE sales_order SET created_at = ? WHERE id = ?", TODAY.minusDays(3).atTime(9, 0), waiting);
+        jdbc.update("UPDATE sales_order SET status = 'PICKED' WHERE id = ?", picked);
+        jdbc.update("UPDATE sales_order SET status = 'COMPLETED', completion_type = 'PAID', created_at = ? WHERE id = ?",
+                TODAY.minusDays(3).atTime(10, 0), completed);
+        jdbc.update("UPDATE sales_order SET status = 'CANCELLED', cancellation_reason = 'x' WHERE id = ?", cancelled);
+
+        // An unfinished status shows every day, like the OPEN tab, with or without a tab.
+        list(managerToken, "status", "AWAITING_PICKING").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[0].id").value(notAssigned))
+                .andExpect(jsonPath("$.items[1].id").value(waiting));
+        list(managerToken, "view", "OPEN", "status", "PICKED")
+                .andExpect(jsonPath("$.totalItems").value(1)).andExpect(jsonPath("$.items[0].id").value(picked));
+        list(managerToken, "view", "ALL", "status", "AWAITING_PICKING").andExpect(jsonPath("$.totalItems").value(2));
+        // A finished status keeps the chosen creation days, today by default.
+        list(managerToken, "status", "COMPLETED").andExpect(jsonPath("$.totalItems").value(0));
+        list(managerToken, "status", "COMPLETED", "createdFrom", TODAY.minusDays(5).toString())
+                .andExpect(jsonPath("$.totalItems").value(1)).andExpect(jsonPath("$.items[0].id").value(completed));
+        list(managerToken, "view", "CANCELLED", "status", "CANCELLED")
+                .andExpect(jsonPath("$.totalItems").value(1)).andExpect(jsonPath("$.items[0].id").value(cancelled));
+        // A status outside the tab finds nothing; an unknown status is refused.
+        list(managerToken, "view", "OPEN", "status", "COMPLETED", "page", "0", "size", "5")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(0))
+                .andExpect(jsonPath("$.items", hasSize(0))).andExpect(jsonPath("$.size").value(5));
+        list(managerToken, "status", "DONE").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02")).andExpect(jsonPath("$.fieldErrors.status").exists());
+
+        // Staff: still only the orders they are picking.
+        assign(managerToken, "PICKING", waiting, staff).andExpect(status().isOk());
+        list(staffToken, "status", "AWAITING_PICKING").andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(waiting));
+        list(staffToken, "status", "PICKED").andExpect(jsonPath("$.totalItems").value(0));
+    }
 }

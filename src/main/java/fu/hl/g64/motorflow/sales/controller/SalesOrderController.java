@@ -11,6 +11,7 @@ import fu.hl.g64.motorflow.sales.dto.SalesOrderSummary;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderUpdateRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderVersion;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderView;
+import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import io.swagger.v3.oas.annotations.Operation;
@@ -51,6 +52,7 @@ public class SalesOrderController {
     public PageResponse<SalesOrderSummary> list(@AuthenticationPrincipal AuthenticatedUser user,
                                                 @RequestParam(required = false) Long storeId,
                                                 @RequestParam(required = false) SalesOrderView view,
+                                                @RequestParam(required = false) SalesOrderStatus status,
                                                 @RequestParam(required = false) String q,
                                                 @RequestParam(required = false)
                                                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdFrom,
@@ -58,7 +60,7 @@ public class SalesOrderController {
                                                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdTo,
                                                 @RequestParam(defaultValue = "0") int page,
                                                 @RequestParam(defaultValue = "20") int size) {
-        return salesOrders.list(user, new SalesOrderSearch(storeId, view, q, createdFrom, createdTo), page, size);
+        return salesOrders.list(user, new SalesOrderSearch(storeId, view, status, q, createdFrom, createdTo), page, size);
     }
 
     @Operation(summary = "Prices, totals, discount threshold and stock of an order being filled in; nothing is saved "
