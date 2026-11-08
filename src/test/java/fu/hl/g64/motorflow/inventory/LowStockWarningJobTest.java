@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -57,7 +58,7 @@ class LowStockWarningJobTest extends ApiTestUsers {
         assertThat(sentTo(owner)).isEmpty();
         assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE recipient_id = ? AND ref_id = ?",
                 String.class, bm.getId(), brake))
-                .isEqualTo("Phụ tùng MA-PHANH - Phụ tùng MA-PHANH dưới ngưỡng tồn tối thiểu: còn 2, ngưỡng 5.");
+                .isEqualTo("Phụ tùng MA-PHANH - Phụ tùng MA-PHANH dưới ngưỡng tồn tối thiểu: còn bán được 2, ngưỡng 5.");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type <> 'LOW_STOCK' "
                 + "OR ref_type <> 'PRODUCT'", Integer.class)).isZero();
     }
@@ -110,6 +111,55 @@ class LowStockWarningJobTest extends ApiTestUsers {
 
         assertThat(job.run()).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification", Integer.class)).isZero();
+    }
+
+    @Test
+    void stockInLotsPastTheirExpiryDateIsNotSellable() {
+        long brake = part("MA-PHANH", "ACTIVE");
+        balance(branch, brake, 10, 5);
+        lot(branch, brake, 10, LocalDate.now(clock).minusDays(1), "IN_STOCK");
+
+        assertThat(job.run()).isEqualTo(2);
+
+        assertThat(sentTo(bm)).containsExactly(brake);
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE recipient_id = ?", String.class,
+                bm.getId())).contains("còn bán được 0, ngưỡng 5.");
+    }
+
+    @Test
+    void stockInLotsMarkedExpiredIsNotSellable() {
+        long brake = part("MA-PHANH", "ACTIVE");
+        balance(branch, brake, 10, 5);
+        lot(branch, brake, 10, LocalDate.now(clock).plusDays(365), "EXPIRED");
+
+        assertThat(job.run()).isEqualTo(2);
+
+        assertThat(sentTo(bm)).containsExactly(brake);
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE recipient_id = ?", String.class,
+                bm.getId())).contains("còn bán được 0");
+    }
+
+    @Test
+    void enoughValidStockAfterTakingOutTheExpiredLotsSendsNothing() {
+        long brake = part("MA-PHANH", "ACTIVE");
+        balance(branch, brake, 10, 5);
+        lot(branch, brake, 4, LocalDate.now(clock).minusDays(1), "IN_STOCK");
+        lot(branch, brake, 6, LocalDate.now(clock).plusDays(90), "IN_STOCK");
+
+        assertThat(job.run()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification", Integer.class)).isZero();
+    }
+
+    private void lot(long store, long product, int qty, LocalDate expiry, String status) {
+        long count = jdbc.queryForObject("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, "
+                + "created_by) VALUES (?, 'OPENING', ?, 'WHOLE', ?) RETURNING id", Long.class, store,
+                LocalDate.now(clock), owner.getId());
+        long lot = jdbc.queryForObject("INSERT INTO lot (product_id, source_type, stock_count_id, store_id, "
+                + "received_date, purchase_unit_price, expiry_date, status) "
+                + "VALUES (?, 'OPENING', ?, ?, ?, 1000, ?, ?) RETURNING id",
+                Long.class, product, count, store, LocalDate.now(clock).minusDays(30), expiry, status);
+        jdbc.update("INSERT INTO lot_balance (lot_id, store_id, stock_status, quantity) VALUES (?, ?, 'AVAILABLE', ?)",
+                lot, store, qty);
     }
 
     private long part(String sku, String status) {

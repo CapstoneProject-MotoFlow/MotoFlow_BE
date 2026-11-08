@@ -14,6 +14,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,8 +23,8 @@ import java.util.stream.Collectors;
 
 /**
  * JOB-02: every morning, tells the Branch Managers of a store which parts fell below their low-stock threshold
- * (UC-51). One notification per part, opening that part. A manager is not told again about a part while the
- * previous notification about it is still unread.
+ * (UC-51), comparing it against sellable stock (available, not expired). One notification per part, opening that
+ * part. A manager is not told again about a part while the previous notification about it is still unread.
  */
 @Slf4j
 @Component
@@ -36,6 +38,7 @@ public class LowStockWarningJob {
     private final UserAccountRepository users;
     private final NotificationRepository notifications;
     private final NotificationService notificationService;
+    private final Clock clock;
 
     @Scheduled(cron = "${motoflow.jobs.low-stock.cron}", zone = "Asia/Ho_Chi_Minh")
     public void scheduled() {
@@ -45,7 +48,7 @@ public class LowStockWarningJob {
     /** @return how many notifications were sent */
     @Transactional
     public int run() {
-        List<LowStockRow> rows = stockBalances.findBelowThreshold();
+        List<LowStockRow> rows = stockBalances.findBelowThreshold(LocalDate.now(clock));
         Map<Long, List<Long>> managersByStore = users.findByRoleAndStatus(Role.BRANCH_MANAGER, AccountStatus.ACTIVE)
                 .stream().filter(m -> m.getStoreId() != null)
                 .collect(Collectors.groupingBy(UserAccount::getStoreId,
@@ -57,8 +60,8 @@ public class LowStockWarningJob {
 
         int sent = 0;
         for (LowStockRow row : rows) {
-            String message = "Phụ tùng %s - %s dưới ngưỡng tồn tối thiểu: còn %d, ngưỡng %d."
-                    .formatted(row.sku(), row.partName(), row.availableQty(), row.lowStockThreshold());
+            String message = "Phụ tùng %s - %s dưới ngưỡng tồn tối thiểu: còn bán được %d, ngưỡng %d."
+                    .formatted(row.sku(), row.partName(), row.sellableQty(), row.lowStockThreshold());
             for (long managerId : managersByStore.getOrDefault(row.storeId(), List.of())) {
                 if (!unread.contains(key(managerId, row.productId()))) {
                     notificationService.notify(managerId, TYPE, message, REF_TYPE, row.productId());
