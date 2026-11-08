@@ -71,15 +71,24 @@ public class TransferReconciliation {
      * already counted with the open receipts, so only the part of a return decision above it is subtracted here.
      */
     public Map<Long, Integer> uncovered(long transferOrderId, List<TransferOrderLine> orderLines) {
-        Map<Long, Long> claimed = new HashMap<>();
+        Map<Long, Long> claimed = pendingClaims(transferOrderId);
         lines.openReceiptQty(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
+        return byProduct(transferOrderId, orderLines).entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
+                entry -> Math.max(entry.getValue().unresolved()
+                        - claimed.getOrDefault(entry.getKey(), 0L).intValue(), 0)));
+    }
+
+    /**
+     * Per part, what losses awaiting their adjustment already claim plus the part of the coordinators' return
+     * decisions above the returns the source has already opened (an open return is counted with its own quantity).
+     */
+    public Map<Long, Long> pendingClaims(long transferOrderId) {
+        Map<Long, Long> claimed = new HashMap<>();
         lines.pendingLoss(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
         Map<Long, Long> opened = new HashMap<>();
         lines.openReturnQty(transferOrderId).forEach(row -> opened.merge(row.getProductId(), row.getQty(), Long::sum));
         lines.pendingReturnDecisions(transferOrderId).forEach(row -> claimed.merge(row.getProductId(),
                 Math.max(row.getQty() - opened.getOrDefault(row.getProductId(), 0L), 0), Long::sum));
-        return byProduct(transferOrderId, orderLines).entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
-                entry -> Math.max(entry.getValue().unresolved()
-                        - claimed.getOrDefault(entry.getKey(), 0L).intValue(), 0)));
+        return claimed;
     }
 }

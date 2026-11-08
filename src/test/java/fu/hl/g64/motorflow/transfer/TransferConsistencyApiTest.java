@@ -69,6 +69,50 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
     }
 
     @Test
+    void aReturnDecisionNotYetOpenedByTheSourceAlsoCapsALateReceipt() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 4);
+        int afterDispatch = stock(source, brake, "available_qty");
+        confirm("bmlb", order, inspected(order, brake, 1, 0)).andExpect(status().isOk());
+
+        decide(order, "RETURN_TO_SOURCE", 2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note WHERE receipt_type = "
+                + "'RETURN_TO_SOURCE'", Long.class)).isZero();
+        long late = arrive("bmlb", order);
+        assertThat(jdbc.queryForObject("SELECT document_qty FROM goods_receipt_note_line WHERE goods_receipt_note_id = ?",
+                Integer.class, late)).isEqualTo(1);
+        assign("bmlb", "INSPECTION", late, destStaff).andExpect(status().isOk());
+        result("nvlb", order, late, brake, 3, 0).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG224"));
+        result("nvlb", order, late, brake, 1, 0).andExpect(status().isOk());
+        confirm("bmlb", order, late).andExpect(status().isOk());
+
+        decide(order, "LATE_DELIVERY", 2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event WHERE resolution_type = "
+                + "'RECEIVED_BACK_AT_SOURCE' AND confirmed_at IS NULL", Long.class)).isZero();
+        long again = arrive("bmlb", order);
+        assign("bmlb", "INSPECTION", again, destStaff).andExpect(status().isOk());
+        result("nvlb", order, again, brake, 2, 0).andExpect(status().isOk());
+        confirm("bmlb", order, again).andExpect(status().isOk());
+        close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
+
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(4);
+        assertThat(stock(dest, brake, "in_transit_qty")).isZero();
+        assertThat(stock(source, brake, "available_qty")).isEqualTo(afterDispatch);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note_line l JOIN goods_receipt_note g ON "
+                + "g.id = l.goods_receipt_note_id WHERE g.transfer_order_id = ? AND l.excess_qty > 0", Long.class,
+                order)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event e JOIN discrepancy_case c ON "
+                + "c.id = e.discrepancy_case_id WHERE c.transfer_order_id = ? AND e.resolution_type = 'APPROVED_LOSS'",
+                Long.class, order)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM adjustment_request WHERE transfer_order_id = ?",
+                Long.class, order)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE transfer_order_id = ? AND "
+                + "movement_type IN ('ADJUSTMENT', 'EXCESS_ACCEPTED', 'EXCESS_REJECTED', 'RETURN_HOLD')", Long.class,
+                order)).isZero();
+    }
+
+    @Test
     void aPendingLossAlsoCapsALateReceipt() throws Exception {
         lot(source, brake, 10, 100_000, null, "A");
         long order = dispatchedOrder(brake, 4);
@@ -176,6 +220,13 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
                         .content(json(Map.of("lines", List.of(Map.of("productId", brake, "quantity", quantity))))))
                 .andExpect(status().isCreated());
         return jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
+    }
+
+    private void decide(long order, String decision, int quantity) throws Exception {
+        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("productId", brake, "decision", decision, "quantity", quantity))))
+                .andExpect(status().isOk());
     }
 
     private ResultActions close(long order) throws Exception {

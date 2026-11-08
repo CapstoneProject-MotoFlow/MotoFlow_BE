@@ -210,13 +210,14 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         if (!missing.isEmpty()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG167", missing);
         }
-        // An open return or a pending loss already claims what is still missing: a late receipt may not count more.
+        // An open return, a return decision or a pending loss already claims what is still missing: a late receipt
+        // may not count more.
         Map<Long, Long> claimed = new HashMap<>();
         if (receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
             orderLines.openReturnQty(transferOrderId)
                     .forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
-            orderLines.pendingLoss(transferOrderId)
-                    .forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
+            reconciliation.pendingClaims(transferOrderId)
+                    .forEach((productId, qty) -> claimed.merge(productId, qty, Long::sum));
         }
         for (GoodsReceiptNoteLine line : lines) {
             TransferReceiptResultRequest.Line result = sent.get(line.getProductId());
