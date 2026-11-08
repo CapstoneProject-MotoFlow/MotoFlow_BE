@@ -65,6 +65,7 @@ import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -258,6 +259,7 @@ public class StockCountServiceImpl implements StockCountService {
         if (count.getStatus() != StockCountStatus.DRAFT && count.getStatus() != StockCountStatus.COUNTING) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
         }
+        requireCountDateReached(count);
         if (count.needsBookQuantities()) {
             countSheets.captureBookQuantities(count,
                     lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId()));
@@ -330,6 +332,7 @@ public class StockCountServiceImpl implements StockCountService {
         StockCount count = access.lockCount(id);
         access.requireManagerOf(user, count.getStoreId());
         requireResultSubmitted(count);
+        requireCountDateReached(count);
 
         List<StockCountLine> all = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(id);
         Set<Long> allIds = all.stream().map(StockCountLine::getId).collect(Collectors.toSet());
@@ -370,6 +373,14 @@ public class StockCountServiceImpl implements StockCountService {
                     "Phiếu kiểm kê #%d có chênh lệch và đang chờ bạn duyệt.".formatted(id), "STOCK_COUNT", id);
         }
         return mapper.toDetail(count, Viewer.MANAGER);
+    }
+
+    /** MSG247: a count dated in the future can be created as a plan, but not counted or confirmed before its date. */
+    private void requireCountDateReached(StockCount count) {
+        if (LocalDate.now(clock).isBefore(count.getCountDate())) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG247",
+                    count.getCountDate().format(DateTimeFormatter.ofPattern("dd/MM/yyyy")));
+        }
     }
 
     /** SC-6 (MSG235): the count is COUNTING, the counter sent the result and the book quantities are taken. */

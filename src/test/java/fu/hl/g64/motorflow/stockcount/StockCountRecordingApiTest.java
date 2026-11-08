@@ -5,6 +5,8 @@ import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -12,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -73,6 +76,38 @@ class StockCountRecordingApiTest extends StockCountTestData {
         assertThat(startedAt(count)).isNotNull();
         // oil: both lots (5 + 7); filter lot A 4, lot B 3, and only the lot without expiry (2) for the null line
         assertThat(bookQtys(count)).containsExactly(12, 4, 3, 2);
+    }
+
+    @Test
+    void aCountDatedTomorrowCannotStartUntilItsDate() throws Exception {
+        LocalDate tomorrow = TODAY.plusDays(1);
+        long count = count(StockCountStatus.DRAFT).on(tomorrow, period).line(oilLine(0, null))
+                .line(filterLotALine(0, null)).line(filterLotBLine(0, null)).line(filterPlainLine(0, null))
+                .task(staff, WarehouseTaskStatus.ASSIGNED).insert();
+        String start = "/api/v1/stock-counts/" + count + "/start";
+
+        refused(postAs(staffToken, start, null), 409, "MSG247")
+                .andExpect(jsonPath("$.message")
+                        .value(containsString(tomorrow.format(DateTimeFormatter.ofPattern("dd/MM/yyyy")))));
+        assertThat(countStatus(count)).isEqualTo("DRAFT");
+        assertThat(startedAt(count)).isNull();
+        assertThat(bookQtys(count)).containsExactly(0, 0, 0, 0);
+
+        today(tomorrow);
+        postAs(staffToken, start, null).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COUNTING"));
+        assertThat(countStatus(count)).isEqualTo("COUNTING");
+        assertThat(startedAt(count)).isNotNull();
+        assertThat(bookQtys(count)).containsExactly(12, 4, 3, 2);
+    }
+
+    @Test
+    void confirmingBeforeTheCountDateIsRefusedAndNothingChanges() throws Exception {
+        long count = count(StockCountStatus.COUNTING).on(TODAY.plusDays(1), period).line(oilLine(12, 12))
+                .line(filterLotALine(4, 4)).task(staff, WarehouseTaskStatus.RESULT_SUBMITTED).insert();
+
+        refused(postAs(managerToken, "/api/v1/stock-counts/" + count + "/confirm", Map.of()), 409, "MSG247");
+        assertThat(countStatus(count)).isEqualTo("COUNTING");
+        assertThat(taskStatuses(count)).containsExactly("RESULT_SUBMITTED");
     }
 
     @Test

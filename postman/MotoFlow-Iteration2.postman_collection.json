@@ -2255,7 +2255,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"countType\": \"CYCLE\",\n  \"countDate\": \"{{countDate}}\",\n  \"scopeType\": \"PRODUCTS\",\n  \"productIds\": [{{countPartId}}]\n}",
+              "raw": "{\n  \"countType\": \"CYCLE\",\n  \"countDate\": \"{{plannedCountDate}}\",\n  \"scopeType\": \"PRODUCTS\",\n  \"productIds\": [{{countPartId}}]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2269,8 +2269,13 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// The count date is today in Vietnam time (UTC+7), inside the open period.",
-                  "pm.collectionVariables.set('countDate', new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10));"
+                  "// A planned count dated tomorrow in Vietnam time (UTC+7), so starting it early shows MSG247.",
+                  "// On the last day of the month tomorrow is in the next period: today is used and the MSG247 requests are skipped.",
+                  "const vnNow = new Date(Date.now() + 7 * 3600 * 1000);",
+                  "const today = vnNow.toISOString().slice(0, 10);",
+                  "const tomorrow = new Date(vnNow.getTime() + 24 * 3600 * 1000).toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('countToday', today);",
+                  "pm.collectionVariables.set('plannedCountDate', tomorrow.slice(0, 7) === today.slice(0, 7) ? tomorrow : today);"
                 ]
               }
             },
@@ -2281,6 +2286,103 @@
                 "exec": [
                   "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
                   "pm.collectionVariables.set('cancelCountId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM giao việc đếm phiếu ngày mai cho Staff",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/warehouse-tasks",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"taskType\": \"COUNTING\",\n  \"documentId\": {{cancelCountId}},\n  \"assigneeId\": {{staffUserId}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('plannedCountDate') === pm.collectionVariables.get('countToday')) {",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Staff bắt đầu đếm trước ngày kiểm bị MSG247",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/{{cancelCountId}}/start",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{staffToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.collectionVariables.get('plannedCountDate') === pm.collectionVariables.get('countToday')) {",
+                  "    pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã MSG247', () => pm.expect(pm.response.json().code).to.eql('MSG247'));",
+                  "const [y, m, d] = pm.collectionVariables.get('plannedCountDate').split('-');",
+                  "pm.test('Báo ngày kiểm dd/MM/yyyy', () => pm.expect(pm.response.json().message).to.include(`${d}/${m}/${y}`));"
                 ]
               }
             }

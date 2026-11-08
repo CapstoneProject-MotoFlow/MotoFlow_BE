@@ -8,7 +8,7 @@ body:
   content: |-
     {
       "countType": "CYCLE",
-      "countDate": "{{countDate}}",
+      "countDate": "{{plannedCountDate}}",
       "scopeType": "PRODUCTS",
       "productIds": [{{countPartId}}]
     }
@@ -19,8 +19,13 @@ auth:
 scripts:
   - type: beforeRequest
     code: |-
-      // The count date is today in Vietnam time (UTC+7), inside the open period.
-      pm.collectionVariables.set('countDate', new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10));
+      // A planned count dated tomorrow in Vietnam time (UTC+7), so starting it early shows MSG247.
+      // On the last day of the month tomorrow is in the next period: today is used and the MSG247 requests are skipped.
+      const vnNow = new Date(Date.now() + 7 * 3600 * 1000);
+      const today = vnNow.toISOString().slice(0, 10);
+      const tomorrow = new Date(vnNow.getTime() + 24 * 3600 * 1000).toISOString().slice(0, 10);
+      pm.collectionVariables.set('countToday', today);
+      pm.collectionVariables.set('plannedCountDate', tomorrow.slice(0, 7) === today.slice(0, 7) ? tomorrow : today);
     language: text/javascript
   - type: afterResponse
     code: |-

@@ -89,7 +89,8 @@ public class StockCountController {
         return service.cancel(user, id, request);
     }
 
-    @Operation(summary = "Start counting; book quantities are taken now (UC-93, the counter)")
+    @Operation(summary = "Start counting; book quantities are taken now (UC-93, the counter); "
+            + "409 MSG247 khi chưa tới ngày kiểm")
     @PostMapping("/{id}/start")
     public StockCountDetailResponse start(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id) {
         return service.start(user, id);
@@ -109,7 +110,8 @@ public class StockCountController {
         return service.submit(user, id, request == null ? new StockCountSubmitRequest(null) : request);
     }
 
-    @Operation(summary = "Confirm the result (UC-94, Branch Manager): done if nothing differs, otherwise to the Owner")
+    @Operation(summary = "Confirm the result (UC-94, Branch Manager): done if nothing differs, otherwise to the Owner; "
+            + "409 MSG247 khi chưa tới ngày kiểm")
     @PostMapping("/{id}/confirm")
     public StockCountDetailResponse confirm(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id,
                                             @Valid @RequestBody(required = false) StockCountConfirmRequest request) {
