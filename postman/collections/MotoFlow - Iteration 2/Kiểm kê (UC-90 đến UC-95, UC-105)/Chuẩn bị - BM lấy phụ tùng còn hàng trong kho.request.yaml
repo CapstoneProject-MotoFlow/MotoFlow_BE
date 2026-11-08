@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory/lots?tab=IN_STOCK&size=1"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const items = pm.response.json().page.items;
+      pm.test('Kho của BM còn hàng', () => pm.expect(items.length).to.be.above(0));
+      pm.collectionVariables.set('countPartId', items[0].productId);
+    language: text/javascript
+order: 1000

@@ -55,4 +55,41 @@ public class StockCountRequest {
 
     @Column(name = "cancelled_at")
     private LocalDateTime cancelledAt;
+
+    /** UC-105: the Owner asks the store's Branch Manager to count. */
+    public static StockCountRequest create(Long storeId, ScopeType scopeType, String scopeNote, String reason,
+                                           Long requestedBy, LocalDateTime now) {
+        StockCountRequest request = new StockCountRequest();
+        request.storeId = storeId;
+        request.scopeType = scopeType;
+        request.scopeNote = scopeNote;
+        request.reason = reason;
+        request.status = StockCountRequestStatus.PENDING;
+        request.requestedBy = requestedBy;
+        request.requestedAt = now;
+        return request;
+    }
+
+    public boolean isPending() {
+        return status == StockCountRequestStatus.PENDING;
+    }
+
+    /** UC-91: the Branch Manager created the count for it. */
+    public void markDone() {
+        requirePending();
+        status = StockCountRequestStatus.DONE;
+    }
+
+    /** UC-105: the Owner withdrew it before a count was made. */
+    public void cancel(LocalDateTime now) {
+        requirePending();
+        status = StockCountRequestStatus.CANCELLED;
+        cancelledAt = now;
+    }
+
+    private void requirePending() {
+        if (status != StockCountRequestStatus.PENDING) {
+            throw new IllegalStateException("stock count request " + id + " is " + status);
+        }
+    }
 }

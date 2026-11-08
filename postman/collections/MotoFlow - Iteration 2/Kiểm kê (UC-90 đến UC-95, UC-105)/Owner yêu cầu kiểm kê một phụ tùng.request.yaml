@@ -1,0 +1,29 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-count-requests"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "storeId": {{bmStoreId}},
+      "scopeType": "PRODUCTS",
+      "reason": "Kiểm định kỳ từ Postman",
+      "productIds": [{{countPartId}}]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.test('Yêu cầu PENDING', () => pm.expect(b.status).to.eql('PENDING'));
+      pm.test('Đúng phụ tùng', () => pm.expect(b.products.map(p => p.productId))
+          .to.eql([Number(pm.collectionVariables.get('countPartId'))]));
+      pm.collectionVariables.set('countRequestId', b.id);
+    language: text/javascript
+order: 4000

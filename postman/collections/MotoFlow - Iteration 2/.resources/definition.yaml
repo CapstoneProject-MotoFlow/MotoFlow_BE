@@ -8,6 +8,7 @@ description: |-
   - bm.cg là Branch Manager cửa hàng thường, dùng cho UC-68 đến UC-70.
   - Thư mục Cảnh báo hết hạn ghi 1 phiên bản chờ cho ngày 2099-01-01, không đổi số ngày đang áp dụng, chạy lại nhiều lần được.
   - Thư mục Phiếu chuyển kho ghi dữ liệu và tồn kho: mỗi lần chạy chuyển 2 phụ tùng từ kho tổng (bm.kho, nv.kho1) tới Cầu Giấy (bm.cg, nv.cg1), nhận thiếu 1 ở phụ tùng đầu, thừa 1 ở phụ tùng sau, trả phần thiếu về kho tổng rồi đóng phiếu. Cần kho tổng còn ít nhất 3 cái bán được của 2 phụ tùng; chạy lại nhiều lần được tới khi hết hàng.
+  - Thư mục Kiểm kê ghi dữ liệu vào kho của bm.kho: mỗi lần chạy tạo 2 yêu cầu kiểm kê (1 được trả lời, 1 bị hủy), 2 phiếu kiểm (1 được duyệt, 1 bị hủy) và cộng 1 vào tồn của 1 phụ tùng. Trước khi chạy, kho này không được có phiếu kiểm DRAFT, COUNTING hay AWAITING_APPROVAL (SC-1); nv.kho1 phải là Staff của kho đó.
 variables:
   baseUrl: http://localhost:8080
   ownerUsername: owner

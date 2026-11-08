@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-count-requests/{{cancelRequestId}}/cancel"
+method: POST
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã MSG233', () => pm.expect(pm.response.json().code).to.eql('MSG233'));
+    language: text/javascript
+order: 31000

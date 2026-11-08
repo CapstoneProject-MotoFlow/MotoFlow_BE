@@ -1,0 +1,35 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stock-counts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "countType": "CYCLE",
+      "countDate": "{{countDate}}",
+      "scopeType": "PRODUCTS",
+      "productIds": [{{countPartId}}],
+      "stockCountRequestId": {{countRequestId}}
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: beforeRequest
+    code: |-
+      // The count date is today in Vietnam time (UTC+7), inside the open period.
+      pm.collectionVariables.set('countDate', new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10));
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.test('Phiếu DRAFT', () => pm.expect(b.status).to.eql('DRAFT'));
+      pm.test('Có dòng kiểm', () => pm.expect(b.lines.length).to.be.above(0));
+      pm.test('Gắn với yêu cầu', () => pm.expect(b.request.id).to.eql(Number(pm.collectionVariables.get('countRequestId'))));
+      pm.collectionVariables.set('stockCountId', b.id);
+    language: text/javascript
+order: 9000

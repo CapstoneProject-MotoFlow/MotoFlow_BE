@@ -18,6 +18,7 @@ scripts:
       pm.test('HTTP 200', () => pm.response.to.have.status(200));
       const b = pm.response.json();
       pm.collectionVariables.set('staffToken', b.accessToken);
+      pm.collectionVariables.set('staffUserId', b.user.id);
       pm.test('Vai trò STAFF', () => pm.expect(b.user.role).to.eql('STAFF'));
     language: text/javascript
 order: 4000
