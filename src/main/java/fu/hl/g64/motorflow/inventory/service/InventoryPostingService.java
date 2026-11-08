@@ -55,17 +55,17 @@ public interface InventoryPostingService {
     List<LotQuantity> move(MovePosting posting);
 
     /**
-     * Plus or minus on one known lot; never below zero (MSG84). A COUNT_ADJUSTMENT may name {@code periodId} and
-     * {@code occurredAt} to land in the count's own period and at the end of the count day (BR-83): that period must
-     * be OPEN (MSG85). Naming them for any other movement type, or only one of them, is an
-     * {@link IllegalArgumentException}; naming neither posts into the current month as always.
-     */
      * {@link #move} of exactly the given lots into several statuses at once (a transfer receipt: passed into AVAILABLE,
      * damaged into DAMAGED). The statuses are filled in enum order from the lots in the given order.
      */
     void moveToStatuses(SplitMovePosting posting);
 
-    /** Plus or minus on one known lot; never below zero (MSG84). */
+    /**
+     * Plus or minus on one known lot; never below zero (MSG84). A COUNT_ADJUSTMENT may name {@code periodId} and
+     * {@code occurredAt} to land in the count's own period and at the end of the count day (BR-83): that period must
+     * be OPEN (MSG85). Naming them for any other movement type, or only one of them, is an
+     * {@link IllegalArgumentException}; naming neither posts into the current month as always.
+     */
     void adjustLot(LotAdjustPosting posting);
 
     /**

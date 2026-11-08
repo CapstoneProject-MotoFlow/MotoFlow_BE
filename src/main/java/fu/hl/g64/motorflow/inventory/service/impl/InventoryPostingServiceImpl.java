@@ -177,7 +177,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         });
         int total = wanted.values().stream().mapToInt(Integer::intValue).sum();
         LocalDateTime now = LocalDateTime.now(clock);
-        InventoryPeriod period = openPeriod(now.toLocalDate());
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
         boolean sameStore = p.fromStoreId().equals(p.toStoreId());
         StockBalance from;
         StockBalance to;
@@ -198,7 +198,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         for (Pick pick : picks) {
             BigDecimal unitCost = costOf(product, pick.lot);
             post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
-                    p.performedBy(), period, now);
+                    p.performedBy(), period, now, now);
             int lotLeft = pick.quantity;
             while (lotLeft > 0) {
                 if (left == 0) {
@@ -207,7 +207,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 }
                 int part = Math.min(lotLeft, left);
                 post(to, pick.lot, filling.getKey(), part, unitCost, p.movementType(), p.source(), p.reason(),
-                        p.performedBy(), period, now);
+                        p.performedBy(), period, now, now);
                 lotLeft -= part;
                 left -= part;
             }
