@@ -1,9 +1,12 @@
 package fu.hl.g64.motorflow.common.error;
 
+import jakarta.persistence.LockTimeoutException;
+import jakarta.persistence.PessimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -30,6 +33,7 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     private static final Locale VIETNAMESE = Locale.forLanguageTag("vi");
+    private static final String APP_PACKAGE = "fu.hl.g64.motorflow.";
 
     private static final String INVALID_VALUE = "Giá trị không hợp lệ.";
     private static final String MISSING_VALUE = "Vui lòng nhập giá trị.";
@@ -84,6 +88,32 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiError> handleAuthentication(AuthenticationException ex, HttpServletRequest request) {
         return build(HttpStatus.UNAUTHORIZED, "MSG06", null, request, null);
+    }
+
+    /**
+     * The entities guard their own state, such as a transfer order dispatched twice or stock about to go negative.
+     * The services check the same rules first, so reaching one of these guards means the document changed between
+     * the check and the write: ask the user to reload (MSG29) instead of reporting a server error. An
+     * IllegalStateException from a library is a bug and stays a 500.
+     */
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiError> handleIllegalState(IllegalStateException ex, HttpServletRequest request) {
+        StackTraceElement[] trace = ex.getStackTrace();
+        if (trace.length == 0 || !trace[0].getClassName().startsWith(APP_PACKAGE)) {
+            return handleOther(ex, request);
+        }
+        log.warn("State changed under {} {}: {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
+        return build(HttpStatus.CONFLICT, "MSG29", null, request, null);
+    }
+
+    /**
+     * A lock wait that timed out or a deadlock PostgreSQL broke: nothing was saved and trying again may work.
+     * Repositories raise Spring's ConcurrencyFailureException; code using the EntityManager directly raises the JPA ones.
+     */
+    @ExceptionHandler({ConcurrencyFailureException.class, PessimisticLockException.class, LockTimeoutException.class})
+    public ResponseEntity<ApiError> handleConcurrency(RuntimeException ex, HttpServletRequest request) {
+        log.warn("Lock conflict on {} {}", request.getMethod(), request.getRequestURI(), ex);
+        return build(HttpStatus.CONFLICT, "MSG248", null, request, null);
     }
 
     @ExceptionHandler(Exception.class)
