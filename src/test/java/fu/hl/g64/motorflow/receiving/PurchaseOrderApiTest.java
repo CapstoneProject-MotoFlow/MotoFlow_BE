@@ -171,6 +171,24 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
     }
 
     @Test
+    void theExpectedArrivalCannotBeChosenInThePast() throws Exception {
+        LocalDate yesterday = LocalDate.of(2026, 10, 12);
+        LocalDate today = LocalDate.of(2026, 10, 13);
+        create(ownerToken, order(honda, giaLam, yesterday, null, line(pad, 1, 1_000)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG248"))
+                .andExpect(jsonPath("$.message").value("Ngày giao dự kiến phải từ hôm nay trở đi."));
+        long order = created(order(honda, giaLam, today, null, line(pad, 1, 1_000)));
+        update(ownerToken, order, change(yesterday, null, "Đổi ngày", line(pad, 1, 1_000)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG248"));
+
+        // Once the PO is late it keeps its date, and its other details can still change.
+        clock.advance(Duration.ofDays(2));
+        ownerToken = signIn("owner");
+        update(ownerToken, order, change(today, null, "Thêm số lượng", line(pad, 3, 1_000)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.overdue").value(true));
+    }
+
+    @Test
     void onlyOwnerCreatesChangesAndCancelsOrders() throws Exception {
         Map<String, Object> body = order(honda, giaLam, null, null, line(pad, 1, 1_000));
         for (String token : List.of(managerToken, staffToken, adminToken)) {

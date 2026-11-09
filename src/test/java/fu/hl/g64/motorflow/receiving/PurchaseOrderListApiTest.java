@@ -36,14 +36,18 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
 
     @BeforeEach
     void createOrders() throws Exception {
-        fullyReceived = created(order(honda, giaLam, LocalDate.of(2026, 9, 5), null, line(pad, 10, 120_000)));
-        lateOrder = created(order(yamaha, longBien, LocalDate.of(2026, 10, 10), null, line(oil, 24, 85_000)));
-        cancelledOrder = created(order(honda, giaLam, LocalDate.of(2026, 10, 8), null, line(pad, 5, 120_000),
+        fullyReceived = created(order(honda, giaLam, TODAY, null, line(pad, 10, 120_000)));
+        lateOrder = created(order(yamaha, longBien, TODAY, null, line(oil, 24, 85_000)));
+        cancelledOrder = created(order(honda, giaLam, TODAY, null, line(pad, 5, 120_000),
                 line(lamp, 2, 200_000)));
         cancel(ownerToken, cancelledOrder, "NCC hết hàng").andExpect(status().isOk());
         receivingOrder = created(order(honda, giaLam, null, "Giao làm hai đợt", line(pad, 10, 120_000),
                 line(lamp, 4, 200_000), line(oil, 6, 85_000)));
         newOrder = created(order(yamaha, giaLam, TODAY, null, line(oil, 12, 85_000)));
+        // Their dates were chosen when they were created, before today (MSG248 refuses a past date now).
+        arrivingOn(fullyReceived, LocalDate.of(2026, 9, 5));
+        arrivingOn(lateOrder, LocalDate.of(2026, 10, 10));
+        arrivingOn(cancelledOrder, LocalDate.of(2026, 10, 8));
         createdAt(fullyReceived, LocalDateTime.of(2026, 9, 1, 9, 0), "FULLY_RECEIVED");
         createdAt(lateOrder, LocalDateTime.of(2026, 10, 1, 9, 0), "AWAITING_DELIVERY");
         createdAt(cancelledOrder, LocalDateTime.of(2026, 10, 5, 9, 0), "CANCELLED");
@@ -333,5 +337,9 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
 
     private static Integer[] ids(long... ids) {
         return Arrays.stream(ids).mapToObj(id -> (int) id).toArray(Integer[]::new);
+    }
+
+    private void arrivingOn(long order, LocalDate arrival) {
+        jdbc.update("UPDATE purchase_order SET expected_arrival = ? WHERE id = ?", arrival, order);
     }
 }
