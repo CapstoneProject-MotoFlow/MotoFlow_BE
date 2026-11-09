@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.support;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.cache.CacheManager;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,6 +35,9 @@ public abstract class IntegrationTest {
     @Autowired
     protected MutableClock clock;
 
+    @Autowired
+    private CacheManager cacheManager;
+
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> POSTGRES.getJdbcUrl("postgres", "postgres"));
@@ -48,6 +52,8 @@ public abstract class IntegrationTest {
                 + "product_image, product_vehicle_model, vehicle_model, product, part_category, user_account, store "
                 + "RESTART IDENTITY CASCADE");
         jdbc.execute("ALTER SEQUENCE supplier_code_seq RESTART WITH 1");
+        // Tests write catalog rows with SQL, which the cache cannot see.
+        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
         clock.set(START);
     }
 
