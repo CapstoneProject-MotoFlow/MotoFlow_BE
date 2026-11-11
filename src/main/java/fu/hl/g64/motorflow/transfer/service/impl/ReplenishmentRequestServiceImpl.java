@@ -12,6 +12,7 @@ import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
+import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
@@ -47,6 +48,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -153,13 +155,9 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG205", parts.get(line.productId()).getSku(),
                         Math.max(limit, 0));
             }
-            changes.add(Map.of("product_id", line.productId(), "from", target.getToPurchaseQty(), "to",
-                    line.toPurchaseQty()));
-            target.passToPurchase(line.toPurchaseQty());
+            changes.add(passToPurchase(target, line.toPurchaseQty()));
         }
-        request.startCoordination();
-        auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", id, "REPLENISHMENT_TO_PURCHASE_SET", user.id(), null,
-                null, Map.of("lines", changes), LocalDateTime.now(clock)));
+        recordToPurchase(user, request, changes);
         long partCount = requested.stream().filter(line -> line.getToPurchaseQty() > 0).count();
         if (partCount > 0) {
             String message = "Yêu cầu bổ sung #%d có %d phụ tùng cần mua từ nhà cung cấp".formatted(id, partCount);
@@ -169,6 +167,70 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                             "REPLENISHMENT_REQUEST", id));
         }
         return detail(request);
+    }
+
+    // UC-40 with BR-55
+    @Transactional
+    @Override
+    public void prepareForPurchase(AuthenticatedUser owner, long id, long storeId, Map<Long, Integer> quantities,
+                                   boolean includeUnallocated) {
+        ReplenishmentRequest request = requests.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG95"));
+        if (!request.getRequestingStoreId().equals(storeId)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG260");
+        }
+        if (request.getStatus() == ReplenishmentRequestStatus.CLOSED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        if (requests.findPurchaseOrders(id).stream()
+                .anyMatch(row -> row.getPurchaseOrder().getStatus() != PurchaseOrderStatus.CANCELLED)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG261", id);
+        }
+        List<ReplenishmentRequestLine> requested = lines.findByReplenishmentRequestIdOrderById(id);
+        Set<Long> parts = requested.stream().map(ReplenishmentRequestLine::getProductId).collect(Collectors.toSet());
+        int lineNo = 0;
+        for (Long productId : quantities.keySet()) {
+            lineNo++;
+            if (!parts.contains(productId)) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG204", lineNo);
+            }
+        }
+        if (!includeUnallocated) {
+            return;
+        }
+        Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
+        List<Map<String, Object>> changes = new ArrayList<>();
+        for (ReplenishmentRequestLine line : requested) {
+            long unallocated = line.getRequestedQty() - planned.getOrDefault(line.getProductId(), 0L)
+                    - line.getToPurchaseQty();
+            if (unallocated > 0) {
+                changes.add(passToPurchase(line, Math.toIntExact(line.getToPurchaseQty() + unallocated)));
+            }
+            // A transfer order planned while the Owner had the PO open: the PO would buy more or less than is short.
+            if (quantities.getOrDefault(line.getProductId(), 0) != line.getToPurchaseQty()) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG262", id,
+                        products.findById(line.getProductId()).map(Product::getSku).orElseThrow(),
+                        line.getToPurchaseQty());
+            }
+        }
+        if (!changes.isEmpty()) {
+            recordToPurchase(owner, request, changes);
+        }
+    }
+
+    /** BR-55: one part's quantity to purchase, and the change for the audit log. */
+    private static Map<String, Object> passToPurchase(ReplenishmentRequestLine line, int quantity) {
+        Map<String, Object> change = Map.of("product_id", line.getProductId(), "from", line.getToPurchaseQty(), "to",
+                quantity);
+        line.passToPurchase(quantity);
+        return change;
+    }
+
+    private void recordToPurchase(AuthenticatedUser user, ReplenishmentRequest request,
+                                  List<Map<String, Object>> changes) {
+        request.startCoordination();
+        auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", request.getId(), "REPLENISHMENT_TO_PURCHASE_SET",
+                user.id(), null, null, Map.of("lines", changes), LocalDateTime.now(clock)));
     }
 
     /** UC-68: a Branch Manager's own store, or the store the Owner chose; only the Owner may stock a planned store. */

@@ -79,6 +79,11 @@ public class PurchaseOrder {
         return order;
     }
 
+    /** BR-55: the PO buys the shortage of this replenishment request. */
+    public void linkReplenishment(Long replenishmentRequestId) {
+        this.replenishmentRequestId = replenishmentRequestId;
+    }
+
     /** Still expecting goods: waiting for a delivery or receiving one. */
     public boolean isOpen() {
         return status == PurchaseOrderStatus.AWAITING_DELIVERY || status == PurchaseOrderStatus.RECEIVING;

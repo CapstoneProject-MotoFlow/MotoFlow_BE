@@ -49,6 +49,7 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
+import fu.hl.g64.motorflow.transfer.service.ReplenishmentRequestService;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
@@ -69,6 +70,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -99,6 +101,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     private final NotificationService notifications;
     private final ReceivingLedger ledger;
     private final DiscrepancySettlement settlement;
+    private final ReplenishmentRequestService replenishments;
     private final Clock clock;
 
     // UC-39
@@ -152,10 +155,18 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         checkLines(request.lines(), Set.of());
         LocalDateTime now = LocalDateTime.now(clock);
         checkArrival(request.expectedArrival(), null, now.toLocalDate());
+        if (request.replenishmentRequestId() != null) {
+            Map<Long, Integer> quantities = new LinkedHashMap<>();
+            request.lines().forEach(line -> quantities.put(line.productId(), line.quantity()));
+            replenishments.prepareForPurchase(owner, request.replenishmentRequestId(), store.getId(), quantities,
+                    request.includeUnallocated());
+        }
 
         String note = text(request.note());
-        PurchaseOrder order = orders.save(PurchaseOrder.create(supplier.getId(), store.getId(),
-                request.expectedArrival(), note, owner.id(), now));
+        PurchaseOrder created = PurchaseOrder.create(supplier.getId(), store.getId(), request.expectedArrival(), note,
+                owner.id(), now);
+        created.linkReplenishment(request.replenishmentRequestId());
+        PurchaseOrder order = orders.save(created);
         orderLines.saveAll(request.lines().stream().map(line -> PurchaseOrderLine.create(order.getId(),
                 line.productId(), line.quantity(), line.purchasePrice())).toList());
         auditLog.save(AuditLog.record(PurchaseOrderHistory.ENTITY, order.getId(), PurchaseOrderHistory.CREATED,

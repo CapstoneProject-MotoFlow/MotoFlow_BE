@@ -10,6 +10,7 @@ import fu.hl.g64.motorflow.transfer.dto.ReplenishmentSearch;
 import fu.hl.g64.motorflow.transfer.dto.ToPurchaseRequest;
 
 import java.util.List;
+import java.util.Map;
 
 /** UC-68 to UC-70: a store asks for more stock. Coordination (UC-71) moves the request on from there. */
 public interface ReplenishmentRequestService {
@@ -28,4 +29,15 @@ public interface ReplenishmentRequestService {
 
     /** BR-55: sets per part what goes to the Owner for purchasing, and tells the Owner. */
     ReplenishmentDetailResponse toPurchase(AuthenticatedUser user, long id, ToPurchaseRequest request);
+
+    /**
+     * UC-40 with BR-55, inside the Owner's PO creation. Locks the request so that two POs cannot be bought for it at
+     * once. It must belong to the receiving warehouse, be open, have no PO that is not cancelled, and the PO may only
+     * buy its parts. With {@code includeUnallocated}, what no transfer order has planned yet is passed to purchase too,
+     * and the PO must then buy exactly what is passed to purchase, per part.
+     *
+     * @param quantities the PO's quantity per part, in line order
+     */
+    void prepareForPurchase(AuthenticatedUser owner, long id, long storeId, Map<Long, Integer> quantities,
+                            boolean includeUnallocated);
 }
