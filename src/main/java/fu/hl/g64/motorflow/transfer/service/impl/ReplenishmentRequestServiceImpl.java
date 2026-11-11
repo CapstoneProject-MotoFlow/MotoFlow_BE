@@ -46,13 +46,19 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestService {
+
+    private static final Pattern CODE = Pattern.compile("(?i)ybs-?0*(\\d+)");
+    private static final Pattern DIGITS = Pattern.compile("\\d+");
 
     private final ReplenishmentRequestRepository requests;
     private final ReplenishmentRequestLineRepository lines;
@@ -97,14 +103,43 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                                                        int size) {
         Long storeId = storeScope.seesEveryStore(user) ? search.storeId()
                 : storeScope.viewableStore(user, search.storeId()).getId();
+        TextQuery q = TextQuery.of(search.q());
         Page<ReplenishmentRequestRepository.RequestRow> found = requests.search(search.status(), storeId, search.from(),
-                search.to(), PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
+                search.to(), q.present(), q.id(), q.pattern(),
+                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
         return PageResponse.of(found, found.stream().map(row -> {
             ReplenishmentRequest request = row.getRequest();
             return new ReplenishmentRowResponse(request.getId(), request.getRequestingStoreId(), row.getStoreName(),
                     request.getStatus(), row.getLineCount(), row.getTotalRequestedQty(), request.getCreatedBy(),
                     row.getCreatedByName(), request.getCreatedAt(), request.getClosedAt());
         }).toList());
+    }
+
+    /**
+     * The search text as the query takes it: a request id when it reads as a code, and a LIKE pattern for store
+     * names.
+     */
+    private record TextQuery(boolean present, Long id, String pattern) {
+
+        static TextQuery of(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return new TextQuery(false, null, "");
+            }
+            String text = raw.trim();
+            Matcher code = CODE.matcher(text);
+            String digits = code.matches() ? code.group(1) : DIGITS.matcher(text).matches() ? text : null;
+            Long id = null;
+            if (digits != null) {
+                try {
+                    id = Long.parseLong(digits);
+                } catch (NumberFormatException tooLong) {
+                    // Digits beyond a Long cannot be an id, so only the store name can match.
+                }
+            }
+            String escaped = text.toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%")
+                    .replace("_", "\\_");
+            return new TextQuery(true, id, "%" + escaped + "%");
+        }
     }
 
     // UC-70

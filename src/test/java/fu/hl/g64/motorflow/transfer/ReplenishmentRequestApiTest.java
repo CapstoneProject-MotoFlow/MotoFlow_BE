@@ -284,6 +284,79 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
     }
 
     @Test
+    void qFindsARequestByItsCodeOrId() throws Exception {
+        long wanted = created("bm", null);
+        created("owner", central);
+        String code = String.format("YBS-%04d", wanted);
+
+        for (String q : List.of(code, code.toLowerCase(), String.valueOf(wanted), " " + code + " ")) {
+            list("owner", "q", q).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[*].id", contains((int) wanted)))
+                    .andExpect(jsonPath("$.totalItems").value(1));
+        }
+        list("owner", "q", "99999999999999999999999").andExpect(jsonPath("$.totalItems").value(0));
+    }
+
+    @Test
+    void qFindsRequestsByPartOfTheStoreNameInAnyCase() throws Exception {
+        long first = created("bm", null);
+        long second = created("bm", null);
+        created("owner", central);
+
+        for (String q : List.of("long BIÊN", "LONG", "biên")) {
+            list("owner", "q", q).andExpect(jsonPath("$.items[*].id", containsInAnyOrder((int) first, (int) second)))
+                    .andExpect(jsonPath("$.items[*].storeName", contains("Long Biên", "Long Biên")));
+        }
+    }
+
+    @Test
+    void qNarrowsDownTogetherWithTheOtherFilters() throws Exception {
+        long open = created("bm", null);
+        long progressing = created("bm", null);
+        created("owner", central);
+        jdbc.update("UPDATE replenishment_request SET status = 'IN_PROGRESS' WHERE id = ?", progressing);
+
+        list("owner", "q", "long", "status", "AWAITING_COORDINATION")
+                .andExpect(jsonPath("$.items[*].id", contains((int) open)));
+        list("owner", "q", "long", "status", "IN_PROGRESS")
+                .andExpect(jsonPath("$.items[*].id", contains((int) progressing)));
+        list("owner", "q", "kho", "status", "IN_PROGRESS").andExpect(jsonPath("$.totalItems").value(0));
+    }
+
+    @Test
+    void aBlankQListsWhatNoQDoes() throws Exception {
+        long first = created("bm", null);
+        long second = created("owner", central);
+
+        for (String q : List.of("", "   ")) {
+            list("owner", "q", q).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[*].id", contains((int) second, (int) first)));
+        }
+    }
+
+    @Test
+    void qNeverWidensWhatAStoreManagerMaySee() throws Exception {
+        long own = created("bm", null);
+        long central1 = created("owner", central);
+
+        list("bm", "q", "Kho").andExpect(status().isOk()).andExpect(jsonPath("$.items", empty()))
+                .andExpect(jsonPath("$.totalItems").value(0));
+        list("bm", "q", String.valueOf(central1)).andExpect(jsonPath("$.items", empty()));
+        list("owner", "q", "Kho").andExpect(jsonPath("$.items[*].id", contains((int) central1)))
+                .andExpect(jsonPath("$.items[*].storeName", contains("Kho tổng")));
+        list("bm", "q", "long").andExpect(jsonPath("$.items[*].id", contains((int) own)));
+    }
+
+    @Test
+    void likeWildcardsInQAreTakenLiterally() throws Exception {
+        created("bm", null);
+        created("owner", central);
+
+        list("owner", "q", "%").andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(0));
+        list("owner", "q", "_").andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(0));
+    }
+
+    @Test
     void theDetailAddsUpTransfersAndConfirmedReceipts() throws Exception {
         long id = created("bm", null, line(brake, 10), line(chain, 2));
         jdbc.update("UPDATE replenishment_request_line SET to_purchase_qty = 3 WHERE product_id = ?", brake);

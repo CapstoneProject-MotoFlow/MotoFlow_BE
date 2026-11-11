@@ -867,6 +867,36 @@
           ]
         },
         {
+          "name": "Tìm yêu cầu bổ sung theo mã/cửa hàng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests?q=YBS-0001&page=0&size=20",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Chỉ trả yêu cầu có mã YBS-0001', () => pm.response.json().items.forEach(row => pm.expect(row.id).to.eql(1)));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "BM xem danh sách",
           "request": {
             "method": "GET",
