@@ -370,6 +370,67 @@ class AuthApiIntegrationTest extends IntegrationTest {
         }
     }
 
+    @Nested
+    class CurrentUser {
+
+        @Test
+        void centralBranchManagerIsFlaggedOnLoginAndOnMe() throws Exception {
+            Long central = createStore("CTR");
+            jdbc.update("UPDATE store SET is_central = TRUE WHERE id = ?", central);
+            UserAccount manager = createUser("bmcentral", Role.BRANCH_MANAGER, central, false);
+
+            MvcResult result = login("bmcentral", PASSWORD)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.user.central").value(true))
+                    .andReturn();
+
+            me(accessToken(result))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(manager.getId()))
+                    .andExpect(jsonPath("$.username").value("bmcentral"))
+                    .andExpect(jsonPath("$.role").value("BRANCH_MANAGER"))
+                    .andExpect(jsonPath("$.storeId").value(central))
+                    .andExpect(jsonPath("$.mustChangePassword").value(false))
+                    .andExpect(jsonPath("$.permissions").isArray())
+                    .andExpect(jsonPath("$.central").value(true));
+        }
+
+        @Test
+        void branchManagerOfANormalStoreIsNotCentral() throws Exception {
+            Long central = createStore("CTR");
+            jdbc.update("UPDATE store SET is_central = TRUE WHERE id = ?", central);
+            Long normal = createStore("CH02");
+            createUser("bmnormal", Role.BRANCH_MANAGER, normal, false);
+
+            MvcResult result = login("bmnormal", PASSWORD)
+                    .andExpect(jsonPath("$.user.central").value(false))
+                    .andReturn();
+
+            me(accessToken(result))
+                    .andExpect(jsonPath("$.storeId").value(normal))
+                    .andExpect(jsonPath("$.central").value(false));
+        }
+
+        @Test
+        void ownerStaffAndAdminAreNotCentral() throws Exception {
+            Long central = createStore("CTR");
+            jdbc.update("UPDATE store SET is_central = TRUE WHERE id = ?", central);
+            createUser("owner", Role.OWNER, null, false);
+            createUser("staffc", Role.STAFF, central, false);
+            createUser("admin", Role.ADMIN, null, false);
+
+            me(accessToken(login("owner", PASSWORD).andReturn()))
+                    .andExpect(jsonPath("$.role").value("OWNER"))
+                    .andExpect(jsonPath("$.central").value(false));
+            me(accessToken(login("staffc", PASSWORD).andReturn()))
+                    .andExpect(jsonPath("$.role").value("STAFF"))
+                    .andExpect(jsonPath("$.central").value(false));
+            me(accessToken(login("admin", PASSWORD).andReturn()))
+                    .andExpect(jsonPath("$.role").value("ADMIN"))
+                    .andExpect(jsonPath("$.central").value(false));
+        }
+    }
+
     private UserAccount createUser(String username, Role role, Long storeId, boolean temporaryPassword) {
         LocalDateTime now = LocalDateTime.now(clock);
         String hash = passwordEncoder.encode(PASSWORD);
