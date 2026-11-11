@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.receiving.repository;
 
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
+import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -15,6 +16,9 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, Lo
         JpaSpecificationExecutor<PurchaseOrder> {
 
     Page<PurchaseOrder> findBySupplierId(Long supplierId, Pageable pageable);
+
+    /** BR-55: a replenishment request has at most one PO that is not cancelled. */
+    boolean existsByReplenishmentRequestIdAndStatusNot(Long replenishmentRequestId, PurchaseOrderStatus status);
 
     /**
      * The PO row, locked. Changing or cancelling a PO (UC-42) and recording its first GRN (UC-106) both lock it first,
