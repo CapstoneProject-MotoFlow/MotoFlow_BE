@@ -145,7 +145,9 @@ public class CustomerServiceImpl implements CustomerService {
     @Transactional
     @Override
     public CustomerResponse update(AuthenticatedUser actor, long id, CustomerRequest request) {
-        Customer customer = find(id);
+        // Saving writes every column, credit_status included, so wait for a credit decision on the same customer.
+        Customer customer = customers.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG74"));
         LocalDateTime now = LocalDateTime.now(clock);
         customer.update(request.customerName().strip(), blankToNull(request.phone()), blankToNull(request.address()),
                 blankToNull(request.taxCode()), now);

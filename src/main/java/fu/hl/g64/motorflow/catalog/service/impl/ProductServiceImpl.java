@@ -183,7 +183,7 @@ public class ProductServiceImpl implements ProductService {
     @Transactional
     @Override
     public ProductResponse update(AuthenticatedUser actor, long id, ProductRequest request) {
-        Product product = find(id);
+        Product product = lock(id);
         if (!request.categoryId().equals(product.getCategoryId())) {
             categoryService.requireLeafForParts(request.categoryId());
         }
@@ -202,7 +202,7 @@ public class ProductServiceImpl implements ProductService {
     @Transactional
     @Override
     public void changeStatus(AuthenticatedUser actor, long id, ProductStatus status) {
-        Product product = find(id);
+        Product product = lock(id);
         if (product.getStatus() == status) {
             return;
         }
@@ -307,6 +307,14 @@ public class ProductServiceImpl implements ProductService {
 
     private Product find(long id) {
         return products.findById(id).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57"));
+    }
+
+    /**
+     * Saving a product writes every column, moving_avg_cost included. Locking the row first makes an edit wait for a
+     * receipt that is recalculating the average, so the edit cannot write back the average it read before.
+     */
+    private Product lock(long id) {
+        return products.findByIdForUpdate(id).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57"));
     }
 
     private static List<String> values(List<ProductIdentifier> codes, IdentifierType type) {

@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -185,6 +186,41 @@ class CatalogApiTest extends IntegrationTest {
 
     @Nested
     class Products {
+
+        @Test
+        void anEditDuringAReceiptKeepsTheNewMovingAverage() throws Exception {
+            long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE"));
+            long part = productId(product("SKU-1", pads));
+            jdbc.update("UPDATE product SET moving_avg_cost = 100000 WHERE id = ?", part);
+            Map<String, Object> renamed = product("SKU-1", pads);
+            renamed.put("partName", "Bố thắng đĩa trước");
+
+            whileAnotherTransactionHoldsTheRow("UPDATE product SET moving_avg_cost = 120000 WHERE id = ?",
+                    () -> send(put("/api/v1/products/{id}", part), ownerToken, renamed).andExpect(status().isOk()),
+                    part);
+
+            assertThat(jdbc.queryForMap("SELECT part_name, moving_avg_cost FROM product WHERE id = ?", part))
+                    .containsEntry("part_name", "Bố thắng đĩa trước")
+                    .hasEntrySatisfying("moving_avg_cost",
+                            cost -> assertThat((BigDecimal) cost).isEqualByComparingTo("120000"));
+        }
+
+        @Test
+        void aStatusChangeDuringAReceiptKeepsTheNewMovingAverage() throws Exception {
+            long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE"));
+            long part = productId(product("SKU-1", pads));
+            jdbc.update("UPDATE product SET moving_avg_cost = 100000 WHERE id = ?", part);
+
+            whileAnotherTransactionHoldsTheRow("UPDATE product SET moving_avg_cost = 120000 WHERE id = ?",
+                    () -> send(post("/api/v1/products/{id}/discontinue", part), ownerToken)
+                            .andExpect(status().is2xxSuccessful()),
+                    part);
+
+            assertThat(jdbc.queryForObject("SELECT moving_avg_cost FROM product WHERE id = ?", BigDecimal.class, part))
+                    .isEqualByComparingTo("120000");
+            assertThat(jdbc.queryForObject("SELECT status FROM product WHERE id = ?", String.class, part))
+                    .isEqualTo("DISCONTINUED");
+        }
 
         @Test
         void createUpdateDiscontinueAndReactivate() throws Exception {
