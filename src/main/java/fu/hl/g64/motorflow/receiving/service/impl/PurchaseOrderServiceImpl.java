@@ -49,12 +49,7 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
-import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequest;
-import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequestLine;
-import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
-import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepository;
-import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
-import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
+import fu.hl.g64.motorflow.transfer.service.ReplenishmentRequestService;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
@@ -75,6 +70,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -105,9 +101,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     private final NotificationService notifications;
     private final ReceivingLedger ledger;
     private final DiscrepancySettlement settlement;
-    private final ReplenishmentRequestRepository replenishments;
-    private final ReplenishmentRequestLineRepository replenishmentLines;
-    private final TransferOrderLineRepository transferLines;
+    private final ReplenishmentRequestService replenishments;
     private final Clock clock;
 
     // UC-39
@@ -161,18 +155,17 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         checkLines(request.lines(), Set.of());
         LocalDateTime now = LocalDateTime.now(clock);
         checkArrival(request.expectedArrival(), null, now.toLocalDate());
-        ReplenishmentRequest replenishment = request.replenishmentRequestId() == null ? null
-                : purchasableReplenishment(request.replenishmentRequestId(), store.getId());
+        if (request.replenishmentRequestId() != null) {
+            Map<Long, Integer> quantities = new LinkedHashMap<>();
+            request.lines().forEach(line -> quantities.put(line.productId(), line.quantity()));
+            replenishments.prepareForPurchase(owner, request.replenishmentRequestId(), store.getId(), quantities,
+                    request.includeUnallocated());
+        }
 
         String note = text(request.note());
         PurchaseOrder created = PurchaseOrder.create(supplier.getId(), store.getId(), request.expectedArrival(), note,
                 owner.id(), now);
-        if (replenishment != null) {
-            created.linkReplenishment(replenishment.getId());
-            if (request.includeUnallocated()) {
-                passUnallocatedToPurchase(owner, replenishment, now);
-            }
-        }
+        created.linkReplenishment(request.replenishmentRequestId());
         PurchaseOrder order = orders.save(created);
         orderLines.saveAll(request.lines().stream().map(line -> PurchaseOrderLine.create(order.getId(),
                 line.productId(), line.quantity(), line.purchasePrice())).toList());
@@ -183,47 +176,6 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 "Có yêu cầu nhập hàng mới %s từ nhà cung cấp %s.".formatted(label(order), supplier.getSupplierName()),
                 REF_TYPE, order.getId());
         return detail(owner, order);
-    }
-
-    /**
-     * BR-55: the request is locked so that two POs cannot be bought for it at once. It must belong to the receiving
-     * warehouse, still be open and have no PO that is not cancelled.
-     */
-    private ReplenishmentRequest purchasableReplenishment(long id, long storeId) {
-        ReplenishmentRequest request = replenishments.findByIdForUpdate(id)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG95"));
-        if (!request.getRequestingStoreId().equals(storeId)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG260");
-        }
-        if (request.getStatus() == ReplenishmentRequestStatus.CLOSED) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
-        }
-        if (orders.existsByReplenishmentRequestIdAndStatusNot(id, PurchaseOrderStatus.CANCELLED)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG261", id);
-        }
-        return request;
-    }
-
-    /** BR-55: what no transfer order has planned yet is bought too, so it no longer shows as unallocated. */
-    private void passUnallocatedToPurchase(AuthenticatedUser owner, ReplenishmentRequest request, LocalDateTime now) {
-        Map<Long, Long> planned = transferLines.plannedByProduct(request.getId()).stream().collect(Collectors.toMap(
-                TransferOrderLineRepository.ProductQty::getProductId, TransferOrderLineRepository.ProductQty::getQty));
-        List<Map<String, Object>> changes = new ArrayList<>();
-        for (ReplenishmentRequestLine line : replenishmentLines.findByReplenishmentRequestIdOrderById(request.getId())) {
-            long unallocated = line.getRequestedQty() - planned.getOrDefault(line.getProductId(), 0L)
-                    - line.getToPurchaseQty();
-            if (unallocated > 0) {
-                int toPurchase = Math.toIntExact(line.getToPurchaseQty() + unallocated);
-                changes.add(Map.of("product_id", line.getProductId(), "from", line.getToPurchaseQty(), "to",
-                        toPurchase));
-                line.passToPurchase(toPurchase);
-            }
-        }
-        if (!changes.isEmpty()) {
-            request.startCoordination();
-            auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", request.getId(), "REPLENISHMENT_TO_PURCHASE_SET",
-                    owner.id(), null, null, Map.of("lines", changes), now));
-        }
     }
 
     // UC-42

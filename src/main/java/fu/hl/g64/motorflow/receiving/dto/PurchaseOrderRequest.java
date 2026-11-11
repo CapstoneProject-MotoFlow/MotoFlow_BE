@@ -12,7 +12,8 @@ import java.util.List;
  * UC-40: a PO for one active supplier and one active receiving warehouse, with the parts, quantities and purchase
  * prices agreed outside MotoFlow (BR-19, BR-20). The expected arrival and the note are the delivery details.
  * {@code replenishmentRequestId} links the PO to the replenishment request it buys the shortage of (BR-55);
- * {@code includeUnallocated} then also passes to purchase what no transfer order has planned yet.
+ * {@code includeUnallocated} then also passes to purchase what no transfer order has planned yet; without a request it
+ * is ignored.
  */
 public record PurchaseOrderRequest(
         @NotNull(message = "Vui lòng chọn nhà cung cấp.")
