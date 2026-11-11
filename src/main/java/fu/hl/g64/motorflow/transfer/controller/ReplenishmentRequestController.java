@@ -58,7 +58,8 @@ public class ReplenishmentRequestController {
     }
 
     @Operation(summary = "List replenishment requests (UC-69), those awaiting coordination first, then newest. A "
-            + "Branch Manager sees their store; the central warehouse Branch Manager and the Owner see every store")
+            + "Branch Manager sees their store; the central warehouse Branch Manager and the Owner see every store. "
+            + "q searches by request code (YBS-xxxx or id) or store name")
     @GetMapping
     public PageResponse<ReplenishmentRowResponse> list(
             @AuthenticationPrincipal AuthenticatedUser user,
@@ -66,9 +67,10 @@ public class ReplenishmentRequestController {
             @RequestParam(required = false) Long storeId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String q,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return service.list(user, new ReplenishmentSearch(status, storeId, from, to), page, size);
+        return service.list(user, new ReplenishmentSearch(status, storeId, from, to, q), page, size);
     }
 
     @Operation(summary = "One replenishment request (UC-70) with what was planned and received per part, and the "

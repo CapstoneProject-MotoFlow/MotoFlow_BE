@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.auth.service;
 
 import fu.hl.g64.motorflow.auth.dto.AuthResponse;
 import fu.hl.g64.motorflow.auth.dto.ChangePasswordRequest;
+import fu.hl.g64.motorflow.auth.dto.CurrentUserResponse;
 import fu.hl.g64.motorflow.auth.dto.LoginRequest;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 
@@ -36,4 +37,10 @@ public interface AuthService {
      * was temporary or known to someone else.
      */
     void changePassword(AuthenticatedUser principal, ChangePasswordRequest request);
+
+    /**
+     * The signed-in user as the frontend sees it, including whether this is the Branch Manager of the
+     * store holding the central warehouse (BR-03/BR-04).
+     */
+    CurrentUserResponse currentUser(AuthenticatedUser user);
 }

@@ -67,7 +67,7 @@ public class AuthController {
     @Operation(summary = "The signed-in user with role, store and permissions")
     @GetMapping("/me")
     public CurrentUserResponse me(@AuthenticationPrincipal AuthenticatedUser user) {
-        return CurrentUserResponse.from(user);
+        return authService.currentUser(user);
     }
 
     @Operation(summary = "Change own password, including a temporary one (UC-02)")

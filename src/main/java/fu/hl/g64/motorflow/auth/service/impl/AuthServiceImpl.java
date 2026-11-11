@@ -15,6 +15,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.security.JwtService;
+import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.auth.helper.PasswordPolicy;
 import fu.hl.g64.motorflow.auth.helper.RefreshTokens;
 import fu.hl.g64.motorflow.auth.service.AuthService;
@@ -46,6 +47,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtService jwtService;
     private final AuthProperties properties;
     private final Clock clock;
+    private final StoreScope storeScope;
     /** Checked against when the username does not exist, so both cases take the same time. */
     private final String dummyPasswordHash;
     /**
@@ -55,7 +57,7 @@ public class AuthServiceImpl implements AuthService {
     private final Map<String, UserAccount> unknownUsers = new ConcurrentHashMap<>();
 
     public AuthServiceImpl(UserAccountRepository users, AuthSessionRepository sessions, AuditLogRepository auditLog, PasswordEncoder passwordEncoder,
-                           JwtService jwtService, AuthProperties properties, Clock clock) {
+                           JwtService jwtService, AuthProperties properties, Clock clock, StoreScope storeScope) {
         this.users = users;
         this.sessions = sessions;
         this.auditLog = auditLog;
@@ -63,6 +65,7 @@ public class AuthServiceImpl implements AuthService {
         this.jwtService = jwtService;
         this.properties = properties;
         this.clock = clock;
+        this.storeScope = storeScope;
         this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
     }
 
@@ -221,9 +224,15 @@ public class AuthServiceImpl implements AuthService {
 
     private IssuedTokens issue(UserAccount user, AuthSession session, String refreshToken) {
         String accessToken = jwtService.issueAccessToken(user.getId(), session.getId());
-        CurrentUserResponse me = CurrentUserResponse.from(toPrincipal(user, session.getId()));
+        CurrentUserResponse me = currentUser(toPrincipal(user, session.getId()));
         AuthResponse body = AuthResponse.bearer(accessToken, properties.accessTokenTtl().toSeconds(), me);
         return new IssuedTokens(body, refreshToken);
+    }
+
+    @Override
+    public CurrentUserResponse currentUser(AuthenticatedUser user) {
+        boolean central = user.role() == Role.BRANCH_MANAGER && storeScope.seesEveryStore(user);
+        return CurrentUserResponse.from(user, central);
     }
 
     private AuthenticatedUser toPrincipal(UserAccount user, long sessionId) {

@@ -49,6 +49,8 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
               and (:storeId is null or r.requestingStoreId = :storeId)
               and cast(r.createdAt as LocalDate) >= coalesce(:from, cast(r.createdAt as LocalDate))
               and cast(r.createdAt as LocalDate) <= coalesce(:to, cast(r.createdAt as LocalDate))
+              and (:hasQ = false or r.id = :qId
+                   or r.requestingStoreId in (select qs.id from Store qs where lower(qs.storeName) like :pattern escape '\\'))
             """;
 
     @Query(value = """
@@ -67,7 +69,9 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
             """,
             countQuery = "select count(r) from ReplenishmentRequest r " + SEARCH)
     Page<RequestRow> search(@Param("status") ReplenishmentRequestStatus status, @Param("storeId") Long storeId,
-                            @Param("from") LocalDate from, @Param("to") LocalDate to, Pageable pageable);
+                            @Param("from") LocalDate from, @Param("to") LocalDate to,
+                            @Param("hasQ") boolean hasQ, @Param("qId") Long qId, @Param("pattern") String pattern,
+                            Pageable pageable);
 
     @Query("""
             select p as purchaseOrder, s.supplierName as supplierName
