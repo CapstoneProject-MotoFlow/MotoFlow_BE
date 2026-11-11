@@ -67,7 +67,7 @@ class GlobalExceptionHandlerTest {
             ResponseEntity<ApiError> response = handler.handleConcurrency(lockFailure, request);
 
             assertThat(response.getStatusCode().value()).isEqualTo(409);
-            assertThat(response.getBody().code()).isEqualTo("MSG248");
+            assertThat(response.getBody().code()).isEqualTo("MSG249");
             assertThat(response.getBody().message()).isEqualTo(
                     "Dữ liệu này đang được người khác cập nhật nên chưa lưu được. Vui lòng thử lại.");
             assertThat(response.getBody().path()).isEqualTo("/api/v1/transfer-orders/1/dispatch");

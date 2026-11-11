@@ -113,7 +113,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({ConcurrencyFailureException.class, PessimisticLockException.class, LockTimeoutException.class})
     public ResponseEntity<ApiError> handleConcurrency(RuntimeException ex, HttpServletRequest request) {
         log.warn("Lock conflict on {} {}", request.getMethod(), request.getRequestURI(), ex);
-        return build(HttpStatus.CONFLICT, "MSG248", null, request, null);
+        return build(HttpStatus.CONFLICT, "MSG249", null, request, null);
     }
 
     @ExceptionHandler(Exception.class)
