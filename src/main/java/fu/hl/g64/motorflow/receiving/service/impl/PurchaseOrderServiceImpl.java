@@ -150,8 +150,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         Store store = stores.findById(request.storeId()).filter(s -> s.getStatus() == StoreStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG46"));
         checkLines(request.lines(), Set.of());
-
         LocalDateTime now = LocalDateTime.now(clock);
+        checkArrival(request.expectedArrival(), null, now.toLocalDate());
+
         String note = text(request.note());
         PurchaseOrder order = orders.save(PurchaseOrder.create(supplier.getId(), store.getId(),
                 request.expectedArrival(), note, owner.id(), now));
@@ -175,6 +176,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         Map<Long, PurchaseOrderLine> byProduct = current.stream()
                 .collect(Collectors.toMap(PurchaseOrderLine::getProductId, Function.identity()));
         checkLines(request.lines(), byProduct.keySet());
+        checkArrival(request.expectedArrival(), order.getExpectedArrival(), LocalDate.now(clock));
 
         String note = text(request.note());
         Map<String, Object> before = PurchaseOrderHistory.snapshot(order.getExpectedArrival(), order.getNote(),
@@ -463,5 +465,15 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
     private static <T> Map<Long, T> byId(Collection<T> rows, Function<T, Long> id) {
         return rows.stream().collect(Collectors.toMap(id, Function.identity()));
+    }
+
+    /**
+     * MSG248: an expected arrival before today. A PO already late may keep the date it has, so that its other details
+     * can still be changed; only a newly chosen date is checked.
+     */
+    private static void checkArrival(LocalDate arrival, LocalDate current, LocalDate today) {
+        if (arrival != null && arrival.isBefore(today) && !arrival.equals(current)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG248");
+        }
     }
 }
