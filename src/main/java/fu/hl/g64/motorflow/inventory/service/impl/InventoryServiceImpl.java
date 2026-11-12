@@ -126,7 +126,18 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
+        Integer min = filter.minQty();
+        Integer max = filter.maxQty();
+        if ((min != null && min < 0) || (max != null && max < 0) || (min != null && max != null && min > max)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG263");
+        }
         Specification<StockBalance> spec = stockFilter(scopeStoreId(user, filter.storeId()), filter);
+        if (min != null) {
+            spec = spec.and((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("availableQty"), min));
+        }
+        if (max != null) {
+            spec = spec.and((root, query, cb) -> cb.lessThanOrEqualTo(root.get("availableQty"), max));
+        }
         Page<StockBalance> found = balances.findAll(spec, PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
                 Sort.by("storeId", "productId")));
         return PageResponse.of(found, rows(user, found.getContent()));
