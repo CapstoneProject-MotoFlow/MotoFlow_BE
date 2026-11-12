@@ -42,7 +42,8 @@ public record SalesOrderDetail(
     }
 
     /**
-     * One part. {@code shortQty} is requested minus picked once picked, with the picker's reason. {@code sellableQty}
+     * One part. {@code shortQty} is requested minus picked once picked; {@code shortReason} is the picker's note on the
+     * line, the reason when short or any remark when picked in full. {@code sellableQty}
      * is what the store can hand over now (available, not expired); {@code stockShortQty} what it lacks for the
      * quantity still to deliver. {@code pickFirst} lists the lots to take, earliest expiry first (BR-75).
      */

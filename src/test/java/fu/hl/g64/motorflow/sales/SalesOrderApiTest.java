@@ -196,7 +196,9 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.lines[0].pickedQty").value(3))
                 .andExpect(jsonPath("$.lines[0].shortQty").value(1))
                 .andExpect(jsonPath("$.lines[0].shortReason").value("Hộp bị móp"))
-                .andExpect(jsonPath("$.lines[1].shortReason").value(nullValue()))
+                // The note of a line picked in full is kept too.
+                .andExpect(jsonPath("$.lines[1].shortQty").value(0))
+                .andExpect(jsonPath("$.lines[1].shortReason").value("không dùng"))
                 .andExpect(jsonPath("$.actions.canRecordPicking").value(true));
         assertThat(taskStatus("PICKING", order)).isEqualTo("RESULT_SUBMITTED");
         assertThat(notifications(manager, "SALES_ORDER_PICKED")).isEqualTo(1);

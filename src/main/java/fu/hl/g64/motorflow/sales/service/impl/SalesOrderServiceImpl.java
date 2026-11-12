@@ -415,7 +415,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             row.put("product_id", line.productId());
             row.put("requested_qty", target.getRequestedQty());
             row.put("picked_qty", line.pickedQty());
-            row.put("short_reason", line.pickedQty() < target.getRequestedQty() ? text(line.shortReason()) : null);
+            // The picker's note is kept on every line: the reason when short, any remark when picked in full.
+            row.put("short_reason", text(line.shortReason()));
             recorded.add(row);
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -912,7 +913,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 rows, credit, debt);
     }
 
-    /** The picker's reasons for the lines still short since the last picking result. */
+    /** The picker's note on each line of the last picking result: why it is short, or any remark when picked in full. */
     private static Map<Long, String> shortReasons(List<AuditLog> steps, List<SalesOrderLine> lines) {
         Map<Long, String> reasons = new HashMap<>();
         steps.stream().filter(step -> SalesOrderHistory.PICKED.equals(step.getAction())).findFirst()
@@ -922,8 +923,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                                 (String) row.get("short_reason"));
                     }
                 }));
-        lines.stream().filter(line -> line.getPickedQty() == null || line.getPickedQty() >= line.getRequestedQty())
-                .forEach(line -> reasons.remove(line.getProductId()));
+        // A line not picked yet (new content since that result) has no note.
+        lines.stream().filter(line -> line.getPickedQty() == null).forEach(line -> reasons.remove(line.getProductId()));
         return reasons;
     }
 
