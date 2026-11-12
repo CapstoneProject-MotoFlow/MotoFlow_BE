@@ -299,6 +299,8 @@ class InventoryApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.items[*].movementType", contains("SALE_ISSUE", "RECEIPT_CONFIRMED")))
                 .andExpect(jsonPath("$.items[0].sourceType").value("SALES_ORDER"))
                 .andExpect(jsonPath("$.items[0].sourceId").value(sale))
+                .andExpect(jsonPath("$.items[0].sku").value("MA-PHANH"))
+                .andExpect(jsonPath("$.items[0].partName").value("Má phanh trước"))
                 .andExpect(jsonPath("$.items[0].quantityChange").value(-1))
                 .andExpect(jsonPath("$.items[0].performedByName").value("Test owner"))
                 .andExpect(jsonPath("$.items[0].value").value(nullValue()));

@@ -569,13 +569,14 @@ public class InventoryServiceImpl implements InventoryService {
 
     /** Unit cost and value are filled for the Owner only (BR-72). */
     private List<StockMovementResponse> movementRows(AuthenticatedUser user, List<StockMovement> content) {
-        Map<Long, String> skus = products.findAllById(content.stream().map(StockMovement::getProductId)
-                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Product::getSku));
+        Map<Long, Product> parts = products.findAllById(content.stream().map(StockMovement::getProductId)
+                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
         Map<Long, String> names = users.findAllById(content.stream().map(StockMovement::getPerformedBy)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
         boolean owner = user.role() == Role.OWNER;
         return content.stream().map(m -> new StockMovementResponse(m.getId(), m.getOccurredAt(),
-                m.getStoreId(), m.getProductId(), skus.get(m.getProductId()), m.getLotId(), m.getMovementType(),
+                m.getStoreId(), m.getProductId(), parts.get(m.getProductId()).getSku(),
+                parts.get(m.getProductId()).getPartName(), m.getLotId(), m.getMovementType(),
                 m.getStockStatus(), m.getQuantityChange(), m.source().type(), m.source().id(), m.getReason(),
                 m.getPerformedBy(), names.get(m.getPerformedBy()), owner ? m.getUnitCost() : null,
                 owner ? m.getValue() : null)).toList();
