@@ -48,6 +48,9 @@ public class WarehouseTask {
     @Column(name = "stock_count_id")
     private Long stockCountId;
 
+    @Column(name = "purchase_order_id")
+    private Long purchaseOrderId;
+
     @Column(name = "assigned_to", nullable = false)
     private Long assignedTo;
 
@@ -75,8 +78,9 @@ public class WarehouseTask {
         switch (type) {
             case PICKING -> task.salesOrderId = documentId;
             case INSPECTION -> task.goodsReceiptNoteId = documentId;
-            case DISPATCH_PREPARATION -> task.transferOrderId = documentId;
+            case DISPATCH_PREPARATION, TRANSFER_RECEIVING -> task.transferOrderId = documentId;
             case COUNTING -> task.stockCountId = documentId;
+            case SUPPLIER_RECEIVING -> task.purchaseOrderId = documentId;
         }
         task.assignedTo = assigneeId;
         task.assignedBy = assignedBy;
@@ -102,6 +106,15 @@ public class WarehouseTask {
         }
         status = WarehouseTaskStatus.ASSIGNED;
         resultSubmittedAt = null;
+    }
+
+    /** The assignee recorded the goods receipt note of a receiving task; its inspection is a task of its own. */
+    public void finishReceiving() {
+        if (!taskType.isReceiving()) {
+            throw new IllegalStateException("task " + id + " is a " + taskType + " task, not a receiving task");
+        }
+        requireStatus(WarehouseTaskStatus.ASSIGNED);
+        status = WarehouseTaskStatus.DONE;
     }
 
     /** The result was confirmed. */

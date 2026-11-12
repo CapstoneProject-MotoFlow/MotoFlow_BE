@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.receiving.dto.CancelPurchaseOrderRequest;
 import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptDetail;
 import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptRequest;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail;
+import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderReceivingView;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderRequest;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderSearch;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderSummary;
@@ -87,16 +88,29 @@ public class PurchaseOrderController {
     }
 
     @Operation(summary = "Record a delivery that arrived for the purchase order (UC-106)",
-            description = "Branch Manager of the receiving warehouse. Without replacementForCaseIds the GRN has one "
-                    + "line per PO line still outstanding; with them it is a replacement delivery for those "
-                    + "discrepancy cases of the PO. Next step: assign the inspection (UC-86).")
+            description = "Only the person holding the PO's receiving task (SUPPLIER_RECEIVING, given by the Branch "
+                    + "Manager, UC-86), usually a Staff member; MSG05 otherwise. Without replacementForCaseIds the GRN "
+                    + "has one line per PO line still outstanding; with them it is a replacement delivery for those "
+                    + "discrepancy cases of the PO. The receiving task is then done and the GRN's inspection goes to "
+                    + "the same person. Prices are hidden except for Owner (BR-72).")
     @PostMapping("/{id}/goods-receipt-notes")
-    @PreAuthorize("hasRole('BRANCH_MANAGER')")
-    public ResponseEntity<GoodsReceiptDetail> createReceipt(@AuthenticationPrincipal AuthenticatedUser manager,
+    @PreAuthorize("hasAnyRole('BRANCH_MANAGER', 'STAFF')")
+    public ResponseEntity<GoodsReceiptDetail> createReceipt(@AuthenticationPrincipal AuthenticatedUser user,
                                                             @PathVariable long id,
                                                             @Valid @RequestBody GoodsReceiptRequest request) {
-        GoodsReceiptDetail created = goodsReceipts.create(manager, id, request);
+        GoodsReceiptDetail created = goodsReceipts.create(user, id, request);
         return ResponseEntity.created(URI.create("/api/v1/goods-receipt-notes/" + created.id())).body(created);
+    }
+
+    @Operation(summary = "What the person receiving the PO's goods needs to record the GRN, without any price",
+            description = "Branch Manager of the receiving warehouse, or the Staff member holding the PO's receiving "
+                    + "task (SUPPLIER_RECEIVING); MSG05 otherwise. Lines with what is still outstanding, and the "
+                    + "discrepancy cases a replacement delivery may still bring goods for.")
+    @GetMapping("/{id}/receiving-view")
+    @PreAuthorize("hasAnyRole('BRANCH_MANAGER', 'STAFF')")
+    public PurchaseOrderReceivingView receivingView(@AuthenticationPrincipal AuthenticatedUser user,
+                                                    @PathVariable long id) {
+        return purchaseOrders.receivingView(user, id);
     }
 
     @Operation(summary = "Cancel a purchase order that has no GRN yet (UC-42)")

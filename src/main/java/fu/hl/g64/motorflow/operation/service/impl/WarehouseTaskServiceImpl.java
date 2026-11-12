@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.repository.StockCountRepository;
 import fu.hl.g64.motorflow.operation.dto.AssignTaskRequest;
+import fu.hl.g64.motorflow.operation.dto.ReceivingTaskResponse;
 import fu.hl.g64.motorflow.operation.dto.TaskAssignmentResponse;
 import fu.hl.g64.motorflow.operation.dto.TaskAssignmentResponse.AssigneeOption;
 import fu.hl.g64.motorflow.operation.dto.TaskAssignmentResponse.TaskRow;
@@ -19,6 +20,12 @@ import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
 import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderRepository;
+import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderLineRepository;
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderReceiving;
+import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
+import fu.hl.g64.motorflow.store.repository.StoreRepository;
+import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
+import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
@@ -58,6 +65,12 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     private final PurchaseOrderRepository purchaseOrders;
     private final TransferOrderRepository transferOrders;
     private final StockCountRepository stockCounts;
+    private final PurchaseOrderLineRepository purchaseOrderLines;
+    private final TransferOrderLineRepository transferOrderLines;
+    private final SupplierRepository suppliers;
+    private final StoreRepository stores;
+    private final PurchaseOrderReceiving purchaseOrderReceiving;
+    private final TransferReconciliation transferReconciliation;
     private final UserAccountRepository users;
     private final NotificationService notifications;
     private final MessageSource messages;
@@ -136,6 +149,13 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         heldTask(user, type, documentId);
     }
 
+    @Transactional(readOnly = true)
+    @Override
+    public boolean holds(AuthenticatedUser user, TaskType type, long documentId) {
+        return tasks.findHistory(type, documentId).stream().anyMatch(task ->
+                task.getStatus() == WarehouseTaskStatus.ASSIGNED && task.getAssignedTo() == user.id());
+    }
+
     // BR-32
     @Transactional
     @Override
@@ -190,6 +210,51 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         tasks.findOpenForUpdate(type, documentId).ifPresent(WarehouseTask::cancel);
     }
 
+    // Lecturer feedback 12/11: whoever records the goods receipt note inspects it.
+    @Transactional
+    @Override
+    public void handOverToInspection(AuthenticatedUser receiver, TaskType receivingType, long documentId,
+                                     long receiptId) {
+        WarehouseTask receiving = heldTask(receiver, receivingType, documentId);
+        receiving.finishReceiving();
+        // The new receipt has no task yet; the Branch Manager who gave the receiving gave its inspection too. The
+        // receiver knows, so nobody is notified.
+        tasks.saveAndFlush(WarehouseTask.assign(TaskType.INSPECTION, receiptId, receiver.id(),
+                receiving.getAssignedBy(), LocalDateTime.now(clock)));
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public List<ReceivingTaskResponse> receivingAssignedToMe(AuthenticatedUser user, TaskType type) {
+        if (type == null || !type.isReceiving()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        List<WarehouseTask> held = tasks.findByAssignedToAndTaskTypeAndStatusOrderByAssignedAtAscIdAsc(user.id(), type,
+                WarehouseTaskStatus.ASSIGNED);
+        Map<Long, String> names = users.findAllById(held.stream().map(WarehouseTask::getAssignedBy)
+                .collect(Collectors.toSet())).stream()
+                .collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
+        return held.stream().map(task -> {
+            long documentId = type == TaskType.SUPPLIER_RECEIVING ? task.getPurchaseOrderId()
+                    : task.getTransferOrderId();
+            String partner;
+            long lineCount;
+            if (type == TaskType.SUPPLIER_RECEIVING) {
+                partner = purchaseOrders.findById(documentId)
+                        .flatMap(order -> suppliers.findById(order.getSupplierId()))
+                        .map(supplier -> supplier.getSupplierName()).orElse(null);
+                lineCount = purchaseOrderLines.findByPurchaseOrderIdOrderByIdAsc(documentId).size();
+            } else {
+                partner = transferOrders.findById(documentId)
+                        .flatMap(order -> stores.findById(order.getSourceStoreId()))
+                        .map(store -> store.getStoreName()).orElse(null);
+                lineCount = transferOrderLines.findByTransferOrderIdOrderByProductId(documentId).size();
+            }
+            return new ReceivingTaskResponse(task.getId(), type, documentId, "#" + documentId, partner, lineCount,
+                    task.getAssignedAt(), task.getAssignedBy(), names.get(task.getAssignedBy()));
+        }).toList();
+    }
+
     /** The document, if the user is a Branch Manager of its store (MSG05 otherwise, MSG120 if it does not exist). */
     private Document requireManagedDocument(AuthenticatedUser manager, TaskType type, long documentId) {
         Document document = find(type, documentId)
@@ -225,6 +290,14 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                         case AWAITING_APPROVAL -> Stage.RESULT_IN;
                         case COMPLETED, CANCELLED -> Stage.FINISHED;
                     }));
+            // Open while a delivery or a replacement delivery can still be recorded (UC-106, same rule as the PO
+            // detail's canCreateReceipt / canCreateReplacement).
+            case SUPPLIER_RECEIVING -> purchaseOrders.findById(documentId).map(order -> new Document(
+                    order.getStoreId(), purchaseOrderReceiving.of(order).any() ? Stage.OPEN : Stage.FINISHED));
+            // Received at the destination; open while goods can arrive (same rule as the arrival itself).
+            case TRANSFER_RECEIVING -> transferOrders.findById(documentId).map(order -> new Document(
+                    order.getDestStoreId(),
+                    transferReconciliation.arrival(order).blockedCode() == null ? Stage.OPEN : Stage.FINISHED));
         };
     }
 
@@ -348,6 +421,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             case INSPECTION -> "kiểm nhận hàng cho phiếu nhận hàng";
             case DISPATCH_PREPARATION -> "chuẩn bị hàng xuất cho phiếu chuyển kho";
             case COUNTING -> "đếm hàng cho phiếu kiểm kê";
+            case SUPPLIER_RECEIVING -> "nhận hàng và lập phiếu nhập cho PO";
+            case TRANSFER_RECEIVING -> "nhận hàng điều chuyển cho lệnh";
         };
         return work + " #" + documentId;
     }
@@ -359,6 +434,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             case INSPECTION -> "GOODS_RECEIPT_NOTE";
             case DISPATCH_PREPARATION -> "TRANSFER_ORDER";
             case COUNTING -> "STOCK_COUNT";
+            case SUPPLIER_RECEIVING -> "PURCHASE_ORDER";
+            case TRANSFER_RECEIVING -> "TRANSFER_ORDER";
         };
     }
 }

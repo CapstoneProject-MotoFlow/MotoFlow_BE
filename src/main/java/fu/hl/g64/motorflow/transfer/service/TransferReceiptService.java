@@ -13,8 +13,14 @@ import fu.hl.g64.motorflow.transfer.dto.TransferReturnRequest;
  */
 public interface TransferReceiptService {
 
-    /** UC-106: the destination Branch Manager records that goods arrived; each part expects what is still uncovered. */
-    TransferReceiptResponse arrive(AuthenticatedUser user, long transferOrderId);
+    /**
+     * UC-106: whoever holds the transfer's TRANSFER_RECEIVING task (Staff or Branch Manager, MSG05 otherwise) records
+     * that the goods arrived with their delivery document; each part expects what is still uncovered. The receiving
+     * task is done and its inspection goes to the same person. MSG138 for a future date, MSG28 for a delivery
+     * document number already recorded for the order.
+     */
+    TransferReceiptResponse arrive(AuthenticatedUser user, long transferOrderId,
+                                   fu.hl.g64.motorflow.transfer.dto.TransferReceiptRequest request);
 
     /**
      * UC-76 Step 3_Return to source: a source Branch Manager records goods coming back, each part at most what is

@@ -48,13 +48,14 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.delivererName").value("Anh Tuấn"))
                 .andExpect(jsonPath("$.vehiclePlateNo").value("29C-123.45"))
                 .andExpect(jsonPath("$.arrivedAt").value("2026-10-13T08:00:00"))
-                .andExpect(jsonPath("$.assignee").doesNotExist())
+                // Lecturer feedback 12/11: whoever records the GRN inspects it.
+                .andExpect(jsonPath("$.assignee.id").value(manager.getId()))
                 // UC-106 step 6: one line per outstanding PO line; a Branch Manager sees no price (BR-72).
                 .andExpect(jsonPath("$.lines[*].sku", contains("MA-PHANH-01", "NHOT-01")))
                 .andExpect(jsonPath("$.lines[*].expectedQty", contains(10, 24)))
                 .andExpect(jsonPath("$.lines[*].deliveredQty", contains(0, 0)))
                 .andExpect(jsonPath("$.lines[*].unitPrice", everyItem(nullValue())))
-                .andExpect(jsonPath("$.canRecord").value(false))
+                .andExpect(jsonPath("$.canRecord").value(true))
                 .andExpect(jsonPath("$.canConfirm").value(false))
                 .andReturn().getResponse().getContentAsString();
         long grn = ((Number) JsonPath.read(created, "$.id")).longValue();
@@ -146,8 +147,8 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         assertThat(notificationsOf(owner)).contains(List.of("SUPPLIER_DISCREPANCY_OPENED", "Phiếu nhận hàng #" + grn
                 + " của yêu cầu nhập hàng #" + order + " có 2 phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà "
                 + "cung cấp.", "GOODS_RECEIPT_NOTE", grn));
-        assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ?",
-                String.class, grn)).isEqualTo("DONE");
+        assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ? "
+                + "AND status <> 'CANCELLED'", String.class, grn)).isEqualTo("DONE");
 
         // BR-22: every line is covered by the delivery; what it lacks is owed through the discrepancy cases.
         detail(managerToken, order)
@@ -430,8 +431,9 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.code").value("MSG05"));
         receipts(ownerToken)
                 .andExpect(jsonPath("$.items[*].id", contains(ids(theirs, grn))));
+        // Every GRN goes to its recorder for inspection, so none is unassigned (lecturer feedback 12/11).
         receipts(ownerToken, "unassigned", "true")
-                .andExpect(jsonPath("$.items[*].id", contains(ids(theirs))));
+                .andExpect(jsonPath("$.totalItems").value(0));
         receipts(ownerToken, "purchaseOrderId", String.valueOf(order), "status", "AWAITING_INSPECTION")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(grn))));
         receipts(ownerToken, "excessAwaiting", "true")

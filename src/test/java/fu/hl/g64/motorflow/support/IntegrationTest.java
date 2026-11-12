@@ -41,6 +41,20 @@ public abstract class IntegrationTest {
     @Autowired
     protected MutableClock clock;
 
+    /**
+     * Test fixture for the receiving tasks (lecturer feedback 12/11): gives {@code assigneeId} the SUPPLIER_RECEIVING
+     * task of a purchase order or the TRANSFER_RECEIVING task of a transfer order, replacing an open one, without the
+     * assignment rules (a store in the tests often has a single Branch Manager, who could not take it through the API).
+     */
+    protected void holdReceiving(String taskType, long documentId, long assigneeId, long assignedBy) {
+        String column = "SUPPLIER_RECEIVING".equals(taskType) ? "purchase_order_id" : "transfer_order_id";
+        jdbc.update("UPDATE warehouse_task SET status = 'CANCELLED' WHERE task_type = ? AND " + column + " = ? "
+                + "AND status IN ('ASSIGNED', 'RESULT_SUBMITTED')", taskType, documentId);
+        jdbc.update("INSERT INTO warehouse_task (task_type, " + column + ", assigned_to, assigned_by, assigned_at) "
+                + "VALUES (?, ?, ?, ?, ?)", taskType, documentId, assigneeId, assignedBy,
+                java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(clock)));
+    }
+
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> POSTGRES.getJdbcUrl("postgres", "postgres"));

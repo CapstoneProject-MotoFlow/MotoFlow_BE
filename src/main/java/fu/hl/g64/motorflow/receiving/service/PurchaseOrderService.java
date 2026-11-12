@@ -45,4 +45,10 @@ public interface PurchaseOrderService {
 
     /** UC-42 Cancel PO: same conditions as {@link #update}. The reason is kept on the PO; the store is notified. */
     PurchaseOrderDetail cancel(AuthenticatedUser owner, long id, String reason);
+
+    /**
+     * UC-106 screen 6.2.1: the PO as its receiver sees it, without prices. A Branch Manager of its store, or someone
+     * holding its SUPPLIER_RECEIVING task (MSG05 otherwise); MSG131 if there is no such PO.
+     */
+    fu.hl.g64.motorflow.receiving.dto.PurchaseOrderReceivingView receivingView(AuthenticatedUser user, long id);
 }

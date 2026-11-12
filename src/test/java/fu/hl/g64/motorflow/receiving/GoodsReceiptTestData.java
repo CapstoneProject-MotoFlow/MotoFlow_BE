@@ -60,7 +60,23 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
                 "contentType", "image/jpeg", "fileSize", 100_000);
     }
 
+    /**
+     * UC-106 by the Branch Manager signed in with {@code token}, who is first given the PO's receiving task when the
+     * PO is at their store (the other callers keep MSG05).
+     */
     protected ResultActions createReceipt(String token, long purchaseOrder, Map<String, Object> body) throws Exception {
+        UserAccount caller = token.equals(managerToken) ? manager : token.equals(otherManagerToken) ? otherManager : null;
+        List<Long> store = jdbc.queryForList("SELECT store_id FROM purchase_order WHERE id = ?", Long.class,
+                purchaseOrder);
+        if (caller != null && !store.isEmpty() && store.get(0).equals(caller.getStoreId())) {
+            holdReceiving("SUPPLIER_RECEIVING", purchaseOrder, caller.getId(), caller.getId());
+        }
+        return createReceiptAs(token, purchaseOrder, body);
+    }
+
+    /** UC-106 as is: the caller must already hold the PO's receiving task. */
+    protected ResultActions createReceiptAs(String token, long purchaseOrder, Map<String, Object> body)
+            throws Exception {
         return mvc.perform(post("/api/v1/purchase-orders/" + purchaseOrder + "/goods-receipt-notes")
                 .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }

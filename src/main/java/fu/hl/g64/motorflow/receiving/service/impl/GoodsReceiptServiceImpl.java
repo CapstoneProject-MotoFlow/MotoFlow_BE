@@ -50,6 +50,7 @@ import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
 import fu.hl.g64.motorflow.receiving.helper.GoodsReceiptViews;
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderReceiving;
 import fu.hl.g64.motorflow.receiving.helper.ReceivingLedger;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
@@ -112,6 +113,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private final NotificationService notifications;
     private final AuditLogRepository auditLog;
     private final ReceivingLedger ledger;
+    private final PurchaseOrderReceiving purchaseOrderReceiving;
     private final DiscrepancySettlement settlement;
     private final GoodsReceiptViews views;
     private final Clock clock;
@@ -184,7 +186,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     // UC-106
     @Transactional
     @Override
-    public GoodsReceiptDetail create(AuthenticatedUser manager, long purchaseOrderId, GoodsReceiptRequest request) {
+    public GoodsReceiptDetail create(AuthenticatedUser user, long purchaseOrderId, GoodsReceiptRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime arrivedAt = request.arrivedAt() != null ? request.arrivedAt() : now;
         if (request.deliveryDocumentDate().isAfter(now.toLocalDate()) || arrivedAt.isAfter(now)) {
@@ -193,7 +195,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         // BR-21: the PO lock keeps a change or cancellation of the PO from passing this new GRN.
         PurchaseOrder order = orders.findByIdForUpdate(purchaseOrderId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG131"));
-        requireManager(manager, order);
+        // Lecturer feedback 12/11: whoever holds the PO's receiving task records the GRN, a Branch Manager too.
+        warehouseTasks.requireAssignee(user, TaskType.SUPPLIER_RECEIVING, order.getId());
         String documentNo = request.deliveryDocumentNo().strip();
         Set<Long> caseIds = new LinkedHashSet<>(request.replacementForCaseIds() == null ? List.of()
                 : request.replacementForCaseIds());
@@ -247,11 +250,12 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         receiptLines.saveAll(expectedParts.stream().map(productId -> GoodsReceiptNoteLine.expected(receipt.getId(),
                 productId, priceByProduct.get(productId))).toList());
         events.saveAll(replacementByCase.entrySet().stream().map(e -> DiscrepancyResolutionEvent.pending(e.getKey(),
-                ResolutionType.REPLACEMENT_RECEIVED, e.getValue(), receipt.getId(), null, manager.id(), now)).toList());
+                ResolutionType.REPLACEMENT_RECEIVED, e.getValue(), receipt.getId(), null, user.id(), now)).toList());
         order.startReceiving(now);
-        attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId(), orEmpty(request.documents()), manager.id());
-        auditLog.save(AuditLog.record(AUDIT_ENTITY, receipt.getId(), CREATED, manager.id(), null, now));
-        return views.detail(manager, receipt, order);
+        attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId(), orEmpty(request.documents()), user.id());
+        auditLog.save(AuditLog.record(AUDIT_ENTITY, receipt.getId(), CREATED, user.id(), null, now));
+        warehouseTasks.handOverToInspection(user, TaskType.SUPPLIER_RECEIVING, order.getId(), receipt.getId());
+        return views.detail(user, receipt, order);
     }
 
     // UC-43
@@ -400,6 +404,9 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         if (!replacement && order.getStatus() == PurchaseOrderStatus.RECEIVING
                 && !ledger.of(order.getId()).anyOutstanding()) {
             order.completeReceiving(now);
+        }
+        if (!purchaseOrderReceiving.of(order).any()) {
+            warehouseTasks.cancelForDocument(TaskType.SUPPLIER_RECEIVING, order.getId());
         }
         if (anyExcess) {
             notifications.notifyOwners("EXCESS_AWAITING_DECISION",

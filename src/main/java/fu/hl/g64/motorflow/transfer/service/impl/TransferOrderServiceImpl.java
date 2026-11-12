@@ -363,6 +363,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             }
         }
         order.close(user.id(), now);
+        warehouseTasks.cancelForDocument(TaskType.TRANSFER_RECEIVING, id);
         auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_CLOSED", user.id(), null, null,
                 Map.of("extra_dispatch", posted), now));
         String message = "Phiếu chuyển kho #%d đã đóng".formatted(id);
@@ -514,7 +515,9 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                         lot.getProductId(), lot.getLotId(), lot.getManufacturerLotNo(), lot.getExpiryDate(),
                         lot.getQuantity(), owner ? lot.getUnitCost() : null)).toList(),
                 orders.findReceipts(id).stream().map(receipt -> new TransferOrderDetailResponse.Receipt(
-                        receipt.getId(), receipt.getReceiptType(), receipt.getStatus(), receipt.getArrivedAt(),
+                        receipt.getId(), receipt.getReceiptType(), receipt.getStatus(),
+                        receipt.getDeliveryDocumentNo(), receipt.getDeliveryDocumentDate(),
+                        receipt.getDelivererName(), receipt.getVehiclePlateNo(), receipt.getArrivedAt(),
                         receipt.getConfirmedAt())).toList(),
                 discrepancies, staff ? List.of() : attachments.list(OwnerType.TRANSFER_ORDER, id));
     }

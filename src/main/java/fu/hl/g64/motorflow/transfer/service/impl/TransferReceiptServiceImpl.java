@@ -21,9 +21,11 @@ import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
+import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
+import fu.hl.g64.motorflow.operation.service.AttachmentService;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
@@ -36,6 +38,7 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.dto.RecountRequest;
+import fu.hl.g64.motorflow.transfer.dto.TransferReceiptRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResponse;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResultRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferReturnRequest;
@@ -69,6 +72,8 @@ import java.util.stream.Collectors;
 public class TransferReceiptServiceImpl implements TransferReceiptService {
 
     private static final String ENTITY = "TRANSFER_ORDER";
+    private static final String RECEIPT_ENTITY = "GOODS_RECEIPT_NOTE";
+    private static final String RECEIPT_CREATED = "GOODS_RECEIPT_CREATED";
 
     private final TransferOrderRepository orders;
     private final TransferOrderLineRepository orderLines;
@@ -86,29 +91,40 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
     private final WarehouseTaskService warehouseTasks;
     private final AuditLogRepository auditLog;
     private final NotificationService notifications;
+    private final AttachmentService attachments;
     private final Clock clock;
 
     // UC-106
     @Transactional
     @Override
-    public TransferReceiptResponse arrive(AuthenticatedUser user, long transferOrderId) {
+    public TransferReceiptResponse arrive(AuthenticatedUser user, long transferOrderId,
+                                          TransferReceiptRequest request) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDateTime arrivedAt = request.arrivedAt() != null ? request.arrivedAt() : now;
+        if (request.deliveryDocumentDate().isAfter(now.toLocalDate()) || arrivedAt.isAfter(now)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG138");
+        }
         TransferOrder order = lockOrder(transferOrderId);
-        requireManager(user, order.getDestStoreId());
-        if (order.getStatus() != TransferOrderStatus.IN_TRANSIT && order.getStatus() != TransferOrderStatus.RECONCILING) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        // Lecturer feedback 12/11: whoever holds the transfer's receiving task records it, a Branch Manager too.
+        warehouseTasks.requireAssignee(user, TaskType.TRANSFER_RECEIVING, transferOrderId);
+        TransferReconciliation.Arrival arrival = reconciliation.arrival(order);
+        if (arrival.blockedCode() != null) {
+            throw new BusinessException(HttpStatus.CONFLICT, arrival.blockedCode());
         }
-        boolean open = orders.findReceipts(transferOrderId).stream().anyMatch(receipt ->
-                receipt.getReceiptType() == ReceiptType.TRANSFER_IN
-                        && receipt.getStatus() != GoodsReceiptNoteStatus.CONFIRMED);
-        if (open) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG211");
+        String documentNo = request.deliveryDocumentNo().strip();
+        if (receipts.existsByTransferOrderIdAndDeliveryDocumentNoIgnoreCase(transferOrderId, documentNo)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG28");
         }
-        Map<Long, Integer> uncovered = reconciliation.uncovered(transferOrderId,
-                orderLines.findByTransferOrderIdOrderByProductId(transferOrderId));
-        if (uncovered.values().stream().allMatch(quantity -> quantity == 0)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG210");
-        }
-        return open(user, ReceiptType.TRANSFER_IN, transferOrderId, uncovered);
+        GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.transferIn(transferOrderId, documentNo,
+                request.deliveryDocumentDate(), text(request.delivererName()), text(request.vehiclePlateNo()),
+                arrivedAt));
+        saveExpected(receipt, arrival.uncovered());
+        attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId(), request.documents(), user.id());
+        auditLog.save(AuditLog.record(ENTITY, transferOrderId, "TRANSFER_RECEIPT_ARRIVED", user.id(), null, null,
+                Map.of("goods_receipt_note_id", receipt.getId()), now));
+        auditLog.save(AuditLog.record(RECEIPT_ENTITY, receipt.getId(), RECEIPT_CREATED, user.id(), null, now));
+        warehouseTasks.handOverToInspection(user, TaskType.TRANSFER_RECEIVING, transferOrderId, receipt.getId());
+        return view(receipt);
     }
 
     // UC-76 Step 3_Return to source
@@ -156,9 +172,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                                          Map<Long, Integer> expected) {
         LocalDateTime now = LocalDateTime.now(clock);
         GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.transfer(type, transferOrderId, now));
-        receiptLines.saveAll(expected.entrySet().stream().filter(entry -> entry.getValue() > 0)
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> GoodsReceiptNoteLine.transfer(receipt.getId(), entry.getKey(), entry.getValue())).toList());
+        saveExpected(receipt, expected);
         auditLog.save(AuditLog.record(ENTITY, transferOrderId, type == ReceiptType.TRANSFER_IN
                 ? "TRANSFER_RECEIPT_ARRIVED" : "TRANSFER_RETURN_ARRIVED", user.id(), null, null,
                 Map.of("goods_receipt_note_id", receipt.getId()), now));
@@ -446,6 +460,16 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         }
     }
 
+    private void saveExpected(GoodsReceiptNote receipt, Map<Long, Integer> expected) {
+        receiptLines.saveAll(expected.entrySet().stream().filter(entry -> entry.getValue() > 0)
+                .sorted(Map.Entry.comparingByKey())
+                .map(entry -> GoodsReceiptNoteLine.transfer(receipt.getId(), entry.getKey(), entry.getValue())).toList());
+    }
+
+    private static String text(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
+    }
+
     private static boolean isManagerOf(AuthenticatedUser user, long storeId) {
         return user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), storeId);
     }
@@ -458,14 +482,20 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
     private TransferReceiptResponse view(GoodsReceiptNote receipt) {
         List<GoodsReceiptNoteLine> lines = receiptLines.findByGoodsReceiptNoteIdOrderByIdAsc(receipt.getId());
         Map<Long, Product> parts = parts(lines);
+        Long createdBy = auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(RECEIPT_ENTITY,
+                receipt.getId(), List.of(RECEIPT_CREATED)).stream().findFirst().map(AuditLog::getActorId).orElse(null);
+        String createdByName = createdBy == null ? null
+                : users.findById(createdBy).map(UserAccount::getFullName).orElse(null);
         return new TransferReceiptResponse(receipt.getId(), receipt.getTransferOrderId(), receipt.getReceiptType(),
-                receipt.getStatus(), receipt.getArrivedAt(), receipt.getRecordedBy(), receipt.getSubmittedAt(),
+                receipt.getStatus(), receipt.getDeliveryDocumentNo(), receipt.getDeliveryDocumentDate(),
+                receipt.getDelivererName(), receipt.getVehiclePlateNo(), receipt.getArrivedAt(), createdBy,
+                createdByName, receipt.getRecordedBy(), receipt.getSubmittedAt(),
                 receipt.getRecountReason(), receipt.getConfirmedBy(), receipt.getConfirmedAt(),
                 lines.stream().map(line -> {
                     Product part = parts.get(line.getProductId());
                     return new TransferReceiptResponse.Line(part.getId(), part.getSku(), part.getPartName(),
                             part.getBaseUnit(), line.getDocumentQty(), line.getDeliveredQty(), line.getPassedQty(),
                             line.getDamagedQty(), line.getExcessQty());
-                }).toList());
+                }).toList(), attachments.list(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId()));
     }
 }

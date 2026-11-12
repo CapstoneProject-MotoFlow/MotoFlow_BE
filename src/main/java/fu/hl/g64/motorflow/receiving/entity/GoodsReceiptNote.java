@@ -113,6 +113,18 @@ public class GoodsReceiptNote {
         return receipt;
     }
 
+    /** UC-106: the goods of a transfer order arrived at the destination with the transfer's delivery document. */
+    public static GoodsReceiptNote transferIn(long transferOrderId, String deliveryDocumentNo,
+                                              LocalDate deliveryDocumentDate, String delivererName,
+                                              String vehiclePlateNo, LocalDateTime arrivedAt) {
+        GoodsReceiptNote receipt = transfer(ReceiptType.TRANSFER_IN, transferOrderId, arrivedAt);
+        receipt.deliveryDocumentNo = deliveryDocumentNo;
+        receipt.deliveryDocumentDate = deliveryDocumentDate;
+        receipt.delivererName = delivererName;
+        receipt.vehiclePlateNo = vehiclePlateNo;
+        return receipt;
+    }
+
     /** Waiting for its inspection result, the first one or a recount (UC-43). */
     public boolean awaitsResult() {
         return status == GoodsReceiptNoteStatus.AWAITING_INSPECTION || status == GoodsReceiptNoteStatus.AWAITING_RECOUNT;
