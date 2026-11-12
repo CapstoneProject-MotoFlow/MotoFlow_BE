@@ -143,6 +143,22 @@ class InventoryApiTest extends ApiTestUsers {
     }
 
     @Test
+    void filtersByAvailableQuantityRange() throws Exception {
+        // Available: central brake 10, central chain 3, branch brake 2; both ends are included.
+        stock("owner", "?minQty=3&maxQty=10")
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].availableQty", contains(10, 3)));
+        stock("owner", "?maxQty=2").andExpect(jsonPath("$.items[*].storeName", contains("Long Biên")));
+        stock("owner", "?minQty=11").andExpect(jsonPath("$.totalItems").value(0));
+        stock("owner", "?minQty=5&maxQty=2")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG263"));
+        stock("owner", "?minQty=-1")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG263"));
+    }
+
+    @Test
     void storageAreaFilterIgnoresCase() throws Exception {
         place(branch, brake, "Kệ A", "A-03");
         place(central, chain, "Kệ B", null);
@@ -299,6 +315,8 @@ class InventoryApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.items[*].movementType", contains("SALE_ISSUE", "RECEIPT_CONFIRMED")))
                 .andExpect(jsonPath("$.items[0].sourceType").value("SALES_ORDER"))
                 .andExpect(jsonPath("$.items[0].sourceId").value(sale))
+                .andExpect(jsonPath("$.items[0].sku").value("MA-PHANH"))
+                .andExpect(jsonPath("$.items[0].partName").value("Má phanh trước"))
                 .andExpect(jsonPath("$.items[0].quantityChange").value(-1))
                 .andExpect(jsonPath("$.items[0].performedByName").value("Test owner"))
                 .andExpect(jsonPath("$.items[0].value").value(nullValue()));

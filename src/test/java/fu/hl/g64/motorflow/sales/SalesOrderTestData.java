@@ -129,9 +129,11 @@ public abstract class SalesOrderTestData extends ApiTestUsers {
                 from);
     }
 
+    /** In effect since 30 days before the test clock (not the database clock, which moves on with real time). */
     protected void limit(String type, String rate) {
+        java.time.LocalDateTime now = java.time.LocalDateTime.now(clock);
         jdbc.update("INSERT INTO pricing_policy (policy_type, rate, effective_from, status, set_by, set_at) "
-                + "VALUES (?, ?::numeric, now() - interval '30 days', 'ACTIVE', ?, now())", type, rate, owner.getId());
+                + "VALUES (?, ?::numeric, ?, 'ACTIVE', ?, ?)", type, rate, now.minusDays(30), owner.getId(), now);
     }
 
     /** A lot received from the supplier into the store's available stock. */

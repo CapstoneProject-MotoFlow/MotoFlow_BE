@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 /** A sale at one store with its current content; every earlier version is kept in audit_log (BR-36). */
 @Entity
@@ -100,6 +101,10 @@ public class SalesOrder {
     @Column(name = "cancellation_reason")
     private String cancellationReason;
 
+    /** The seller's free-text note on the order; a memo that is not part of a version (BR-36). */
+    @Column(length = 500)
+    private String note;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -108,13 +113,14 @@ public class SalesOrder {
      * the snapshot keeps what the customer was called when the order was taken.
      */
     public static SalesOrder create(long storeId, Customer customer, PriceType priceType, BigDecimal discountRate,
-                                    long createdBy, LocalDateTime now) {
+                                    String note, long createdBy, LocalDateTime now) {
         SalesOrder order = new SalesOrder();
         order.storeId = storeId;
         order.status = SalesOrderStatus.AWAITING_PICKING;
         order.setCustomer(customer);
         order.priceType = priceType;
         order.discountRate = discountRate;
+        order.note = note;
         order.createdBy = createdBy;
         order.createdAt = now;
         order.updatedAt = now;
@@ -131,6 +137,20 @@ public class SalesOrder {
         this.priceType = priceType;
         this.discountRate = discountRate;
         dropConfirmation(now);
+    }
+
+    /**
+     * UC-55: the seller rewrites the note of an unfinished order. The note is a memo, so this alone saves no new
+     * version and drops no confirmation. True if the note changed.
+     */
+    public boolean changeNote(String note, LocalDateTime now) {
+        requireUnfinished();
+        if (Objects.equals(this.note, note)) {
+            return false;
+        }
+        this.note = note;
+        updatedAt = now;
+        return true;
     }
 
     /** The parts or requested quantities changed: the goods must be picked again for the new content (UC-58). */

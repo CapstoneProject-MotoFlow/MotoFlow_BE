@@ -269,7 +269,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 rate)).toList(), now);
 
         SalesOrder order = orders.save(SalesOrder.create(store.getId(), customer, request.priceType(), rate,
-                seller.id(), now));
+                text(request.note()), seller.id(), now));
         List<SalesOrderLine> lines = new ArrayList<>();
         for (int i = 0; i < request.lines().size(); i++) {
             SalesOrderLineRequest line = request.lines().get(i);
@@ -313,12 +313,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 || !Objects.equals(order.getCustomerPhoneSnapshot(), customer.phone())));
         boolean pricingChanged = order.getPriceType() != request.priceType()
                 || order.getDiscountRate().compareTo(rate) != 0;
+        // The note is a memo outside the versions: changing only it saves no version and keeps the confirmation.
+        LocalDateTime now = LocalDateTime.now(clock);
+        order.changeNote(text(request.note()), now);
         if (!linesChanged && !customerChanged && !pricingChanged) {
             return detail(seller, order);
         }
 
         // BR-18, BR-36: the new version takes the retail prices in effect now.
-        LocalDateTime now = LocalDateTime.now(clock);
         Map<Long, Long> prices = requirePrices(request.lines(), parts, now);
         checkPricing(rate, request.lines().stream().map(line -> priced(line.quantity(), prices.get(line.productId()),
                 rate)).toList(), now);
@@ -413,7 +415,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             row.put("product_id", line.productId());
             row.put("requested_qty", target.getRequestedQty());
             row.put("picked_qty", line.pickedQty());
-            row.put("short_reason", line.pickedQty() < target.getRequestedQty() ? text(line.shortReason()) : null);
+            // The picker's note is kept on every line: the reason when short, any remark when picked in full.
+            row.put("short_reason", text(line.shortReason()));
             recorded.add(row);
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -869,7 +872,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return new SalesOrderDetail(id, version, order.getStatus(), order.getStoreId(), storeName,
                 order.getCustomerId(), order.getCustomerNameSnapshot(),
                 staff ? null : order.getCustomerPhoneSnapshot(), staff ? null : order.getCustomerAddressSnapshot(),
-                order.getPriceType(), staff ? null : order.getDiscountRate(), picker,
+                order.getNote(), order.getPriceType(), staff ? null : order.getDiscountRate(), picker,
                 order.getCreatedBy(), names.get(order.getCreatedBy()), order.getCreatedAt(), order.getUpdatedAt(),
                 order.getConfirmedBy(), names.get(order.getConfirmedBy()), order.getConfirmedAt(),
                 delivered ? "DELIVERED" : "REQUESTED", staff ? null : totals.referenceTotal(),
@@ -910,7 +913,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 rows, credit, debt);
     }
 
-    /** The picker's reasons for the lines still short since the last picking result. */
+    /** The picker's note on each line of the last picking result: why it is short, or any remark when picked in full. */
     private static Map<Long, String> shortReasons(List<AuditLog> steps, List<SalesOrderLine> lines) {
         Map<Long, String> reasons = new HashMap<>();
         steps.stream().filter(step -> SalesOrderHistory.PICKED.equals(step.getAction())).findFirst()
@@ -920,8 +923,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                                 (String) row.get("short_reason"));
                     }
                 }));
-        lines.stream().filter(line -> line.getPickedQty() == null || line.getPickedQty() >= line.getRequestedQty())
-                .forEach(line -> reasons.remove(line.getProductId()));
+        // A line not picked yet (new content since that result) has no note.
+        lines.stream().filter(line -> line.getPickedQty() == null).forEach(line -> reasons.remove(line.getProductId()));
         return reasons;
     }
 
