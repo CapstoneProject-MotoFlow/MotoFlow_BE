@@ -140,12 +140,42 @@ abstract class TransferFlowTestData extends ApiTestUsers {
         return order;
     }
 
+    /** The delivery document the goods of a transfer arrive with, dated today, with one photo of it. */
+    protected Map<String, Object> arrivalNote(String documentNo) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("deliveryDocumentNo", documentNo);
+        body.put("deliveryDocumentDate", LocalDate.now(clock).toString());
+        body.put("delivererName", "Anh Hùng");
+        body.put("vehiclePlateNo", "29C-678.90");
+        body.put("documents", List.of(Map.of("storageKey", "motoflow/attachments/" + java.util.UUID.randomUUID(),
+                "fileName", "phieu-xuat.jpg", "contentType", "image/jpeg", "fileSize", 100_000)));
+        return body;
+    }
+
+    /** UC-106 as is: the caller must already hold the transfer's receiving task. */
+    protected ResultActions arriveAs(String username, long order, Map<String, Object> body) throws Exception {
+        return mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn(username))
+                .contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    /** {@code username} is given the transfer's receiving task by the destination Branch Manager (test fixture). */
+    protected void holdReceiving(String username, long order) {
+        holdReceiving("TRANSFER_RECEIVING", order, userId(username), destManager.getId());
+    }
+
+    protected long userId(String username) {
+        return jdbc.queryForObject("SELECT id FROM user_account WHERE username = ?", Long.class, username);
+    }
+
     protected ResultActions arrive(long order) throws Exception {
-        return mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn("bmlb")));
+        holdReceiving("bmlb", order);
+        return arriveAs("bmlb", order, arrivalNote("PX-" + order + "-" + java.util.UUID.randomUUID()
+                .toString().substring(0, 8)));
     }
 
     protected long arrive(String manager, long order) throws Exception {
-        mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn(manager)))
+        holdReceiving(manager, order);
+        arriveAs(manager, order, arrivalNote("PX-" + java.util.UUID.randomUUID().toString().substring(0, 8)))
                 .andExpect(status().isCreated());
         return jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
     }

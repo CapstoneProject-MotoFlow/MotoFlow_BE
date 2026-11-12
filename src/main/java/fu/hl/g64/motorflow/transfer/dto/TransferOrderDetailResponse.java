@@ -41,8 +41,10 @@ public record TransferOrderDetailResponse(
                       BigDecimal unitCost) {
     }
 
-    public record Receipt(long id, ReceiptType receiptType, GoodsReceiptNoteStatus status, LocalDateTime arrivedAt,
-                          LocalDateTime confirmedAt) {
+    /** The delivery document fields are set for a TRANSFER_IN receipt recorded with its delivery document. */
+    public record Receipt(long id, ReceiptType receiptType, GoodsReceiptNoteStatus status, String deliveryDocumentNo,
+                          LocalDate deliveryDocumentDate, String delivererName, String vehiclePlateNo,
+                          LocalDateTime arrivedAt, LocalDateTime confirmedAt) {
     }
 
     public record Discrepancy(long id, long productId, int shortQty, DiscrepancyCaseStatus status,

@@ -20,9 +20,14 @@ public interface WarehouseTaskRepository extends JpaRepository<WarehouseTask, Lo
     String OF_DOCUMENT = """
             t.taskType = :type
               and (t.salesOrderId = :documentId or t.goodsReceiptNoteId = :documentId
-                   or t.transferOrderId = :documentId or t.stockCountId = :documentId)""";
+                   or t.transferOrderId = :documentId or t.stockCountId = :documentId
+                   or t.purchaseOrderId = :documentId)""";
 
     List<WarehouseTask> findByAssignedToAndStatus(Long assignedTo, WarehouseTaskStatus status);
+
+    /** The user's tasks of one type and status, oldest assignment first. */
+    List<WarehouseTask> findByAssignedToAndTaskTypeAndStatusOrderByAssignedAtAscIdAsc(Long assignedTo, TaskType taskType,
+                                                                                     WarehouseTaskStatus status);
 
     /** [taskType, number of tasks] given to the Staff member and not started on yet. */
     @Query("""
