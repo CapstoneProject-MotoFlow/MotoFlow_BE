@@ -24,11 +24,12 @@ import java.util.List;
  * <p>{@code quantityBasis} says which quantities the totals use: REQUESTED until the order is confirmed, DELIVERED
  * after (BR-14, BR-37). {@code discountThreshold} is the limit in effect now, for the form (screen 8.1.2).
  * {@code money} holds the payments, refunds, credit and receivable of the order (UC-54, UC-60, UC-61) and
- * {@code closing} its completion or cancellation; both are null for Staff.
+ * {@code closing} its completion or cancellation; both are null for Staff. {@code note} is the seller's note on the
+ * order, shown to the picker too.
  */
 public record SalesOrderDetail(
         long id, int version, SalesOrderStatus status, long storeId, String storeName,
-        Long customerId, String customerName, String customerPhone, String customerAddress,
+        Long customerId, String customerName, String customerPhone, String customerAddress, String note,
         PriceType priceType, BigDecimal discountRate, Picker picker,
         Long createdById, String createdBy, LocalDateTime createdAt, LocalDateTime updatedAt,
         Long confirmedById, String confirmedBy, LocalDateTime confirmedAt,

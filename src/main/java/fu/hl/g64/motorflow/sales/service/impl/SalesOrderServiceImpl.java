@@ -269,7 +269,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 rate)).toList(), now);
 
         SalesOrder order = orders.save(SalesOrder.create(store.getId(), customer, request.priceType(), rate,
-                seller.id(), now));
+                text(request.note()), seller.id(), now));
         List<SalesOrderLine> lines = new ArrayList<>();
         for (int i = 0; i < request.lines().size(); i++) {
             SalesOrderLineRequest line = request.lines().get(i);
@@ -313,12 +313,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 || !Objects.equals(order.getCustomerPhoneSnapshot(), customer.phone())));
         boolean pricingChanged = order.getPriceType() != request.priceType()
                 || order.getDiscountRate().compareTo(rate) != 0;
+        // The note is a memo outside the versions: changing only it saves no version and keeps the confirmation.
+        LocalDateTime now = LocalDateTime.now(clock);
+        order.changeNote(text(request.note()), now);
         if (!linesChanged && !customerChanged && !pricingChanged) {
             return detail(seller, order);
         }
 
         // BR-18, BR-36: the new version takes the retail prices in effect now.
-        LocalDateTime now = LocalDateTime.now(clock);
         Map<Long, Long> prices = requirePrices(request.lines(), parts, now);
         checkPricing(rate, request.lines().stream().map(line -> priced(line.quantity(), prices.get(line.productId()),
                 rate)).toList(), now);
@@ -869,7 +871,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return new SalesOrderDetail(id, version, order.getStatus(), order.getStoreId(), storeName,
                 order.getCustomerId(), order.getCustomerNameSnapshot(),
                 staff ? null : order.getCustomerPhoneSnapshot(), staff ? null : order.getCustomerAddressSnapshot(),
-                order.getPriceType(), staff ? null : order.getDiscountRate(), picker,
+                order.getNote(), order.getPriceType(), staff ? null : order.getDiscountRate(), picker,
                 order.getCreatedBy(), names.get(order.getCreatedBy()), order.getCreatedAt(), order.getUpdatedAt(),
                 order.getConfirmedBy(), names.get(order.getConfirmedBy()), order.getConfirmedAt(),
                 delivered ? "DELIVERED" : "REQUESTED", staff ? null : totals.referenceTotal(),

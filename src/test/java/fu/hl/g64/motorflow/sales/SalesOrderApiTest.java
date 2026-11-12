@@ -289,6 +289,35 @@ class SalesOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void noteIsSavedAndChangingOnlyItKeepsTheVersionAndConfirmation() throws Exception {
+        Map<String, Object> body = order(null, customer, "RETAIL", null, lines(pad, 4, oil, 2));
+        body.put("note", "  Khách lấy chiều nay  ");
+        String created = create(managerToken, body).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.note").value("Khách lấy chiều nay"))
+                .andReturn().getResponse().getContentAsString();
+        long order = ((Number) JsonPath.read(created, "$.id")).longValue();
+        assign(managerToken, "PICKING", order, staff);
+        // The picker reads the note too.
+        detail(staffToken, order).andExpect(jsonPath("$.note").value("Khách lấy chiều nay"));
+        pick(staffToken, order, 1, pad, 4, null, oil, 2, null);
+        confirm(managerToken, order, 1, pad, 4, oil, 2).andExpect(jsonPath("$.status").value("CONFIRMED"));
+
+        // A new note only: same version, still confirmed (BR-36 does not apply to the memo).
+        body.put("note", "Giao cho anh Nam");
+        update(managerToken, order, 1, body).andExpect(status().isOk())
+                .andExpect(jsonPath("$.note").value("Giao cho anh Nam"))
+                .andExpect(jsonPath("$.version").value(1))
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        // Blank clears it.
+        body.put("note", " ");
+        update(managerToken, order, 1, body).andExpect(status().isOk())
+                .andExpect(jsonPath("$.note").value(nullValue()))
+                .andExpect(jsonPath("$.version").value(1));
+        body.put("note", "x".repeat(501));
+        update(managerToken, order, 1, body).andExpect(status().isBadRequest());
+    }
+
+    @Test
     void updatingSavesVersionsAndSendsChangedLinesBackToThePicker() throws Exception {
         long order = createOrder(pad, 4, oil, 2);
         assign(managerToken, "PICKING", order, staff);
