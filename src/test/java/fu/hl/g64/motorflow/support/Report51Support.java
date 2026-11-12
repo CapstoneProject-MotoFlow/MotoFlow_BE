@@ -3,8 +3,17 @@ package fu.hl.g64.motorflow.support;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,6 +52,49 @@ public final class Report51Support {
     /** {@code request} with a JSON body, sent by the user signed in with {@code token} (or nobody). */
     public static MockHttpServletRequestBuilder as(String token, MockHttpServletRequestBuilder request, String json) {
         return as(token, request).contentType(MediaType.APPLICATION_JSON).content(json);
+    }
+
+    /**
+     * Runs {@code a} and {@code b} on two threads released together by a latch, and returns their results in the order
+     * a, b. Each call gives up after 30 seconds.
+     *
+     * <p>Which tool for which concurrency case:
+     * <ul>
+     *   <li>The same action pressed twice, or by two people at once (two dispatches, two approvals) → this method.
+     *       Which request wins is up to the database, so assert on the set of outcomes, e.g.
+     *       {@code assertThat(statuses).containsExactlyInAnyOrder(200, 409)}, then the loser's {@code $.code}, then
+     *       that the database was written exactly once (movements, balances, lots, documents created).</li>
+     *   <li>"No write is lost" (a request must wait for a row another transaction holds) →
+     *       {@link IntegrationTest#whileAnotherTransactionHoldsTheRow}, which always puts the request in the middle of
+     *       the other transaction instead of relying on timing. See {@code CatalogApiTest} and
+     *       {@code CustomerApiTest}. If it fails with "The request never waited for the row lock", the service does
+     *       not lock that row: report it as a suspected defect.</li>
+     * </ul>
+     * Sign in (get tokens) before calling this, so both threads only send the request under test.
+     */
+    public static List<MvcResult> atTheSameTime(Callable<MvcResult> a, Callable<MvcResult> b) throws Exception {
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<MvcResult> first = pool.submit(released(a, ready, start));
+            Future<MvcResult> second = pool.submit(released(b, ready, start));
+            if (!ready.await(30, TimeUnit.SECONDS)) {
+                throw new AssertionError("The two requests never got ready to start");
+            }
+            start.countDown();
+            return List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private static Callable<MvcResult> released(Callable<MvcResult> call, CountDownLatch ready, CountDownLatch start) {
+        return () -> {
+            ready.countDown();
+            start.await();
+            return call.call();
+        };
     }
 
     /** The response is the error {@code code} (for example "MSG05") with HTTP status {@code status}. */
