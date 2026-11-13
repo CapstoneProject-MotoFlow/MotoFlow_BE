@@ -11,7 +11,8 @@ public enum SalesOrderView {
     OPEN(EnumSet.of(SalesOrderStatus.AWAITING_PICKING, SalesOrderStatus.PICKED, SalesOrderStatus.CONFIRMED)),
     COMPLETED(EnumSet.of(SalesOrderStatus.COMPLETED)),
     CANCELLED(EnumSet.of(SalesOrderStatus.CANCELLED)),
-    ALL(EnumSet.allOf(SalesOrderStatus.class));
+    /** Every sales order; a draft is not one until submitted. */
+    ALL(EnumSet.complementOf(EnumSet.of(SalesOrderStatus.DRAFT)));
 
     private final Set<SalesOrderStatus> statuses;
 

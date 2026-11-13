@@ -162,7 +162,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional(readOnly = true)
     @Override
     public SalesOrderDetail get(AuthenticatedUser user, long id) {
-        SalesOrder order = orders.findById(id).orElseThrow(SalesOrderServiceImpl::notFound);
+        SalesOrder order = orders.findById(id).filter(found -> !found.isDraft()).orElseThrow(SalesOrderServiceImpl::notFound);
         if (user.role() == Role.STAFF) {
             boolean picking = tasks.findOpenPickings(List.of(id)).stream()
                     .anyMatch(task -> task.getAssignedTo() == user.id());
@@ -179,7 +179,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional(readOnly = true)
     @Override
     public List<SalesOrderVersion> versions(AuthenticatedUser seller, long id) {
-        SalesOrder order = orders.findById(id).orElseThrow(SalesOrderServiceImpl::notFound);
+        SalesOrder order = orders.findById(id).filter(found -> !found.isDraft()).orElseThrow(SalesOrderServiceImpl::notFound);
         requireSeller(seller, order);
         List<AuditLog> saved = new ArrayList<>(auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(
                 SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSION_ACTIONS));
@@ -259,30 +259,142 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     @Override
     public SalesOrderDetail create(AuthenticatedUser seller, SalesOrderRequest request) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        Content content = content(seller, request, now);
+        checkPricing(content, now);
+        SalesOrder order = orders.save(SalesOrder.create(content.store().getId(), content.customer(),
+                request.priceType(), content.rate(), text(request.note()), seller.id(), now));
+        return opened(seller, order, saveLines(order, request, content), now);
+    }
+
+    // PM 13/11: sales drafts
+    @Transactional(readOnly = true)
+    @Override
+    public PageResponse<SalesOrderSummary> drafts(AuthenticatedUser seller, Long storeId, String q, int page,
+                                                  int size) {
+        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+        Specification<SalesOrder> mine = matching(q, seller.role() == Role.OWNER ? storeId : null, null,
+                EnumSet.of(SalesOrderStatus.DRAFT), null, null)
+                .and((root, query, cb) -> cb.equal(root.get("createdBy"), seller.id()));
+        Page<SalesOrder> found = orders.findAll(mine, pageable);
+        return PageResponse.of(found, summaries(seller, found.getContent()));
+    }
+
+    @Transactional
+    @Override
+    public SalesOrderDetail createDraft(AuthenticatedUser seller, SalesOrderRequest request) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        Content content = content(seller, request, now);
+        SalesOrder order = orders.save(SalesOrder.createDraft(content.store().getId(), content.customer(),
+                request.priceType(), content.rate(), text(request.note()), seller.id(), now));
+        saveLines(order, request, content);
+        return detail(seller, order);
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public SalesOrderDetail draft(AuthenticatedUser seller, long id) {
+        return detail(seller, orders.findById(id).filter(found -> isOwnDraft(seller, found))
+                .orElseThrow(SalesOrderServiceImpl::notFound));
+    }
+
+    @Transactional
+    @Override
+    public SalesOrderDetail updateDraft(AuthenticatedUser seller, long id, SalesOrderRequest request) {
+        SalesOrder order = lockOwnDraft(seller, id);
+        LocalDateTime now = LocalDateTime.now(clock);
+        rewriteDraft(seller, order, request, now);
+        return detail(seller, order);
+    }
+
+    @Transactional
+    @Override
+    public SalesOrderDetail submitDraft(AuthenticatedUser seller, long id, SalesOrderRequest request) {
+        SalesOrder order = lockOwnDraft(seller, id);
+        LocalDateTime now = LocalDateTime.now(clock);
+        // UC-53 as for a new order: the prices in effect now (BR-18) and the discount threshold (BR-16). A refusal
+        // rolls the whole transaction back, so the draft keeps what it had.
+        Content content = rewriteDraft(seller, order, request, now);
+        checkPricing(content, now);
+        order.submit(now);
+        return opened(seller, order, orderLines.findBySalesOrderIdOrderByLineNoAsc(id), now);
+    }
+
+    @Transactional
+    @Override
+    public void deleteDraft(AuthenticatedUser seller, long id) {
+        SalesOrder order = lockOwnDraft(seller, id);
+        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
+        orderLines.flush();
+        orders.delete(order);
+    }
+
+    /** Only its creator knows a draft exists: any other caller, and any id of a real order, gets MSG156. */
+    private static boolean isOwnDraft(AuthenticatedUser seller, SalesOrder order) {
+        return order.isDraft() && order.getCreatedBy() == seller.id();
+    }
+
+    private SalesOrder lockOwnDraft(AuthenticatedUser seller, long id) {
+        return orders.findByIdForUpdate(id).filter(found -> isOwnDraft(seller, found))
+                .orElseThrow(SalesOrderServiceImpl::notFound);
+    }
+
+    /** Replaces the draft's whole content with the request, at the prices in effect now. */
+    private Content rewriteDraft(AuthenticatedUser seller, SalesOrder order, SalesOrderRequest request,
+                                 LocalDateTime now) {
+        Content content = content(seller, request, now);
+        order.changeDraft(content.store().getId(), content.customer(), request.priceType(), content.rate(),
+                text(request.note()), now);
+        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(order.getId()));
+        orderLines.flush();
+        saveLines(order, request, content);
+        return content;
+    }
+
+    /**
+     * What every new order and draft is checked for (UC-53): the selling store, the customer, the discount rate
+     * (BR-10, BR-12), the parts (MSG57, MSG158, MSG159) and a retail price in effect for each (MSG160). The discount
+     * threshold (BR-16) is left to {@link #checkPricing(Content, LocalDateTime)}, which a draft skips.
+     */
+    private Content content(AuthenticatedUser seller, SalesOrderRequest request, LocalDateTime now) {
         Store store = sellingStore(seller, request.storeId());
         SalesOrder.Customer customer = customer(request.customerId(), request.walkInName(), request.walkInPhone());
         BigDecimal rate = discountRate(request.priceType(), request.discountRate());
         Map<Long, Product> parts = checkLines(request.lines(), Set.of(), true);
-        LocalDateTime now = LocalDateTime.now(clock);
         Map<Long, Long> prices = requirePrices(request.lines(), parts, now);
-        checkPricing(rate, request.lines().stream().map(line -> priced(line.quantity(), prices.get(line.productId()),
-                rate)).toList(), now);
+        List<Priced> priced = request.lines().stream()
+                .map(line -> priced(line.quantity(), prices.get(line.productId()), rate)).toList();
+        return new Content(store, customer, rate, prices, priced);
+    }
 
-        SalesOrder order = orders.save(SalesOrder.create(store.getId(), customer, request.priceType(), rate,
-                text(request.note()), seller.id(), now));
+    private record Content(Store store, SalesOrder.Customer customer, BigDecimal rate, Map<Long, Long> prices,
+                           List<Priced> priced) {
+    }
+
+    private void checkPricing(Content content, LocalDateTime now) {
+        checkPricing(content.rate(), content.priced(), now);
+    }
+
+    private List<SalesOrderLine> saveLines(SalesOrder order, SalesOrderRequest request, Content content) {
         List<SalesOrderLine> lines = new ArrayList<>();
         for (int i = 0; i < request.lines().size(); i++) {
             SalesOrderLineRequest line = request.lines().get(i);
-            long reference = prices.get(line.productId());
+            long reference = content.prices().get(line.productId());
             lines.add(SalesOrderLine.create(order.getId(), i + 1, line.productId(), line.quantity(), reference,
-                    OrderPricing.actualUnitPrice(reference, rate)));
+                    OrderPricing.actualUnitPrice(reference, content.rate())));
         }
-        orderLines.saveAll(lines);
+        return orderLines.saveAll(lines);
+    }
+
+    /** UC-53 steps 9-10: version 1 is recorded and, when Owner sold it, the store's Branch Manager is told. */
+    private SalesOrderDetail opened(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
+                                    LocalDateTime now) {
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, order.getId(), SalesOrderHistory.CREATED, seller.id(),
                 null, null, SalesOrderHistory.snapshot(1, null, order, lines), now));
         if (seller.role() == Role.OWNER) {
             // The store's Branch Manager gives the picking to someone (UC-86).
-            notifications.notifyStoreManagers(store.getId(), "SALES_ORDER_CREATED",
+            notifications.notifyStoreManagers(order.getStoreId(), "SALES_ORDER_CREATED",
                     "Có đơn bán mới %s cần giao việc lấy hàng.".formatted(label(order)), REF_TYPE, order.getId());
         }
         return detail(seller, order);
@@ -373,7 +485,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Transactional
     @Override
     public SalesOrderDetail recordPicking(AuthenticatedUser picker, long id, PickingRequest request) {
-        SalesOrder order = orders.findByIdForUpdate(id).orElseThrow(SalesOrderServiceImpl::notFound);
+        SalesOrder order = orders.findByIdForUpdate(id).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderServiceImpl::notFound);
         // BR-32: only someone ever given this order to pick learns what state it is in.
         boolean given = tasks.findHistory(TaskType.PICKING, id).stream()
                 .anyMatch(task -> task.getAssignedTo() == picker.id());
@@ -555,7 +668,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
      * (MSG164). The seller is checked first, so another store learns nothing of the order's state.
      */
     private SalesOrder lockForSeller(AuthenticatedUser seller, long id) {
-        SalesOrder order = orders.findByIdForUpdate(id).orElseThrow(SalesOrderServiceImpl::notFound);
+        SalesOrder order = orders.findByIdForUpdate(id).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderServiceImpl::notFound);
         requireSeller(seller, order);
         return requireUnfinished(order);
     }
@@ -766,6 +880,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             return null;
         }
         return switch (order.getStatus()) {
+            case DRAFT -> null;
             case AWAITING_PICKING -> picking == null && user.role() == Role.BRANCH_MANAGER
                     ? NextAction.ASSIGN_PICKER : null;
             // BR-26: a Branch Manager who picked the goods leaves the confirmation to someone else.
@@ -794,7 +909,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, PickingGuide.Part> stock = unfinished
                 ? guide.parts(order.getStoreId(), productIds, now.toLocalDate()) : Map.of();
         Map<Long, String> reasons = shortReasons(steps, lines);
-        OrderCollections.Money collected = staff ? null : collections.of(id);
+        boolean draft = order.isDraft();
+        OrderCollections.Money collected = staff || draft ? null : collections.of(id);
         Set<Long> people = new HashSet<>();
         people.add(order.getCreatedBy());
         people.add(order.getConfirmedBy());
@@ -850,7 +966,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         boolean settled = money != null && money.unverifiedCount() == 0;
         boolean creditAllowed = order.getCustomerId() != null && customers.findById(order.getCustomerId())
                 .filter(customer -> customer.getCreditStatus() == CreditStatus.ELIGIBLE).isPresent();
-        Actions actions = new Actions(seller && unfinished,
+        // A draft is only edited, submitted or deleted by its creator (PM 13/11).
+        Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false)
+                : new Actions(seller && unfinished,
                 user.role() == Role.BRANCH_MANAGER && seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
                 holdsTask && ((order.getStatus() == SalesOrderStatus.AWAITING_PICKING
                         && taskStatus == WarehouseTaskStatus.ASSIGNED)
@@ -867,7 +985,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 names.get(order.getCompletedBy()), order.getCompletedAt(), order.getCancelledBy(),
                 names.get(order.getCancelledBy()), order.getCancelledAt(), order.getCancellationReason());
 
-        List<HistoryEntry> history = staff ? List.of() : history(steps, assignments, names);
+        List<HistoryEntry> history = staff || draft ? List.of() : history(steps, assignments, names);
         String storeName = stores.findById(order.getStoreId()).map(Store::getStoreName).orElse(null);
         return new SalesOrderDetail(id, version, order.getStatus(), order.getStoreId(), storeName,
                 order.getCustomerId(), order.getCustomerNameSnapshot(),

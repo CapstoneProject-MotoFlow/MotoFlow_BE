@@ -251,7 +251,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Transactional
     @Override
     public SalesOrderDetail cancel(AuthenticatedUser seller, long orderId, CancelSalesOrderRequest request) {
-        SalesOrder order = orders.findByIdForUpdate(orderId).orElseThrow(SalesOrderSettlementServiceImpl::notFound);
+        SalesOrder order = orders.findByIdForUpdate(orderId).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderSettlementServiceImpl::notFound);
         requireSeller(seller, order);
         if (order.getStatus() == SalesOrderStatus.CANCELLED) {
             // UC-56 Step 6_Order already completed or cancelled: show the cancellation without repeating it.
@@ -300,7 +301,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         String message = null;
         try {
             completed = Boolean.TRUE.equals(transactions.execute(status -> {
-                SalesOrder order = orders.findByIdForUpdate(orderId).orElseThrow(SalesOrderSettlementServiceImpl::notFound);
+                SalesOrder order = orders.findByIdForUpdate(orderId).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderSettlementServiceImpl::notFound);
                 if (order.getStatus() != SalesOrderStatus.CONFIRMED) {
                     return false;
                 }
@@ -425,7 +427,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
      * (MSG164). The seller is checked first, so another store learns nothing of the order's state.
      */
     private SalesOrder lockForSeller(AuthenticatedUser seller, long id) {
-        SalesOrder order = orders.findByIdForUpdate(id).orElseThrow(SalesOrderSettlementServiceImpl::notFound);
+        SalesOrder order = orders.findByIdForUpdate(id).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderSettlementServiceImpl::notFound);
         requireSeller(seller, order);
         if (!order.isUnfinished()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG164");

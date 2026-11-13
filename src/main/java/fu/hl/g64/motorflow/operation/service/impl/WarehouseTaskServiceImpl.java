@@ -267,8 +267,11 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
 
     private Optional<Document> find(TaskType type, long documentId) {
         return switch (type) {
-            case PICKING -> salesOrders.findById(documentId).map(order -> new Document(order.getStoreId(),
+            // A draft is not a sales order until submitted (PM 13/11): it is never picked, so it is not found.
+            case PICKING -> salesOrders.findById(documentId).filter(order -> !order.isDraft())
+                    .map(order -> new Document(order.getStoreId(),
                     switch (order.getStatus()) {
+                        case DRAFT -> throw new IllegalStateException("draft " + documentId);
                         case AWAITING_PICKING -> Stage.OPEN;
                         case PICKED -> Stage.RESULT_IN;
                         case CONFIRMED, COMPLETED, CANCELLED -> Stage.FINISHED;

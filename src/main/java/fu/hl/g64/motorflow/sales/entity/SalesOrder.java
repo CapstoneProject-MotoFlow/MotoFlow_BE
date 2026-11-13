@@ -128,6 +128,41 @@ public class SalesOrder {
     }
 
     /**
+     * PM 13/11: a draft its creator keeps on the server. It stays outside the order flow (no stock, picking, money
+     * or history) until {@link #submit}.
+     */
+    public static SalesOrder createDraft(long storeId, Customer customer, PriceType priceType,
+                                         BigDecimal discountRate, String note, long createdBy, LocalDateTime now) {
+        SalesOrder order = create(storeId, customer, priceType, discountRate, note, createdBy, now);
+        order.status = SalesOrderStatus.DRAFT;
+        return order;
+    }
+
+    /** The creator rewrites the whole draft. */
+    public void changeDraft(long storeId, Customer customer, PriceType priceType, BigDecimal discountRate,
+                            String note, LocalDateTime now) {
+        requireDraft();
+        this.storeId = storeId;
+        setCustomer(customer);
+        this.priceType = priceType;
+        this.discountRate = discountRate;
+        this.note = note;
+        updatedAt = now;
+    }
+
+    /** The draft becomes a sales order waiting for picking, created now (UC-53). */
+    public void submit(LocalDateTime now) {
+        requireDraft();
+        status = SalesOrderStatus.AWAITING_PICKING;
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    public boolean isDraft() {
+        return status == SalesOrderStatus.DRAFT;
+    }
+
+    /**
      * UC-55: the order moves to a new version with this customer and pricing (BR-36). Its price and credit decision
      * must be confirmed again, so the confirmation and any credit decision are dropped.
      */
@@ -252,6 +287,12 @@ public class SalesOrder {
     private void requireUnfinished() {
         if (!isUnfinished()) {
             throw new IllegalStateException("order " + id + " is " + status);
+        }
+    }
+
+    private void requireDraft() {
+        if (!isDraft()) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not a draft");
         }
     }
 

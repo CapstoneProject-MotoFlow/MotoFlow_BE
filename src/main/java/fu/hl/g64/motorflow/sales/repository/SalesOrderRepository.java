@@ -21,10 +21,11 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
     @Query("select o from SalesOrder o where o.id = :id")
     Optional<SalesOrder> findByIdForUpdate(long id);
 
-    /** Orders for the customer, at one store or at every store when {@code storeId} is null. */
+    /** Orders for the customer (never a draft, PM 13/11), at one store or at every store when {@code storeId} is null. */
     @Query("""
             select o from SalesOrder o
-            where o.customerId = :customerId and (:storeId is null or o.storeId = :storeId)""")
+            where o.customerId = :customerId and (:storeId is null or o.storeId = :storeId)
+              and o.status <> fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.DRAFT""")
     Page<SalesOrder> findByCustomer(Long customerId, Long storeId, Pageable pageable);
 
     long countByStoreIdAndStatus(Long storeId, SalesOrderStatus status);
