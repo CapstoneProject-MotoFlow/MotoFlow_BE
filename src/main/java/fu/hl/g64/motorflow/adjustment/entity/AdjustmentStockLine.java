@@ -43,4 +43,16 @@ public class AdjustmentStockLine {
 
     @Column(name = "quantity_change", nullable = false)
     private int quantityChange;
+
+    public static AdjustmentStockLine of(long requestId, long storeId, long productId, Long lotId, StockStatus status,
+                                         int quantityChange) {
+        AdjustmentStockLine line = new AdjustmentStockLine();
+        line.adjustmentRequestId = requestId;
+        line.storeId = storeId;
+        line.productId = productId;
+        line.lotId = lotId;
+        line.stockStatus = status;
+        line.quantityChange = quantityChange;
+        return line;
+    }
 }
