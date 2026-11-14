@@ -78,4 +78,11 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from Receivable r where r.id in :ids order by r.recognizedAt, r.id")
     List<Receivable> findAllByIdForUpdate(Collection<Long> ids);
+
+    /** [receivable, remaining amount in VND] of the given receivables. */
+    @Query("select r, " + REMAINING + """
+            from Receivable r
+            where r.id in :ids
+            order by r.recognizedAt, r.id""")
+    List<Object[]> findWithRemainingByIds(Collection<Long> ids);
 }

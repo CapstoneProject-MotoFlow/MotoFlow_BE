@@ -13,6 +13,7 @@ import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSearch;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSource;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSummary;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSummary.Person;
+import fu.hl.g64.motorflow.adjustment.dto.CorrectionRequest;
 import fu.hl.g64.motorflow.adjustment.dto.RejectAdjustmentRequest;
 import fu.hl.g64.motorflow.adjustment.dto.StockLossRequest;
 import fu.hl.g64.motorflow.adjustment.entity.AdjustmentRequest;
@@ -23,6 +24,7 @@ import fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentType;
 import fu.hl.g64.motorflow.adjustment.helper.AdjustmentStock;
 import fu.hl.g64.motorflow.adjustment.helper.AdjustmentStock.Change;
 import fu.hl.g64.motorflow.adjustment.helper.DocumentCorrections;
+import fu.hl.g64.motorflow.adjustment.helper.DocumentCorrections.Plan;
 import fu.hl.g64.motorflow.adjustment.repository.AdjustmentRequestRepository;
 import fu.hl.g64.motorflow.adjustment.repository.AdjustmentStockLineRepository;
 import fu.hl.g64.motorflow.adjustment.service.AdjustmentService;
@@ -278,6 +280,38 @@ public class AdjustmentServiceImpl implements AdjustmentService {
                 .collect(Collectors.toMap(DiscrepancyCase::getProductId, Function.identity(), (a, b) -> a));
     }
 
+    // ---------------------------------------------------------------------------------------------- UC-81
+
+    @Transactional(readOnly = true)
+    @Override
+    public AdjustmentPreview previewCorrection(AuthenticatedUser user, CorrectionRequest request) {
+        Plan plan = corrections.plan(user, request);
+        boolean owner = user.role() == Role.OWNER;
+        List<AdjustmentLineView> lines = stock.views(plan.storeId(), null, plan.stockChanges(), owner);
+        List<AdjustmentAmountView> amounts = corrections.previewAmounts(plan);
+        return new AdjustmentPreview(AdjustmentType.DOCUMENT_CORRECTION, plan.storeId(), storeName(plan.storeId()),
+                source(plan.source()), LocalDate.now(clock), lines, amounts, owner ? total(lines) : null);
+    }
+
+    @Transactional
+    @Override
+    public AdjustmentDetail submitCorrection(AuthenticatedUser user, CorrectionRequest request) {
+        Plan plan = corrections.plan(user, request);
+        if (request.attachments() == null || request.attachments().isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG255");
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        AdjustmentRequest saved = requests.save(AdjustmentRequest.submit(AdjustmentType.DOCUMENT_CORRECTION,
+                plan.storeId(), plan.source(), request.reason().strip(), user.id(), now));
+        for (Change c : plan.stockChanges()) {
+            stockLines.save(AdjustmentStockLine.of(saved.getId(), plan.storeId(), c.productId(), c.lotId(),
+                    c.status(), c.change()));
+        }
+        corrections.saved(saved, plan, user.id(), now);
+        submitted(user, saved, request.attachments(), now);
+        return detail(user, saved);
+    }
+
     // ---------------------------------------------------------------------------------------------- UC-82
 
     @Transactional(readOnly = true)
@@ -414,6 +448,9 @@ public class AdjustmentServiceImpl implements AdjustmentService {
             corrections.apply(request, owner.id(), now);
         }
         request.markApplied(now);
+        if (request.getAdjustmentType() == AdjustmentType.DOCUMENT_CORRECTION) {
+            corrections.applied(request, now);
+        }
         auditLog.save(AuditLog.record(AUDIT_ENTITY, request.getId(), APPLIED, owner.id(), null, now));
         if (!request.isRequestedBy(owner.id())) {
             notifications.notify(request.getRequestedBy(), "ADJUSTMENT_APPLIED",

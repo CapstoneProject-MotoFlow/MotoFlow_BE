@@ -75,4 +75,12 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
 
     /** The movements an applied adjustment posted, by part and lot. */
     List<StockMovement> findByAdjustmentRequestIdOrderByProductIdAscIdAsc(Long adjustmentRequestId);
+
+    /** The SALE_ISSUE movements of the order's part, latest first: where a corrected sale puts goods back. */
+    @Query("""
+            select m from StockMovement m
+            where m.salesOrderId = :salesOrderId and m.productId = :productId
+              and m.movementType = fu.hl.g64.motorflow.inventory.entity.enums.MovementType.SALE_ISSUE
+            order by m.id desc""")
+    List<StockMovement> findSaleIssues(long salesOrderId, long productId);
 }
