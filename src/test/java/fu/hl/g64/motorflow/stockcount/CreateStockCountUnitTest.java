@@ -45,7 +45,9 @@ class CreateStockCountUnitTest extends StockCountTestData {
                 .containsEntry("inventory_period_id", period).containsEntry("created_by", manager.getId())
                 .containsEntry("count_date", Date.valueOf(TODAY));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_count_line WHERE stock_count_id = ?", Long.class,
-                row.get("id"))).isEqualTo(4);
+                row.get("id"))).isEqualTo(5);
+        assertThat(jdbc.queryForList("SELECT DISTINCT product_id FROM stock_count_line WHERE stock_count_id = ?",
+                Long.class, row.get("id"))).containsExactlyInAnyOrder(oil, filter, plug);
     }
 
     @Test

@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -48,7 +49,7 @@ class RecordTransferReceiptUnitTest extends TransferFlowTestData {
     void utc017() throws Exception {
         long[] receipt = assignedReceipt(brake, 5);
 
-        record(signIn("nvlb"), receipt, brake, 3, 2).andExpect(status().isOk());
+        record(signIn("nvlb"), receipt, "2 units arrived with cracked casings.", brake, 3, 2).andExpect(status().isOk());
 
         assertRecorded(receipt[1], brake, 5, 3, 2);
     }
@@ -170,12 +171,22 @@ class RecordTransferReceiptUnitTest extends TransferFlowTestData {
     }
 
     private ResultActions record(String token, long[] receipt, long... lines) throws Exception {
+        return record(token, receipt, null, lines);
+    }
+
+    /** G06: a result that reports damaged units must carry an inspection note. */
+    private ResultActions record(String token, long[] receipt, String inspectionNote, long... lines) throws Exception {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (int i = 0; i < lines.length; i += 3) {
             rows.add(Map.of("productId", lines[i], "passedQty", lines[i + 1], "damagedQty", lines[i + 2]));
         }
+        Map<String, Object> body = new HashMap<>();
+        body.put("lines", rows);
+        if (inspectionNote != null) {
+            body.put("inspectionNote", inspectionNote);
+        }
         return mvc.perform(as(token, put(ORDERS + "/" + receipt[0] + "/receipts/" + receipt[1] + "/result"),
-                json(Map.of("lines", rows))));
+                json(body)));
     }
 
     private void assertRecorded(long receipt, long product, int expected, int passed, int damaged) {
