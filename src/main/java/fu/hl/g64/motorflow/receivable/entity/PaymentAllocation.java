@@ -38,6 +38,19 @@ public class PaymentAllocation {
     @Column(name = "reversed_at")
     private LocalDateTime reversedAt;
 
+    public boolean isActive() {
+        return reversedAt == null;
+    }
+
+    /** BR-71: an applied correction of the payment reverses this row; it stays for history. */
+    public void reverse(long adjustmentRequestId, LocalDateTime now) {
+        if (reversedAt != null) {
+            throw new IllegalStateException("allocation " + id + " already reversed");
+        }
+        reversedByAdjustmentId = adjustmentRequestId;
+        reversedAt = now;
+    }
+
     public static PaymentAllocation of(long paymentId, long receivableId, long amount) {
         PaymentAllocation allocation = new PaymentAllocation();
         allocation.paymentId = paymentId;
