@@ -35,7 +35,7 @@ import java.net.URI;
 import java.time.LocalDate;
 
 @Tag(name = "Purchase orders", description = "UC-39 to UC-42: Owner creates, changes and cancels purchase orders "
-        + "(yêu cầu nhập hàng); the Branch Manager of the receiving warehouse follows them")
+        + "(đơn nhập hàng, DNH-xxxx); the Branch Manager of the receiving warehouse follows them")
 @RestController
 @RequestMapping("/api/v1/purchase-orders")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")

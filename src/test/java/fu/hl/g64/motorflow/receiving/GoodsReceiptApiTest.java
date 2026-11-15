@@ -101,7 +101,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         // BR-25: nothing reaches stock before the confirmation.
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement", Long.class)).isZero();
         assertThat(notificationsOf(manager)).contains(List.of("GOODS_RECEIPT_SUBMITTED", "Phiếu nhận hàng #" + grn
-                + " của yêu cầu nhập hàng #" + order + " đã có kết quả kiểm nhận và đang chờ xác nhận.",
+                + " của đơn nhập hàng " + dnh(order) + " đã có kết quả kiểm nhận và đang chờ xác nhận.",
                 "GOODS_RECEIPT_NOTE", grn));
 
         receipt(managerToken, grn)
@@ -145,7 +145,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 Map.of("product_id", oil, "short_qty", 4, "damaged_qty", 0, "return_required_qty", 0,
                         "replacement_required_qty", 4, "status", "OPEN"));
         assertThat(notificationsOf(owner)).contains(List.of("SUPPLIER_DISCREPANCY_OPENED", "Phiếu nhận hàng #" + grn
-                + " của yêu cầu nhập hàng #" + order + " có 2 phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà "
+                + " của đơn nhập hàng " + dnh(order) + " có 2 phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà "
                 + "cung cấp.", "GOODS_RECEIPT_NOTE", grn));
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ? "
                 + "AND status <> 'CANCELLED'", String.class, grn)).isEqualTo("DONE");
@@ -516,7 +516,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         assertThat(averageCost(pad)).isEqualByComparingTo("110000");
         assertThat(stock(giaLam, pad, "AVAILABLE")).isEqualTo(20);
         assertThat(notificationsOf(owner)).contains(List.of("EXCESS_AWAITING_DECISION", "Phiếu nhận hàng #" + grn
-                + " của yêu cầu nhập hàng #" + order + " có hàng giao thừa đang chờ quyết định nhận hoặc không nhận.",
+                + " của đơn nhập hàng " + dnh(order) + " có hàng giao thừa đang chờ quyết định nhận hoặc không nhận.",
                 "GOODS_RECEIPT_NOTE", grn));
         receipts(ownerToken, "excessAwaiting", "true")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(grn))))

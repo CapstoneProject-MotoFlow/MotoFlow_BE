@@ -238,4 +238,9 @@ abstract class PurchaseOrderTestData extends ApiTestUsers {
     protected long id(String sql, Object... args) {
         return jdbc.queryForObject(sql, Long.class, args);
     }
+
+    /** How notifications name a PO, for example DNH-0012. */
+    protected static String dnh(long purchaseOrder) {
+        return "DNH-%04d".formatted(purchaseOrder);
+    }
 }
