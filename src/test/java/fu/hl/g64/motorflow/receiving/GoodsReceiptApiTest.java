@@ -582,4 +582,37 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM lot WHERE product_id = ?", Long.class, pad)).isEqualTo(2);
         assertStockAgrees(giaLam, pad);
     }
+
+    /** FE review PR #43 R-01 (PM 15/11): the delivery-document quantities are entered with the GRN and kept. */
+    @Test
+    void theDeliveryDocumentQuantitiesAreEnteredWithTheReceiptAndKeptByTheInspection() throws Exception {
+        Map<String, Object> body = deliveryNote("PX-DOC");
+        body.put("documentLines", List.of());
+        createReceipt(managerToken, order, body).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG278"));
+        body.put("documentLines", List.of(Map.of("productId", pad, "documentQty", 10),
+                Map.of("productId", pad, "documentQty", 9)));
+        createReceiptAs(managerToken, order, body).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG277"));
+        body.put("documentLines", List.of(Map.of("productId", 999_999L, "documentQty", 1)));
+        createReceiptAs(managerToken, order, body).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG277"));
+
+        // Oil left out: its document lists none.
+        body.put("documentLines", List.of(Map.of("productId", pad, "documentQty", 10)));
+        String created = createReceiptAs(managerToken, order, body).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lines[*].documentQty", contains(10, 0)))
+                .andReturn().getResponse().getContentAsString();
+        long grn = ((Number) JsonPath.read(created, "$.id")).longValue();
+        assign(grn, staff);
+
+        // The inspector sends only what arrived; a document quantity in the result is ignored.
+        Map<String, Object> pads = counted(lineOf(grn, pad), null, 8, 0, 0);
+        Map<String, Object> oils = counted(lineOf(grn, oil), null, 0, 0, 0);
+        oils.put("documentQty", 24);
+        recordAsIs(staffToken, grn, findings(pads, oils)).andExpect(status().isOk());
+        assertThat(jdbc.queryForList("SELECT document_qty FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? "
+                + "ORDER BY id", Integer.class, grn)).containsExactly(10, 0);
+        receipt(managerToken, grn).andExpect(jsonPath("$.lines[0].shortQty").value(2));
+    }
 }
