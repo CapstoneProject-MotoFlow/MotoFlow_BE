@@ -217,28 +217,36 @@ public abstract class StockCountTestData extends ApiTestUsers {
     /** A line to seed: part, lot (null for the line of the lots without expiry), book and counted quantity. */
     protected record SeedLine(long productId, Long lotId, LocalDate expiryDate, int bookQty, Integer countedQty,
                               String reason, boolean recountRequested, String recountReason, Integer previousBookQty,
-                              Integer previousCountedQty) {
+                              Integer previousCountedQty, Integer bookDamagedQty, Integer damagedQty,
+                              Integer previousDamagedQty) {
 
         public static SeedLine of(long productId, Long lotId, LocalDate expiryDate, int bookQty, Integer countedQty) {
-            return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, null, false, null, null, null);
+            return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, null, false, null, null, null, 0,
+                    countedQty == null ? 0 : 0, null);
         }
 
         /** The Branch Manager's reason for the difference. */
         public SeedLine because(String why) {
             return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, why, recountRequested,
-                    recountReason, previousBookQty, previousCountedQty);
+                    recountReason, previousBookQty, previousCountedQty, bookDamagedQty, damagedQty, previousDamagedQty);
         }
 
         /** Sent back for a recount. */
         public SeedLine recount(String why) {
             return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, reason, true, why,
-                    previousBookQty, previousCountedQty);
+                    previousBookQty, previousCountedQty, bookDamagedQty, damagedQty, previousDamagedQty);
         }
 
         /** Counted again after a recount: the earlier book and counted quantities. */
         public SeedLine previously(int book, Integer counted) {
             return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, reason, recountRequested,
-                    recountReason, book, counted);
+                    recountReason, book, counted, bookDamagedQty, damagedQty, previousDamagedQty);
+        }
+
+        /** Book and counted damaged quantities for A04. */
+        public SeedLine withDamaged(int bookDamaged, int countedDamaged) {
+            return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, reason, recountRequested,
+                    recountReason, previousBookQty, previousCountedQty, bookDamaged, countedDamaged, previousDamagedQty);
         }
     }
 
@@ -355,12 +363,16 @@ public abstract class StockCountTestData extends ApiTestUsers {
                     status == StockCountStatus.CANCELLED ? "Hủy thử" : null);
             for (SeedLine line : lines) {
                 jdbc.update("INSERT INTO stock_count_line (stock_count_id, product_id, lot_id, expiry_date, book_qty, "
-                                + "counted_qty, counted_by, counted_at, reason, recount_requested, recount_reason, "
-                                + "previous_book_qty, previous_counted_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        count, line.productId(), line.lotId(), line.expiryDate(), line.bookQty(), line.countedQty(),
-                        line.countedQty() == null ? null : taskAssigneeOr(staff.getId()),
+                                + "book_damaged_qty, damaged_qty, counted_qty, counted_by, counted_at, reason, "
+                                + "recount_requested, recount_reason, previous_book_qty, previous_counted_qty, "
+                                + "previous_damaged_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        count, line.productId(), line.lotId(), line.expiryDate(), line.bookQty(),
+                        line.bookDamagedQty() == null ? 0 : line.bookDamagedQty(),
+                        line.countedQty() == null ? 0 : (line.damagedQty() == null ? 0 : line.damagedQty()),
+                        line.countedQty(), line.countedQty() == null ? null : taskAssigneeOr(staff.getId()),
                         line.countedQty() == null ? null : now, line.reason(), line.recountRequested(),
-                        line.recountReason(), line.previousBookQty(), line.previousCountedQty());
+                        line.recountReason(), line.previousBookQty(), line.previousCountedQty(),
+                        line.previousDamagedQty());
             }
             if (taskAssignee != null) {
                 boolean submitted = taskStatus == WarehouseTaskStatus.RESULT_SUBMITTED
@@ -418,6 +430,25 @@ public abstract class StockCountTestData extends ApiTestUsers {
     protected int availableOfLot(long lotId) {
         return jdbc.queryForObject("SELECT coalesce(sum(quantity), 0) FROM lot_balance WHERE lot_id = ? "
                 + "AND stock_status = 'AVAILABLE'", Integer.class, lotId);
+    }
+
+    /** DAMAGED quantity of a lot in its warehouse. */
+    protected int damagedOfLot(long lotId) {
+        return jdbc.queryForObject("SELECT coalesce(sum(quantity), 0) FROM lot_balance WHERE lot_id = ? "
+                + "AND stock_status = 'DAMAGED'", Integer.class, lotId);
+    }
+
+    /** Moves units from AVAILABLE to DAMAGED on a lot and keeps stock balances aligned. */
+    protected void markDamaged(long storeId, long productId, long lotId, int qty) {
+        jdbc.update("UPDATE lot_balance SET quantity = quantity - ? WHERE lot_id = ? AND stock_status = 'AVAILABLE'",
+                qty, lotId);
+        jdbc.update("""
+                INSERT INTO lot_balance (lot_id, store_id, stock_status, quantity, updated_at)
+                VALUES (?, ?, 'DAMAGED', ?, now())
+                ON CONFLICT (lot_id, store_id, stock_status) DO UPDATE
+                SET quantity = lot_balance.quantity + excluded.quantity, updated_at = now()""", lotId, storeId, qty);
+        jdbc.update("UPDATE stock_balance SET available_qty = available_qty - ?, damaged_qty = damaged_qty + ? "
+                + "WHERE store_id = ? AND product_id = ?", qty, qty, storeId, productId);
     }
 
     /** AVAILABLE quantity of a part in a warehouse (stock_balance). */

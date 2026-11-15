@@ -23,6 +23,7 @@ import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountableLot;
+import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountedLot;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountLineRepository;
@@ -308,13 +309,16 @@ public class StockCountServiceImpl implements StockCountService {
         LocalDateTime now = LocalDateTime.now(clock);
         for (StockCountLinesSaveRequest.Line item : sent) {
             StockCountLine line = own.get(item.lineId());
-            if (line == null || (item.countedQty() != null && item.countedQty() < 0)
+            int damaged = item.damagedQty() == null ? 0 : item.damagedQty();
+            if (line == null || (item.countedQty() != null && item.countedQty() < 0) || damaged < 0
+                    || (item.countedQty() != null && damaged > item.countedQty())
                     || (recounting && !line.isRecountRequested())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG237");
             }
         }
         for (StockCountLinesSaveRequest.Line item : sent) {
-            own.get(item.lineId()).record(item.countedQty(), user.id(), now);
+            int damaged = item.damagedQty() == null ? 0 : item.damagedQty();
+            own.get(item.lineId()).record(item.countedQty(), damaged, user.id(), now);
         }
     }
     // endregion
@@ -375,11 +379,12 @@ public class StockCountServiceImpl implements StockCountService {
             line.explain(line.difference() != 0 ? reasons.get(line.getId()) : null);
             line.clearRecount();
         }
-        boolean hasDifference = countSheets.hasDifference(kept);
-        count.confirm(user.id(), hasDifference, LocalDateTime.now(clock));
-        if (hasDifference) {
+        boolean needsApproval = countSheets.needsApproval(kept);
+        count.confirm(user.id(), needsApproval, LocalDateTime.now(clock));
+        if (needsApproval) {
             notifications.notifyOwners("STOCK_COUNT_AWAITING_APPROVAL",
-                    "Phiếu kiểm kê #%d có chênh lệch và đang chờ bạn duyệt.".formatted(id), "STOCK_COUNT", id);
+                    "Phiếu kiểm kê #%d có chênh lệch hoặc thay đổi hàng hỏng và đang chờ bạn duyệt.".formatted(id),
+                    "STOCK_COUNT", id);
         }
         return mapper.toDetail(count, Viewer.MANAGER);
     }
@@ -449,7 +454,7 @@ public class StockCountServiceImpl implements StockCountService {
         }
         access.requireOpenPeriod(count.getInventoryPeriodId());
 
-        List<ApprovalStep> steps = planAdjustments(count);
+        List<ApprovalStep> steps = planDifferenceAdjustments(count);
         LocalDateTime now = LocalDateTime.now(clock);
         // BR-83: the differences belong to the period and the end of the count day, even if approved a month later.
         LocalDateTime occurredAt = count.getCountDate().atTime(23, 59, 59);
@@ -469,6 +474,25 @@ public class StockCountServiceImpl implements StockCountService {
                         occurredAt));
             }
         }
+        for (DamageStep step : planDamageAdjustments(count)) {
+            int quantity = step.quantity();
+            if (quantity > 0) {
+                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.AVAILABLE,
+                        -quantity, MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
+                        count.getInventoryPeriodId(), occurredAt));
+                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.DAMAGED, quantity,
+                        MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
+                        count.getInventoryPeriodId(), occurredAt));
+            } else {
+                int abs = -quantity;
+                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.DAMAGED, -abs,
+                        MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
+                        count.getInventoryPeriodId(), occurredAt));
+                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.AVAILABLE, abs,
+                        MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
+                        count.getInventoryPeriodId(), occurredAt));
+            }
+        }
 
         String decision = request == null || request.decisionReason() == null || request.decisionReason().isBlank()
                 ? null : request.decisionReason().strip();
@@ -482,12 +506,19 @@ public class StockCountServiceImpl implements StockCountService {
     private record ApprovalStep(long productId, Long lotId, int quantity, String reason) {
     }
 
+    /** Reclassify stock between AVAILABLE and DAMAGED on one lot. */
+    private record DamageStep(long productId, long lotId, int quantity, String reason) {
+    }
+
+    private record LotHold(int available, int damaged) {
+    }
+
     /**
      * Turns every line with a difference into lot postings, in part order, and checks first that no lot would go
      * below zero (SC-12), so nothing is written when one would. A line with a lot moves that lot; a missing quantity
      * with no lot is taken from the lots without expiry, oldest received first; a surplus with no lot is a new lot.
      */
-    private List<ApprovalStep> planAdjustments(StockCount count) {
+    private List<ApprovalStep> planDifferenceAdjustments(StockCount count) {
         List<StockCountLine> withDifference = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId())
                 .stream().filter(l -> l.isCounted() && l.difference() != 0)
                 .sorted(Comparator.comparing(StockCountLine::getProductId)).toList();
@@ -525,6 +556,93 @@ public class StockCountServiceImpl implements StockCountService {
                     }
                     int take = Math.min(left, lot.getQuantity());
                     steps.add(new ApprovalStep(product, lot.getLotId(), -take, line.getReason()));
+                    left -= take;
+                }
+                if (left > 0) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), "không lô");
+                }
+            }
+        }
+        return steps;
+    }
+
+    /**
+     * After difference postings, reclassifies damaged quantity changes lot by lot (BR-80). Positive quantity moves stock
+     * from AVAILABLE to DAMAGED on the same lot; negative moves the other way.
+     */
+    private List<DamageStep> planDamageAdjustments(StockCount count) {
+        List<StockCountLine> withChange = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId())
+                .stream().filter(l -> l.isCounted() && l.damagedChange() != 0)
+                .sorted(Comparator.comparing(StockCountLine::getProductId)).toList();
+        if (withChange.isEmpty()) {
+            return List.of();
+        }
+        List<Long> productIds = withChange.stream().map(StockCountLine::getProductId).distinct().toList();
+        Map<Long, String> skus = products.findAllById(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Product::getSku));
+        Map<Long, LotHold> held = new HashMap<>();
+        Map<Long, List<CountedLot>> withoutExpiry = new HashMap<>();
+        for (CountedLot lot : lotBalances.findCountedLots(count.getStoreId(), productIds)) {
+            held.put(lot.getLotId(), new LotHold(lot.getAvailable(), lot.getDamaged()));
+            if (lot.getExpiryDate() == null) {
+                withoutExpiry.computeIfAbsent(lot.getProductId(), k -> new ArrayList<>()).add(lot);
+            }
+        }
+
+        List<DamageStep> steps = new ArrayList<>();
+        for (StockCountLine line : withChange) {
+            long product = line.getProductId();
+            int change = line.damagedChange();
+            String reason = line.getReason();
+            if (line.getLotId() != null) {
+                LotHold stock = held.get(line.getLotId());
+                if (stock == null) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
+                }
+                if (change > 0) {
+                    if (stock.available() < change) {
+                        throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
+                    }
+                    held.put(line.getLotId(), new LotHold(stock.available() - change, stock.damaged() + change));
+                } else {
+                    int abs = -change;
+                    if (stock.damaged() < abs) {
+                        throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
+                    }
+                    held.put(line.getLotId(), new LotHold(stock.available() + abs, stock.damaged() - abs));
+                }
+                steps.add(new DamageStep(product, line.getLotId(), change, reason));
+            } else if (change > 0) {
+                int left = change;
+                for (CountedLot lot : withoutExpiry.getOrDefault(product, List.of())) {
+                    if (left == 0) {
+                        break;
+                    }
+                    LotHold stock = held.get(lot.getLotId());
+                    if (stock == null || stock.available() == 0) {
+                        continue;
+                    }
+                    int take = Math.min(left, stock.available());
+                    held.put(lot.getLotId(), new LotHold(stock.available() - take, stock.damaged() + take));
+                    steps.add(new DamageStep(product, lot.getLotId(), take, reason));
+                    left -= take;
+                }
+                if (left > 0) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), "không lô");
+                }
+            } else {
+                int left = -change;
+                for (CountedLot lot : withoutExpiry.getOrDefault(product, List.of())) {
+                    if (left == 0) {
+                        break;
+                    }
+                    LotHold stock = held.get(lot.getLotId());
+                    if (stock == null || stock.damaged() == 0) {
+                        continue;
+                    }
+                    int take = Math.min(left, stock.damaged());
+                    held.put(lot.getLotId(), new LotHold(stock.available() + take, stock.damaged() - take));
+                    steps.add(new DamageStep(product, lot.getLotId(), -take, reason));
                     left -= take;
                 }
                 if (left > 0) {

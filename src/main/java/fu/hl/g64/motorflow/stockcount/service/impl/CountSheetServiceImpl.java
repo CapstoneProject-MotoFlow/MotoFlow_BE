@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
 import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
+import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountedLot;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountLineRepository;
 import fu.hl.g64.motorflow.stockcount.service.CountSheetService;
@@ -30,20 +31,20 @@ public class CountSheetServiceImpl implements CountSheetService {
     @Override
     public List<StockCountLine> buildLines(StockCount count, List<Long> productIds) {
         List<Long> parts = switch (count.getScopeType()) {
-            case WHOLE -> lotBalances.findProductIdsWithAvailableStock(count.getStoreId());
+            case WHOLE -> lotBalances.findProductIdsWithCountableStock(count.getStoreId());
             case AREA -> stockBalances.findProductIdsByStorageArea(count.getStoreId(), count.getScopeNote());
             case PRODUCTS -> productIds;
             case CATEGORY -> lotBalances.findProductIdsWithStockInCategories(count.getStoreId(),
                     categories.withDescendants(count.getPartCategoryId()));
         };
-        Map<Long, List<LotBalanceRepository.CountableLot>> lotsByPart = parts.isEmpty() ? Map.of()
-                : lotBalances.findCountableLots(count.getStoreId(), parts).stream()
-                .collect(Collectors.groupingBy(LotBalanceRepository.CountableLot::getProductId));
+        Map<Long, List<CountedLot>> lotsByPart = parts.isEmpty() ? Map.of()
+                : lotBalances.findCountedLots(count.getStoreId(), parts).stream()
+                .collect(Collectors.groupingBy(CountedLot::getProductId));
         List<StockCountLine> built = new ArrayList<>();
         for (Long part : parts) {
-            List<LotBalanceRepository.CountableLot> lots = lotsByPart.getOrDefault(part, List.of());
+            List<CountedLot> lots = lotsByPart.getOrDefault(part, List.of());
             boolean anyWithoutExpiry = false;
-            for (LotBalanceRepository.CountableLot lot : lots) {
+            for (CountedLot lot : lots) {
                 if (lot.getExpiryDate() == null) {
                     anyWithoutExpiry = true;
                 } else {
@@ -69,26 +70,28 @@ public class CountSheetServiceImpl implements CountSheetService {
             return;
         }
         List<Long> parts = targets.stream().map(StockCountLine::getProductId).distinct().toList();
-        List<LotBalanceRepository.CountableLot> lots = lotBalances.findCountableLots(count.getStoreId(), parts);
+        List<CountedLot> lots = lotBalances.findCountedLots(count.getStoreId(), parts);
         for (StockCountLine line : targets) {
-            int book = lots.stream()
+            List<CountedLot> matched = lots.stream()
                     .filter(lot -> line.getLotId() == null
                             ? lot.getProductId().equals(line.getProductId()) && lot.getExpiryDate() == null
                             : lot.getLotId().equals(line.getLotId()))
-                    .mapToInt(LotBalanceRepository.CountableLot::getQuantity).sum();
+                    .toList();
+            int book = matched.stream().mapToInt(lot -> lot.getAvailable() + lot.getDamaged()).sum();
+            int bookDamaged = matched.stream().mapToInt(CountedLot::getDamaged).sum();
             if (restart) {
-                line.restartRecount(book);
+                line.restartRecount(book, bookDamaged);
             } else {
-                line.takeBookQty(book);
+                line.takeBookQty(book, bookDamaged);
             }
         }
     }
     // endregion
 
-    // region hasDifference (owner: Z)
+    // region needsApproval (owner: Z)
     @Override
-    public boolean hasDifference(List<StockCountLine> countLines) {
-        return countLines.stream().anyMatch(l -> l.isCounted() && l.difference() != 0);
+    public boolean needsApproval(List<StockCountLine> countLines) {
+        return countLines.stream().anyMatch(StockCountLine::needsApproval);
     }
     // endregion
 }

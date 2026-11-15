@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.stockcount.dto;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
@@ -17,6 +18,9 @@ public record StockCountLinesSaveRequest(
             @NotNull(message = "Vui lòng chọn dòng.")
             Long lineId,
 
-            Integer countedQty) {
+            Integer countedQty,
+
+            @Min(value = 0, message = "Số hàng hỏng không được âm.")
+            Integer damagedQty) {
     }
 }

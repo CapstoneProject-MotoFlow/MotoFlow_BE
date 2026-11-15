@@ -61,14 +61,18 @@ public record StockCountDetailResponse(
             String storageArea,
             String binLocation,
             Integer bookQty,
+            Integer bookDamagedQty,
             Integer countedQty,
+            int damagedQty,
             Integer difference,
+            Integer damagedChange,
             BigDecimal differenceValue,
             String reason,
             boolean recountRequested,
             String recountReason,
             Integer previousBookQty,
             Integer previousCountedQty,
+            Integer previousDamagedQty,
             LocalDateTime countedAt) {
     }
 }

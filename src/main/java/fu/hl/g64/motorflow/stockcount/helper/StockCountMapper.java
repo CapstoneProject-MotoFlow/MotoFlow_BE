@@ -116,15 +116,17 @@ public class StockCountMapper {
                                                         Viewer viewer) {
         boolean counter = viewer == Viewer.COUNTER;
         Integer difference = counter ? null : line.difference();
+        Integer damagedChange = counter ? null : line.damagedChange();
         BigDecimal value = viewer == Viewer.OWNER && difference != null && part.getMovingAvgCost() != null
                 ? part.getMovingAvgCost().multiply(BigDecimal.valueOf(difference)).setScale(0, RoundingMode.HALF_UP)
                 : null;
         return new StockCountDetailResponse.Line(line.getId(), part.getId(), part.getSku(), part.getPartName(),
                 part.getBaseUnit(), line.getLotId(), line.getExpiryDate(),
                 location == null ? null : location.getStorageArea(), location == null ? null : location.getBinLocation(),
-                counter ? null : line.getBookQty(), line.getCountedQty(), difference, value,
-                counter ? null : line.getReason(), line.isRecountRequested(), line.getRecountReason(),
-                counter ? null : line.getPreviousBookQty(), counter ? null : line.getPreviousCountedQty(),
+                counter ? null : line.getBookQty(), counter ? null : line.getBookDamagedQty(), line.getCountedQty(),
+                line.getDamagedQty(), difference, damagedChange, value, counter ? null : line.getReason(),
+                line.isRecountRequested(), line.getRecountReason(), counter ? null : line.getPreviousBookQty(),
+                counter ? null : line.getPreviousCountedQty(), counter ? null : line.getPreviousDamagedQty(),
                 line.getCountedAt());
     }
 

@@ -145,7 +145,7 @@ class StockCountApprovalApiTest extends StockCountTestData {
         postAs(ownerToken, url(count), Map.of()).andExpect(status().isOk());
 
         assertThat(availableOfLot(filterLotB)).isEqualTo(5);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM lot", Integer.class)).isEqualTo(5);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM lot", Integer.class)).isEqualTo(6);
         assertThat(movementsOf(count)).hasSize(1);
     }
 

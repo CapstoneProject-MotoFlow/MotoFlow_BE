@@ -22,9 +22,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class StockCountRecordingApiTest extends StockCountTestData {
 
     private static Map<String, Object> line(long lineId, Integer qty) {
+        return line(lineId, qty, null);
+    }
+
+    private static Map<String, Object> line(long lineId, Integer qty, Integer damagedQty) {
         Map<String, Object> m = new HashMap<>();
         m.put("lineId", lineId);
         m.put("countedQty", qty);
+        if (damagedQty != null) {
+            m.put("damagedQty", damagedQty);
+        }
         return m;
     }
 
@@ -168,6 +175,8 @@ class StockCountRecordingApiTest extends StockCountTestData {
         List<Long> ids = lineIds(count);
         String url = "/api/v1/stock-counts/" + count + "/lines";
         refused(putAs(staffToken, url, lines(line(ids.get(0), 5), line(ids.get(1), -1))), 400, "MSG237");
+        refused(putAs(staffToken, url, lines(line(ids.get(0), 5, -1))), 400, "MSG02");
+        refused(putAs(staffToken, url, lines(line(ids.get(0), 3, 4))), 400, "MSG237");
         refused(putAs(staffToken, url, lines(line(ids.get(0), 5), line(lineIds(other).get(0), 1))), 400, "MSG237");
         assertThat(row(ids.get(0)).get(1)).isNull();
         assertThat(row(lineIds(other).get(0)).get(1)).isNull();
