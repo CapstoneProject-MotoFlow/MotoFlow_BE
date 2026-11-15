@@ -21,6 +21,7 @@ import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
+import fu.hl.g64.motorflow.operation.dto.AttachmentUpload;
 import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
@@ -30,6 +31,7 @@ import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNoteLine;
+import fu.hl.g64.motorflow.receiving.helper.InspectionNoteRules;
 import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
@@ -101,7 +103,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                                           TransferReceiptRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime arrivedAt = request.arrivedAt() != null ? request.arrivedAt() : now;
-        if (request.deliveryDocumentDate().isAfter(now.toLocalDate()) || arrivedAt.isAfter(now)) {
+        if (arrivedAt.isAfter(now)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG138");
         }
         TransferOrder order = lockOrder(transferOrderId);
@@ -111,15 +113,11 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         if (arrival.blockedCode() != null) {
             throw new BusinessException(HttpStatus.CONFLICT, arrival.blockedCode());
         }
-        String documentNo = request.deliveryDocumentNo().strip();
-        if (receipts.existsByTransferOrderIdAndDeliveryDocumentNoIgnoreCase(transferOrderId, documentNo)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG28");
-        }
-        GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.transferIn(transferOrderId, documentNo,
-                request.deliveryDocumentDate(), text(request.delivererName()), text(request.vehiclePlateNo()),
+        GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.transfer(ReceiptType.TRANSFER_IN, transferOrderId,
                 arrivedAt));
         saveExpected(receipt, arrival.uncovered());
-        attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId(), request.documents(), user.id());
+        List<AttachmentUpload> photos = request.photos() == null ? List.of() : request.photos();
+        attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId(), photos, user.id());
         auditLog.save(AuditLog.record(ENTITY, transferOrderId, "TRANSFER_RECEIPT_ARRIVED", user.id(), null, null,
                 Map.of("goods_receipt_note_id", receipt.getId()), now));
         auditLog.save(AuditLog.record(RECEIPT_ENTITY, receipt.getId(), RECEIPT_CREATED, user.id(), null, now));
@@ -254,7 +252,8 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             line.settleTransferExcess(Math.max(delivered - line.getDocumentQty(), 0));
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        receipt.submitResult(user.id(), null, now);
+        InspectionNoteRules.requireWhenNeeded(lines, body.inspectionNote());
+        receipt.submitResult(user.id(), null, text(body.inspectionNote()), now);
         warehouseTasks.submitResult(user, TaskType.INSPECTION, receiptId);
         return view(receipt);
     }
@@ -489,7 +488,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         return new TransferReceiptResponse(receipt.getId(), receipt.getTransferOrderId(), receipt.getReceiptType(),
                 receipt.getStatus(), receipt.getDeliveryDocumentNo(), receipt.getDeliveryDocumentDate(),
                 receipt.getDelivererName(), receipt.getVehiclePlateNo(), receipt.getArrivedAt(), createdBy,
-                createdByName, receipt.getRecordedBy(), receipt.getSubmittedAt(),
+                createdByName, receipt.getRecordedBy(), receipt.getSubmittedAt(), receipt.getInspectionNote(),
                 receipt.getRecountReason(), receipt.getConfirmedBy(), receipt.getConfirmedAt(),
                 lines.stream().map(line -> {
                     Product part = parts.get(line.getProductId());

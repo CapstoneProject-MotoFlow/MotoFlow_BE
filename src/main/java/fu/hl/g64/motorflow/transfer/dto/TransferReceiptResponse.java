@@ -9,14 +9,14 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * A receipt of a transfer order, at the destination or back at the source. The delivery document fields,
- * {@code createdBy} and {@code documents} are set for a TRANSFER_IN receipt recorded with its delivery document.
+ * A receipt of a transfer order, at the destination or back at the source. Delivery document fields stay null for a
+ * transfer arrival (E02); {@code documents} lists any photos attached when the goods arrived.
  */
 public record TransferReceiptResponse(long id, long transferOrderId, ReceiptType receiptType,
                                       GoodsReceiptNoteStatus status, String deliveryDocumentNo,
                                       LocalDate deliveryDocumentDate, String delivererName, String vehiclePlateNo,
                                       LocalDateTime arrivedAt, Long createdBy, String createdByName,
-                                      Long recordedBy, LocalDateTime submittedAt, String recountReason,
+                                      Long recordedBy, LocalDateTime submittedAt, String inspectionNote, String recountReason,
                                       Long confirmedBy, LocalDateTime confirmedAt, List<Line> lines,
                                       List<AttachmentResponse> documents) {
 

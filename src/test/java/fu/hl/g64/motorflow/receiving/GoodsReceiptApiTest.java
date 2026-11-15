@@ -87,6 +87,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         // Two pads are damaged and four oils did not come.
         record(staffToken, grn, findings(pads, counted(oilLine, 24, 20, 0, 0)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inspectionNote").value("Ghi chú kiểm nhận (fixture)."))
                 .andExpect(jsonPath("$.status").value("AWAITING_CONFIRMATION"))
                 .andExpect(jsonPath("$.recordedById").value(staff.getId()))
                 .andExpect(jsonPath("$.recordedByName").value("Test staff"))
@@ -246,6 +247,9 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         long padLine = lineOf(grn, pad);
         long oilLine = lineOf(grn, oil);
 
+        recordAsIs(staffToken, grn, findings(counted(padLine, 10, 9, 0, 0), counted(oilLine, 24, 24, 0, 0)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG265"));
         record(staffToken, grn, findings(counted(padLine, 10, 3, 2, 2)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG27"))
@@ -605,7 +609,9 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         Map<String, Object> pads = counted(lineOf(grn, pad), null, 8, 0, 0);
         Map<String, Object> oils = counted(lineOf(grn, oil), null, 0, 0, 0);
         oils.put("documentQty", 24);
-        recordAsIs(staffToken, grn, findings(pads, oils)).andExpect(status().isOk());
+        Map<String, Object> result = findings(pads, oils);
+        result.put("inspectionNote", "Thiếu 2 má phanh.");
+        recordAsIs(staffToken, grn, result).andExpect(status().isOk());
         assertThat(jdbc.queryForList("SELECT document_qty FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? "
                 + "ORDER BY id", Integer.class, grn)).containsExactly(10, 0);
         receipt(managerToken, grn).andExpect(jsonPath("$.lines[0].shortQty").value(2));

@@ -23,7 +23,7 @@ public record GoodsReceiptDetail(
         long storeId, String storeName,
         String deliveryDocumentNo, LocalDate deliveryDocumentDate, String delivererName, String vehiclePlateNo,
         LocalDateTime arrivedAt, Assignee assignee,
-        Long recordedById, String recordedByName, LocalDateTime submittedAt, String recountReason,
+        Long recordedById, String recordedByName, LocalDateTime submittedAt, String inspectionNote, String recountReason,
         Long confirmedById, String confirmedByName, LocalDateTime confirmedAt,
         Long excessDecidedById, String excessDecidedByName, LocalDateTime excessDecidedAt,
         long openDiscrepancies,

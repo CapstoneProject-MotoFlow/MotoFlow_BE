@@ -144,7 +144,35 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
                 }
             }
         }
+        ensureInspectionNoteIfNeeded(body);
         return recordAsIs(token, receipt, body);
+    }
+
+    private static void ensureInspectionNoteIfNeeded(Map<String, Object> body) {
+        if (body.containsKey("inspectionNote")) {
+            return;
+        }
+        Object lines = body.get("lines");
+        if (!(lines instanceof List<?> list)) {
+            return;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> line)) {
+                continue;
+            }
+            int documentQty = intOrZero(line.get("documentQty"));
+            int delivered = intOrZero(line.get("deliveredQty"));
+            int wrong = intOrZero(line.get("wrongItemQty"));
+            int damaged = intOrZero(line.get("damagedQty"));
+            if (wrong > 0 || damaged > 0 || documentQty > delivered || delivered > documentQty) {
+                body.put("inspectionNote", "Ghi chú kiểm nhận (fixture).");
+                return;
+            }
+        }
+    }
+
+    private static int intOrZero(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
     }
 
     /** UC-43 with the body exactly as given: nothing is written to the GRN lines first. */

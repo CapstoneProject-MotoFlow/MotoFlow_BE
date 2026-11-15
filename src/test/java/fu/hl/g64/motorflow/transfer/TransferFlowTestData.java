@@ -140,15 +140,15 @@ abstract class TransferFlowTestData extends ApiTestUsers {
         return order;
     }
 
-    /** The delivery document the goods of a transfer arrive with, dated today, with one photo of it. */
-    protected Map<String, Object> arrivalNote(String documentNo) {
-        Map<String, Object> body = new java.util.LinkedHashMap<>();
-        body.put("deliveryDocumentNo", documentNo);
-        body.put("deliveryDocumentDate", LocalDate.now(clock).toString());
-        body.put("delivererName", "Anh Hùng");
-        body.put("vehiclePlateNo", "29C-678.90");
-        body.put("documents", List.of(Map.of("storageKey", "motoflow/attachments/" + java.util.UUID.randomUUID(),
-                "fileName", "phieu-xuat.jpg", "contentType", "image/jpeg", "fileSize", 100_000)));
+    /** Optional arrival time and photos when transfer goods reach the destination (E02). */
+    protected Map<String, Object> arrivalNote() {
+        return new java.util.LinkedHashMap<>();
+    }
+
+    protected Map<String, Object> arrivalNoteWithPhoto() {
+        Map<String, Object> body = arrivalNote();
+        body.put("photos", List.of(Map.of("storageKey", "motoflow/attachments/" + java.util.UUID.randomUUID(),
+                "fileName", "hang-chuyen.jpg", "contentType", "image/jpeg", "fileSize", 100_000)));
         return body;
     }
 
@@ -169,14 +169,12 @@ abstract class TransferFlowTestData extends ApiTestUsers {
 
     protected ResultActions arrive(long order) throws Exception {
         holdReceiving("bmlb", order);
-        return arriveAs("bmlb", order, arrivalNote("PX-" + order + "-" + java.util.UUID.randomUUID()
-                .toString().substring(0, 8)));
+        return arriveAs("bmlb", order, arrivalNote());
     }
 
     protected long arrive(String manager, long order) throws Exception {
         holdReceiving(manager, order);
-        arriveAs(manager, order, arrivalNote("PX-" + java.util.UUID.randomUUID().toString().substring(0, 8)))
-                .andExpect(status().isCreated());
+        arriveAs(manager, order, arrivalNote()).andExpect(status().isCreated());
         return jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
     }
 
@@ -193,9 +191,33 @@ abstract class TransferFlowTestData extends ApiTestUsers {
         for (int i = 0; i < lines.length; i += 3) {
             rows.add(Map.of("productId", lines[i], "passedQty", lines[i + 1], "damagedQty", lines[i + 2]));
         }
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("lines", rows);
+        String note = inspectionNoteIfNeeded(receipt, rows);
+        if (note != null) {
+            body.put("inspectionNote", note);
+        }
         return mvc.perform(put(ORDERS + "/" + order + "/receipts/" + receipt + "/result")
                 .header(HttpHeaders.AUTHORIZATION, signIn(recorder)).contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("lines", rows))));
+                .content(json(body)));
+    }
+
+    private String inspectionNoteIfNeeded(long receipt, List<Map<String, Object>> rows) {
+        for (Map<String, Object> row : rows) {
+            long productId = ((Number) row.get("productId")).longValue();
+            int passed = ((Number) row.get("passedQty")).intValue();
+            int damaged = ((Number) row.get("damagedQty")).intValue();
+            Integer documentQty = jdbc.queryForObject("SELECT document_qty FROM goods_receipt_note_line "
+                    + "WHERE goods_receipt_note_id = ? AND product_id = ?", Integer.class, receipt, productId);
+            if (documentQty == null) {
+                continue;
+            }
+            int delivered = passed + damaged;
+            if (damaged > 0 || delivered != documentQty) {
+                return "Ghi chú kiểm nhận (fixture).";
+            }
+        }
+        return null;
     }
 
     protected ResultActions confirm(String manager, long order, long receipt) throws Exception {

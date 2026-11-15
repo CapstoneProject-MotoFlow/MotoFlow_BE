@@ -116,18 +116,6 @@ public class GoodsReceiptNote {
         return receipt;
     }
 
-    /** UC-106: the goods of a transfer order arrived at the destination with the transfer's delivery document. */
-    public static GoodsReceiptNote transferIn(long transferOrderId, String deliveryDocumentNo,
-                                              LocalDate deliveryDocumentDate, String delivererName,
-                                              String vehiclePlateNo, LocalDateTime arrivedAt) {
-        GoodsReceiptNote receipt = transfer(ReceiptType.TRANSFER_IN, transferOrderId, arrivedAt);
-        receipt.deliveryDocumentNo = deliveryDocumentNo;
-        receipt.deliveryDocumentDate = deliveryDocumentDate;
-        receipt.delivererName = delivererName;
-        receipt.vehiclePlateNo = vehiclePlateNo;
-        return receipt;
-    }
-
     /** Waiting for its inspection result, the first one or a recount (UC-43). */
     public boolean awaitsResult() {
         return status == GoodsReceiptNoteStatus.AWAITING_INSPECTION || status == GoodsReceiptNoteStatus.AWAITING_RECOUNT;
@@ -137,12 +125,13 @@ public class GoodsReceiptNote {
      * UC-43 step 7: the inspection result waits for the Branch Manager. {@code arrivedAt} corrects the arrival time
      * the Staff member saw (screen 6.2.2), or keeps it when null.
      */
-    public void submitResult(long recordedBy, LocalDateTime arrivedAt, LocalDateTime now) {
+    public void submitResult(long recordedBy, LocalDateTime arrivedAt, String inspectionNote, LocalDateTime now) {
         require(awaitsResult(), "AWAITING_INSPECTION or AWAITING_RECOUNT");
         if (arrivedAt != null) {
             this.arrivedAt = arrivedAt;
         }
         this.recordedBy = recordedBy;
+        this.inspectionNote = inspectionNote;
         submittedAt = now;
         status = GoodsReceiptNoteStatus.AWAITING_CONFIRMATION;
     }

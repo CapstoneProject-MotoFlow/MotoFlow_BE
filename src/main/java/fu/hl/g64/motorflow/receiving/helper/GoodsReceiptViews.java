@@ -158,7 +158,8 @@ public class GoodsReceiptViews {
                 receipt.getArrivedAt(), task == null ? null : new Assignee(task.getAssignedTo(),
                 names.get(task.getAssignedTo()), task.getStatus(), task.getAssignedAt()),
                 receipt.getRecordedBy(), names.get(receipt.getRecordedBy()), receipt.getSubmittedAt(),
-                receipt.getRecountReason(), receipt.getConfirmedBy(), names.get(receipt.getConfirmedBy()),
+                receipt.getInspectionNote(), receipt.getRecountReason(), receipt.getConfirmedBy(),
+                names.get(receipt.getConfirmedBy()),
                 receipt.getConfirmedAt(), receipt.getExcessDecidedBy(), names.get(receipt.getExcessDecidedBy()),
                 receipt.getExcessDecidedAt(), openCases, canRecord, canConfirm, manager && awaitingConfirmation,
                 canDecideExcess, rows, attachments.list(OwnerType.GOODS_RECEIPT_NOTE, id));
