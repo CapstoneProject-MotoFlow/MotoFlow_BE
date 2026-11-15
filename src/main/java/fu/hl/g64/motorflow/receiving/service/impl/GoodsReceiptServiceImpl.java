@@ -243,12 +243,13 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         if (receipts.existsByPurchaseOrderIdAndDeliveryDocumentNoIgnoreCase(order.getId(), documentNo)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG28");
         }
+        Map<Long, Integer> documentQty = documentQuantities(request.documentLines(), expectedParts);
 
         GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.supplierDelivery(order.getId(), documentNo,
                 request.deliveryDocumentDate(), text(request.delivererName()), text(request.vehiclePlateNo()),
                 arrivedAt));
         receiptLines.saveAll(expectedParts.stream().map(productId -> GoodsReceiptNoteLine.expected(receipt.getId(),
-                productId, priceByProduct.get(productId))).toList());
+                productId, priceByProduct.get(productId), documentQty.getOrDefault(productId, 0))).toList());
         events.saveAll(replacementByCase.entrySet().stream().map(e -> DiscrepancyResolutionEvent.pending(e.getKey(),
                 ResolutionType.REPLACEMENT_RECEIVED, e.getValue(), receipt.getId(), null, user.id(), now)).toList());
         order.startReceiving(now);
@@ -292,8 +293,9 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                     && in.expiryDate().isBefore(in.manufactureDate())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG137", n);
             }
-            anything |= in.documentQty() > 0 || in.deliveredQty() > 0;
+            anything |= in.deliveredQty() > 0;
         }
+        anything |= lines.stream().anyMatch(line -> line.getDocumentQty() > 0);
         if (!anything) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG140");
         }
@@ -302,9 +304,10 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             InspectionResultRequest.Line in = given.get(line.getId());
             if (in == null) {
                 // A part the delivery did not bring and its document did not list.
-                line.record(0, 0, 0, 0, null, null, null);
+                line.record(line.getDocumentQty(), 0, 0, 0, null, null, null);
             } else {
-                line.record(in.documentQty(), in.deliveredQty(), orZero(in.wrongItemQty()), orZero(in.damagedQty()),
+                // The delivery-document quantity stays as entered when the GRN was recorded (PM 15/11).
+                line.record(line.getDocumentQty(), in.deliveredQty(), orZero(in.wrongItemQty()), orZero(in.damagedQty()),
                         text(in.manufacturerLotNo()), in.manufactureDate(), in.expiryDate());
             }
         }
@@ -611,5 +614,26 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
 
     private static <T> Map<Long, T> byId(java.util.Collection<T> rows, Function<T, Long> id) {
         return rows.stream().collect(Collectors.toMap(id, Function.identity()));
+    }
+
+    /**
+     * UC-106 step 3 (PM 15/11): the delivery-document quantity of each expected part; a part left out is 0. Another
+     * part, or a part given twice, is refused (MSG277); at least one line is needed (MSG278).
+     */
+    private static Map<Long, Integer> documentQuantities(List<GoodsReceiptRequest.DocumentLine> lines,
+                                                         List<Long> expectedParts) {
+        if (lines == null || lines.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG278");
+        }
+        Set<Long> expected = new HashSet<>(expectedParts);
+        Map<Long, Integer> quantities = new HashMap<>();
+        for (int i = 0; i < lines.size(); i++) {
+            GoodsReceiptRequest.DocumentLine line = lines.get(i);
+            if (!expected.contains(line.productId())
+                    || quantities.putIfAbsent(line.productId(), line.documentQty()) != null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG277", i + 1);
+            }
+        }
+        return quantities;
     }
 }

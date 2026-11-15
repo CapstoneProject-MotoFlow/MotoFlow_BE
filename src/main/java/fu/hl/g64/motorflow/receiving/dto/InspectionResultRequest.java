@@ -28,14 +28,15 @@ public record InspectionResultRequest(
         List<@NotNull @Valid AttachmentUpload> evidence) {
 
     /**
-     * One part of the GRN: the delivery-document, delivered, wrong-item and damaged quantities (wrong item and damaged
-     * are 0 when left out) and the lot data printed on the packaging. Passed and short are derived (BR-24).
+     * One part of the GRN: the delivered, wrong-item and damaged quantities (wrong item and damaged are 0 when left
+     * out) and the lot data printed on the packaging. Passed and short are derived (BR-24). {@code documentQty} is
+     * ignored: the delivery-document quantity was entered when the GRN was recorded (PM 15/11); it stays optional so
+     * an older client still works.
      */
     public record Line(
             @NotNull(message = "Vui lòng chọn dòng của phiếu nhận hàng.")
             Long lineId,
 
-            @NotNull(message = "Vui lòng nhập số lượng trên chứng từ.")
             @PositiveOrZero(message = "Số lượng không được âm.")
             @Max(value = 1_000_000, message = "Số lượng tối đa 1.000.000.")
             Integer documentQty,
