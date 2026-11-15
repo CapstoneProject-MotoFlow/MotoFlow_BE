@@ -21,14 +21,20 @@ class StockCountRequestApiTest extends StockCountTestData {
     private static final String URL = "/api/v1/stock-count-requests";
 
     private ResultActions create(String token, Long storeId, ScopeType scope, String note, String reason,
-                                 List<Long> productIds) throws Exception {
+                                 List<Long> productIds, Long partCategoryId) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("storeId", storeId);
         body.put("scopeType", scope);
         body.put("scopeNote", note);
         body.put("reason", reason);
         body.put("productIds", productIds);
+        body.put("partCategoryId", partCategoryId);
         return postAs(token, URL, body);
+    }
+
+    private ResultActions create(String token, Long storeId, ScopeType scope, String note, String reason,
+                                 List<Long> productIds) throws Exception {
+        return create(token, storeId, scope, note, reason, productIds, null);
     }
 
     private int requestCount() {
@@ -96,7 +102,34 @@ class StockCountRequestApiTest extends StockCountTestData {
                 .andExpect(jsonPath("$.code").value("MSG02"));
         create(ownerToken, store, ScopeType.WHOLE, null, "x".repeat(256), null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"));
+        create(ownerToken, store, ScopeType.CATEGORY, null, "x", null, null).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
+        create(ownerToken, store, ScopeType.CATEGORY, "Ghi chú", "x", null, categoryA).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
+        create(ownerToken, store, ScopeType.CATEGORY, null, "x", List.of(oil), categoryA)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
+        create(ownerToken, store, ScopeType.WHOLE, null, "x", null, categoryA).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
+        create(ownerToken, store, ScopeType.CATEGORY, null, "x", null, 99_999L).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
         assertThat(requestCount()).isZero();
+    }
+
+    @Test
+    void ownerRequestsACategoryAndTheManagerIsTold() throws Exception {
+        create(ownerToken, store, ScopeType.CATEGORY, null, "Kiểm nhóm A", null, categoryA)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.scopeType").value("CATEGORY"))
+                .andExpect(jsonPath("$.partCategoryId").value(categoryA))
+                .andExpect(jsonPath("$.partCategoryName").value("Nhóm A"))
+                .andExpect(jsonPath("$.scopeNote").doesNotExist())
+                .andExpect(jsonPath("$.products").isEmpty());
+
+        long id = id("SELECT id FROM stock_count_request");
+        assertThat(jdbc.queryForObject("SELECT part_category_id FROM stock_count_request WHERE id = ?", Long.class, id))
+                .isEqualTo(categoryA);
+        assertThat(notificationsOf(manager)).containsExactly(List.of("STOCK_COUNT_REQUESTED", "STOCK_COUNT_REQUEST", id));
     }
 
     @Test

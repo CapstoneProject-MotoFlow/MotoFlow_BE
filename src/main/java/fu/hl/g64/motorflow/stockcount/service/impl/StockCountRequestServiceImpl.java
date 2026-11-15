@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.stockcount.service.impl;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.catalog.repository.PartCategoryRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequest;
@@ -41,6 +42,7 @@ public class StockCountRequestServiceImpl implements StockCountRequestService {
     private final StockCountRequestProductRepository requestProducts;
     private final StoreRepository stores;
     private final ProductRepository products;
+    private final PartCategoryRepository categories;
     private final StockBalanceRepository stockBalances;
     private final InventoryPeriods inventoryPeriods;
     private final NotificationService notifications;
@@ -88,20 +90,22 @@ public class StockCountRequestServiceImpl implements StockCountRequestService {
         access.requireOpenPeriod(inventoryPeriods.findFor(today).orElseThrow().getId());
 
         String note = request.scopeNote() == null || request.scopeNote().isBlank() ? null : request.scopeNote().strip();
+        Long partCategoryId = request.partCategoryId();
         boolean valid = switch (request.scopeType()) {
-            case WHOLE -> productIds.isEmpty() && note == null;
+            case WHOLE -> productIds.isEmpty() && note == null && partCategoryId == null;
             case PRODUCTS -> !productIds.isEmpty() && new HashSet<>(productIds).size() == productIds.size()
-                    && note == null;
-            case AREA -> productIds.isEmpty() && note != null
+                    && note == null && partCategoryId == null;
+            case AREA -> productIds.isEmpty() && note != null && partCategoryId == null
                     && stockBalances.findStorageAreas(store.getId()).contains(note);
-            case CATEGORY -> false;
+            case CATEGORY -> productIds.isEmpty() && note == null && partCategoryId != null
+                    && categories.existsById(partCategoryId);
         };
         if (!valid) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
         }
 
         StockCountRequest saved = requests.save(StockCountRequest.create(store.getId(), request.scopeType(), note,
-                request.reason().strip(), user.id(), LocalDateTime.now(clock)));
+                partCategoryId, request.reason().strip(), user.id(), LocalDateTime.now(clock)));
         productIds.forEach(id -> requestProducts.save(StockCountRequestProduct.create(saved.getId(), id)));
         notifications.notifyStoreManagers(store.getId(), "STOCK_COUNT_REQUESTED",
                 "Owner yêu cầu cửa hàng %s kiểm kê kho (yêu cầu kiểm kê #%d).".formatted(store.getStoreName(),

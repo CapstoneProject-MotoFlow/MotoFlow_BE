@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.stockcount.service.impl;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.catalog.entity.Product;
+import fu.hl.g64.motorflow.catalog.repository.PartCategoryRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
@@ -92,6 +93,7 @@ public class StockCountServiceImpl implements StockCountService {
     private final LotBalanceRepository lotBalances;
     private final StockBalanceRepository stockBalances;
     private final ProductRepository products;
+    private final PartCategoryRepository categories;
     private final StoreRepository stores;
     private final WarehouseTaskRepository tasks;
     private final InventoryPeriods inventoryPeriods;
@@ -143,6 +145,7 @@ public class StockCountServiceImpl implements StockCountService {
                 .map(InventoryPeriod::getId).orElseThrow(() -> new BusinessException(HttpStatus.CONFLICT, "MSG232"));
 
         List<Long> productIds = request.productIds() == null ? List.of() : request.productIds();
+        Long partCategoryId = request.partCategoryId();
         String scopeNote = request.scopeNote() == null || request.scopeNote().isBlank() ? null
                 : request.scopeNote().strip();
         StockCountRequest answered = null;
@@ -155,15 +158,17 @@ public class StockCountServiceImpl implements StockCountService {
             Set<Long> requested = requestProducts.findByStockCountRequestIdOrderByProductId(answered.getId()).stream()
                     .map(StockCountRequestProduct::getProductId).collect(Collectors.toSet());
             if (request.countType() != CountType.CYCLE || request.scopeType() != answered.getScopeType()
-                    || !Objects.equals(scopeNote, answered.getScopeNote()) || !requested.equals(new HashSet<>(productIds))) {
+                    || !Objects.equals(scopeNote, answered.getScopeNote())
+                    || !Objects.equals(partCategoryId, answered.getPartCategoryId())
+                    || !requested.equals(new HashSet<>(productIds))) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG234");
             }
         }
-        validateScope(storeId, request.scopeType(), scopeNote, productIds);
+        validateScope(storeId, request.scopeType(), scopeNote, partCategoryId, productIds);
 
         LocalDateTime now = LocalDateTime.now(clock);
         StockCount count = counts.save(StockCount.create(storeId, periodId, answered == null ? null : answered.getId(),
-                request.countType(), request.countDate(), request.scopeType(), scopeNote, user.id(), now));
+                request.countType(), request.countDate(), request.scopeType(), scopeNote, partCategoryId, user.id(), now));
         countSheets.buildLines(count, productIds);
         if (answered != null) {
             answered.markDone();
@@ -172,13 +177,16 @@ public class StockCountServiceImpl implements StockCountService {
     }
 
     /** MSG02 for a scope that does not fit its type, MSG242 for a part that does not exist. */
-    private void validateScope(long storeId, ScopeType scopeType, String scopeNote, List<Long> productIds) {
+    private void validateScope(long storeId, ScopeType scopeType, String scopeNote, Long partCategoryId,
+                               List<Long> productIds) {
         boolean bad = switch (scopeType) {
-            case WHOLE -> !productIds.isEmpty();
-            case AREA -> !productIds.isEmpty() || scopeNote == null
+            case WHOLE -> !productIds.isEmpty() || scopeNote != null || partCategoryId != null;
+            case AREA -> !productIds.isEmpty() || scopeNote == null || partCategoryId != null
                     || !stockBalances.findStorageAreas(storeId).contains(scopeNote);
-            case PRODUCTS -> productIds.isEmpty() || new HashSet<>(productIds).size() != productIds.size();
-            case CATEGORY -> true;
+            case PRODUCTS -> productIds.isEmpty() || new HashSet<>(productIds).size() != productIds.size()
+                    || scopeNote != null || partCategoryId != null;
+            case CATEGORY -> !productIds.isEmpty() || scopeNote != null || partCategoryId == null
+                    || !categories.existsById(partCategoryId);
         };
         if (bad) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");

@@ -71,9 +71,15 @@ public abstract class StockCountTestData extends ApiTestUsers {
     /** October 2026, OPEN. */
     protected long period;
 
+    /** Root category A: {@link #oil} and {@link #pad}; child A1: {@link #filter}; separate B: {@link #plug}. */
+    protected long categoryA;
+    protected long categoryA1;
+    protected long categoryB;
+
     protected long oil;
     protected long filter;
     protected long pad;
+    protected long plug;
     protected long oilLot1;
     protected long oilLot2;
     protected long filterLotA;
@@ -99,11 +105,16 @@ public abstract class StockCountTestData extends ApiTestUsers {
         signInAll();
 
         period = period(TODAY, true);
-        long category = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Phụ tùng', 'MOTORCYCLE') "
+        categoryA = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Nhóm A', 'MOTORCYCLE') "
                 + "RETURNING id");
-        oil = part("NHOT-01", "Nhớt 10W40", category, 85_000);
-        filter = part("LOC-01", "Lọc gió", category, 50_000);
-        pad = part("MA-PHANH-01", "Má phanh trước", category, null);
+        categoryA1 = id("INSERT INTO part_category (category_name, vehicle_type, parent_id) "
+                + "VALUES ('Nhóm A1', 'MOTORCYCLE', ?) RETURNING id", categoryA);
+        categoryB = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Nhóm B', 'MOTORCYCLE') "
+                + "RETURNING id");
+        oil = part("NHOT-01", "Nhớt 10W40", categoryA, 85_000);
+        filter = part("LOC-01", "Lọc gió", categoryA1, 50_000);
+        pad = part("MA-PHANH-01", "Má phanh trước", categoryA, null);
+        plug = part("BUGI-01", "Bugi", categoryB, 20_000);
         openingCount = id("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, status, created_by) "
                 + "VALUES (?, 'OPENING', '2026-09-30', 'WHOLE', 'COMPLETED', ?) RETURNING id", store, owner.getId());
         oilLot1 = lot(store, oil, LocalDate.of(2026, 10, 1), null, 5, 80_000, "Kệ A");
@@ -111,6 +122,7 @@ public abstract class StockCountTestData extends ApiTestUsers {
         filterLotA = lot(store, filter, LocalDate.of(2026, 10, 3), LocalDate.of(2027, 1, 31), 4, 50_000, "Kệ B");
         filterLotB = lot(store, filter, LocalDate.of(2026, 10, 4), LocalDate.of(2027, 6, 30), 3, 50_000, "Kệ B");
         filterLotPlain = lot(store, filter, LocalDate.of(2026, 10, 2), null, 2, 50_000, "Kệ B");
+        lot(store, plug, LocalDate.of(2026, 10, 6), null, 6, 20_000, "Kệ C");
     }
 
     protected void signInAll() throws Exception {
@@ -179,10 +191,17 @@ public abstract class StockCountTestData extends ApiTestUsers {
     /** An Owner request to {@code storeId}, requested now; {@code productIds} only for PRODUCTS. */
     protected long seedRequest(long storeId, ScopeType scope, String scopeNote, StockCountRequestStatus status,
                                Long... productIds) {
-        long request = id("INSERT INTO stock_count_request (store_id, scope_type, scope_note, reason, status, "
-                        + "requested_by, requested_at, cancelled_at) VALUES (?, ?, ?, 'Kiểm định kỳ', ?, ?, ?, ?) "
-                        + "RETURNING id", storeId, scope.name(), scopeNote, status.name(), owner.getId(),
-                LocalDateTime.now(clock), status == StockCountRequestStatus.CANCELLED ? LocalDateTime.now(clock) : null);
+        return seedRequest(storeId, scope, scopeNote, null, status, productIds);
+    }
+
+    /** {@code partCategoryId} only for CATEGORY. */
+    protected long seedRequest(long storeId, ScopeType scope, String scopeNote, Long partCategoryId,
+                               StockCountRequestStatus status, Long... productIds) {
+        long request = id("INSERT INTO stock_count_request (store_id, scope_type, scope_note, part_category_id, reason, "
+                        + "status, requested_by, requested_at, cancelled_at) VALUES (?, ?, ?, ?, 'Kiểm định kỳ', ?, ?, "
+                        + "?, ?) RETURNING id", storeId, scope.name(), scopeNote, partCategoryId, status.name(),
+                owner.getId(), LocalDateTime.now(clock),
+                status == StockCountRequestStatus.CANCELLED ? LocalDateTime.now(clock) : null);
         for (Long product : productIds) {
             jdbc.update("INSERT INTO stock_count_request_product (stock_count_request_id, product_id) VALUES (?, ?)",
                     request, product);

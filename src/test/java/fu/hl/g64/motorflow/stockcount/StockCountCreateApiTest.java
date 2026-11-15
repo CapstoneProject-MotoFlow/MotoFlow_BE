@@ -22,13 +22,14 @@ class StockCountCreateApiTest extends StockCountTestData {
     private static final String URL = "/api/v1/stock-counts";
 
     private Map<String, Object> body(String type, LocalDate date, ScopeType scope, String note, List<Long> products,
-                                     Long request) {
+                                     Long partCategoryId, Long request) {
         Map<String, Object> body = new HashMap<>();
         body.put("countType", type);
         body.put("countDate", date.toString());
         body.put("scopeType", scope.name());
         body.put("scopeNote", note);
         body.put("productIds", products);
+        body.put("partCategoryId", partCategoryId);
         body.put("stockCountRequestId", request);
         return body;
     }
@@ -38,7 +39,11 @@ class StockCountCreateApiTest extends StockCountTestData {
     }
 
     private ResultActions cycle(ScopeType scope, String note, List<Long> products) throws Exception {
-        return create(managerToken, body("CYCLE", TODAY, scope, note, products, null));
+        return create(managerToken, body("CYCLE", TODAY, scope, note, products, null, null));
+    }
+
+    private ResultActions cycleCategory(long categoryId) throws Exception {
+        return create(managerToken, body("CYCLE", TODAY, ScopeType.CATEGORY, null, null, categoryId, null));
     }
 
     private ResultActions refused(ResultActions result, int httpStatus, String code) throws Exception {
@@ -70,7 +75,7 @@ class StockCountCreateApiTest extends StockCountTestData {
                 .andExpect(jsonPath("$.storeId").value(store))
                 .andExpect(jsonPath("$.inventoryPeriodId").value(period))
                 .andExpect(jsonPath("$.createdBy").value(manager.getId()))
-                .andExpect(jsonPath("$.lines.length()").value(4));
+                .andExpect(jsonPath("$.lines.length()").value(5));
 
         long count = draftCount();
         assertThat(jdbc.queryForObject("SELECT created_by FROM stock_count WHERE id = ?", Long.class, count))
@@ -79,7 +84,8 @@ class StockCountCreateApiTest extends StockCountTestData {
                 Arrays.asList(oil, null, null, 0),
                 Arrays.asList(filter, filterLotA, "2027-01-31", 0),
                 Arrays.asList(filter, filterLotB, "2027-06-30", 0),
-                Arrays.asList(filter, null, null, 0));
+                Arrays.asList(filter, null, null, 0),
+                Arrays.asList(plug, null, null, 0));
     }
 
     @Test
@@ -113,10 +119,10 @@ class StockCountCreateApiTest extends StockCountTestData {
     void theDateMustFallInAnOpenPeriodNotAfterThisMonth() throws Exception {
         closePeriod(period);
         refused(cycle(ScopeType.WHOLE, null, null), 409, "MSG232");
-        refused(create(managerToken, body("CYCLE", LocalDate.of(2026, 11, 1), ScopeType.WHOLE, null, null, null)),
+        refused(create(managerToken, body("CYCLE", LocalDate.of(2026, 11, 1), ScopeType.WHOLE, null, null, null, null)),
                 409, "MSG232");
         // No period for September was ever created.
-        refused(create(managerToken, body("CYCLE", LocalDate.of(2026, 9, 30), ScopeType.WHOLE, null, null, null)),
+        refused(create(managerToken, body("CYCLE", LocalDate.of(2026, 9, 30), ScopeType.WHOLE, null, null, null, null)),
                 409, "MSG232");
         assertThat(countRows()).isZero();
     }
@@ -125,7 +131,7 @@ class StockCountCreateApiTest extends StockCountTestData {
     void thisMonthsPeriodIsOpenedWhenMissing() throws Exception {
         today(LocalDate.of(2026, 11, 2));
 
-        create(managerToken, body("CYCLE", LocalDate.of(2026, 11, 20), ScopeType.WHOLE, null, null, null))
+        create(managerToken, body("CYCLE", LocalDate.of(2026, 11, 20), ScopeType.WHOLE, null, null, null, null))
                 .andExpect(status().isCreated());
 
         assertThat(jdbc.queryForObject("SELECT status FROM inventory_period WHERE period_month = '2026-11-01'",
@@ -136,9 +142,9 @@ class StockCountCreateApiTest extends StockCountTestData {
 
     @Test
     void answeringARequestMarksItDone() throws Exception {
-        long request = seedRequest(store, ScopeType.PRODUCTS, "Kiểm gấp", StockCountRequestStatus.PENDING, oil, filter);
+        long request = seedRequest(store, ScopeType.PRODUCTS, null, StockCountRequestStatus.PENDING, oil, filter);
 
-        create(managerToken, body("CYCLE", TODAY, ScopeType.PRODUCTS, "Kiểm gấp", List.of(filter, oil), request))
+        create(managerToken, body("CYCLE", TODAY, ScopeType.PRODUCTS, null, List.of(filter, oil), null, request))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.request.id").value(request));
 
@@ -154,22 +160,22 @@ class StockCountCreateApiTest extends StockCountTestData {
         long foreign = seedRequest(otherStore, ScopeType.WHOLE, null, StockCountRequestStatus.PENDING);
 
         for (long request : new long[]{done, cancelled}) {
-            refused(create(managerToken, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, request)), 409, "MSG233");
+            refused(create(managerToken, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, null, request)), 409, "MSG233");
         }
-        refused(create(managerToken, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, foreign)), 403, "MSG05");
-        refused(create(managerToken, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, 999_999L)), 404, "MSG246");
+        refused(create(managerToken, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, null, foreign)), 403, "MSG05");
+        refused(create(managerToken, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, null, 999_999L)), 404, "MSG246");
         assertThat(countRows()).isZero();
     }
 
     @Test
     void aCountThatDiffersFromItsRequestIsRefused() throws Exception {
-        long request = seedRequest(store, ScopeType.PRODUCTS, "Kiểm gấp", StockCountRequestStatus.PENDING, oil);
+        long request = seedRequest(store, ScopeType.PRODUCTS, null, StockCountRequestStatus.PENDING, oil);
 
         List<Map<String, Object>> wrong = List.of(
-                body("CYCLE", TODAY, ScopeType.WHOLE, null, null, request),
-                body("CYCLE", TODAY, ScopeType.PRODUCTS, "Ghi chú khác", List.of(oil), request),
-                body("CYCLE", TODAY, ScopeType.PRODUCTS, "Kiểm gấp", List.of(oil, filter), request),
-                body("YEAR_END", TODAY, ScopeType.PRODUCTS, "Kiểm gấp", List.of(oil), request));
+                body("CYCLE", TODAY, ScopeType.WHOLE, null, null, null, request),
+                body("CYCLE", TODAY, ScopeType.PRODUCTS, "Ghi chú khác", List.of(oil), null, request),
+                body("CYCLE", TODAY, ScopeType.PRODUCTS, null, List.of(oil, filter), null, request),
+                body("YEAR_END", TODAY, ScopeType.PRODUCTS, null, List.of(oil), null, request));
         for (Map<String, Object> each : wrong) {
             refused(create(managerToken, each), 409, "MSG234");
         }
@@ -180,19 +186,20 @@ class StockCountCreateApiTest extends StockCountTestData {
     @Test
     void onlyTheBranchManagerOfAWarehouseCreates() throws Exception {
         for (String token : List.of(ownerToken, staffToken)) {
-            refused(create(token, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, null)), 403, "MSG05");
+            refused(create(token, body("CYCLE", TODAY, ScopeType.WHOLE, null, null, null, null)), 403, "MSG05");
         }
         assertThat(countRows()).isZero();
     }
 
     @Test
     void anOpeningCountIsNotSupportedYetAndYearEndIs() throws Exception {
-        refused(create(managerToken, body("OPENING", TODAY, ScopeType.WHOLE, null, null, null)), 409, "MSG244");
+        refused(create(managerToken, body("OPENING", TODAY, ScopeType.WHOLE, null, null, null, null)), 409, "MSG244");
         // Checked before the role: an Owner gets the same answer.
-        refused(create(ownerToken, body("OPENING", TODAY, ScopeType.WHOLE, null, null, null)), 409, "MSG244");
+        refused(create(ownerToken, body("OPENING", TODAY, ScopeType.WHOLE, null, null, null, null)), 409, "MSG244");
         assertThat(countRows()).isZero();
 
-        create(managerToken, body("YEAR_END", TODAY, ScopeType.WHOLE, null, null, null)).andExpect(status().isCreated());
+        create(managerToken, body("YEAR_END", TODAY, ScopeType.WHOLE, null, null, null, null))
+                .andExpect(status().isCreated());
         assertThat(jdbc.queryForObject("SELECT count_type FROM stock_count WHERE status = 'DRAFT'", String.class))
                 .isEqualTo("YEAR_END");
     }
@@ -206,6 +213,45 @@ class StockCountCreateApiTest extends StockCountTestData {
         refused(cycle(ScopeType.AREA, "Kệ Z", null), 400, "MSG02");
         refused(cycle(ScopeType.AREA, "Kệ A", List.of(oil)), 400, "MSG02");
         refused(cycle(ScopeType.PRODUCTS, null, List.of(oil, 999_999L)), 400, "MSG242");
+        refused(cycleCategory(99_999L), 400, "MSG02");
+        refused(create(managerToken, body("CYCLE", TODAY, ScopeType.CATEGORY, null, List.of(oil), categoryA, null)),
+                400, "MSG02");
+        refused(create(managerToken, body("CYCLE", TODAY, ScopeType.CATEGORY, "Kệ A", null, categoryA, null)),
+                400, "MSG02");
+        assertThat(countRows()).isZero();
+    }
+
+    @Test
+    void categoryScopeIncludesSubcategoriesAndExcludesOtherBranches() throws Exception {
+        cycleCategory(categoryA).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.scopeType").value("CATEGORY"))
+                .andExpect(jsonPath("$.partCategoryId").value(categoryA))
+                .andExpect(jsonPath("$.partCategoryName").value("Nhóm A"))
+                .andExpect(jsonPath("$.lines.length()").value(4));
+
+        var productIds = lines(draftCount()).stream().map(l -> l.get(0)).distinct().toList();
+        assertThat(productIds).containsExactlyInAnyOrder(oil, filter);
+        assertThat(productIds).doesNotContain(plug);
+    }
+
+    @Test
+    void answeringACategoryRequestMarksItDone() throws Exception {
+        long request = seedRequest(store, ScopeType.CATEGORY, null, categoryA, StockCountRequestStatus.PENDING);
+
+        create(managerToken, body("CYCLE", TODAY, ScopeType.CATEGORY, null, null, categoryA, request))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.request.partCategoryId").value(categoryA));
+
+        assertThat(requestStatus(request)).isEqualTo("DONE");
+    }
+
+    @Test
+    void aCountWhoseCategoryDiffersFromItsRequestIsRefused() throws Exception {
+        long request = seedRequest(store, ScopeType.CATEGORY, null, categoryA, StockCountRequestStatus.PENDING);
+
+        refused(create(managerToken, body("CYCLE", TODAY, ScopeType.CATEGORY, null, null, categoryB, request)),
+                409, "MSG234");
+        assertThat(requestStatus(request)).isEqualTo("PENDING");
         assertThat(countRows()).isZero();
     }
 

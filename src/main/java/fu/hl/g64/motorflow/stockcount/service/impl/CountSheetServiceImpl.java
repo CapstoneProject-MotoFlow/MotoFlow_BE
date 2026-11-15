@@ -1,6 +1,6 @@
 package fu.hl.g64.motorflow.stockcount.service.impl;
 
-import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
 import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
 import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
@@ -10,7 +10,6 @@ import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountLineRepository;
 import fu.hl.g64.motorflow.stockcount.service.CountSheetService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -25,6 +24,7 @@ public class CountSheetServiceImpl implements CountSheetService {
     private final StockCountLineRepository lines;
     private final LotBalanceRepository lotBalances;
     private final StockBalanceRepository stockBalances;
+    private final PartCategoryService categories;
 
     // region buildLines (owner: Y)
     @Override
@@ -33,7 +33,8 @@ public class CountSheetServiceImpl implements CountSheetService {
             case WHOLE -> lotBalances.findProductIdsWithAvailableStock(count.getStoreId());
             case AREA -> stockBalances.findProductIdsByStorageArea(count.getStoreId(), count.getScopeNote());
             case PRODUCTS -> productIds;
-            case CATEGORY -> throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+            case CATEGORY -> lotBalances.findProductIdsWithStockInCategories(count.getStoreId(),
+                    categories.withDescendants(count.getPartCategoryId()));
         };
         Map<Long, List<LotBalanceRepository.CountableLot>> lotsByPart = parts.isEmpty() ? Map.of()
                 : lotBalances.findCountableLots(count.getStoreId(), parts).stream()

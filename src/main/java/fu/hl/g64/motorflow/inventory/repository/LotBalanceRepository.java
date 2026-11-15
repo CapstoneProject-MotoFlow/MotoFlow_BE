@@ -131,4 +131,14 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
               and b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE
             order by l.productId""")
     List<Long> findProductIdsWithAvailableStock(Long storeId);
+
+    /** UC-91: parts in the listed categories with AVAILABLE or DAMAGED stock in a lot of the warehouse, by id. */
+    @Query("""
+            select distinct l.productId from LotBalance b, Lot l, Product p
+            where l.id = b.lotId and p.id = l.productId and b.storeId = :storeId and b.quantity > 0
+              and b.stockStatus in (fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE,
+                                  fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.DAMAGED)
+              and p.categoryId in :categoryIds
+            order by l.productId""")
+    List<Long> findProductIdsWithStockInCategories(Long storeId, Collection<Long> categoryIds);
 }

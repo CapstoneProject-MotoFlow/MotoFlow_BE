@@ -25,6 +25,8 @@ public record StockCountDetailResponse(
         LocalDate countDate,
         ScopeType scopeType,
         String scopeNote,
+        Long partCategoryId,
+        String partCategoryName,
         StockCountStatus status,
         long createdBy,
         String createdByName,

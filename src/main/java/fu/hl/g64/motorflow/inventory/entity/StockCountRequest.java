@@ -60,12 +60,13 @@ public class StockCountRequest {
     private LocalDateTime cancelledAt;
 
     /** UC-105: the Owner asks the store's Branch Manager to count. */
-    public static StockCountRequest create(Long storeId, ScopeType scopeType, String scopeNote, String reason,
-                                           Long requestedBy, LocalDateTime now) {
+    public static StockCountRequest create(Long storeId, ScopeType scopeType, String scopeNote, Long partCategoryId,
+                                           String reason, Long requestedBy, LocalDateTime now) {
         StockCountRequest request = new StockCountRequest();
         request.storeId = storeId;
         request.scopeType = scopeType;
         request.scopeNote = scopeNote;
+        request.partCategoryId = partCategoryId;
         request.reason = reason;
         request.status = StockCountRequestStatus.PENDING;
         request.requestedBy = requestedBy;

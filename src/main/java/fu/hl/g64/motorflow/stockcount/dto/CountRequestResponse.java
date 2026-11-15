@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * UC-105 and the UC-91 prefill: the Owner's stock count request. {@code products} is empty unless the scope is
- * PRODUCTS; {@code scopeNote} is the storage area for AREA.
+ * PRODUCTS; {@code scopeNote} is the storage area for AREA; {@code partCategoryId} is set for CATEGORY.
  */
 public record CountRequestResponse(
         long id,
@@ -16,6 +16,8 @@ public record CountRequestResponse(
         String storeName,
         ScopeType scopeType,
         String scopeNote,
+        Long partCategoryId,
+        String partCategoryName,
         String reason,
         StockCountRequestStatus status,
         long requestedBy,
