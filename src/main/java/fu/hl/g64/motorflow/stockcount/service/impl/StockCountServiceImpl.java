@@ -22,7 +22,6 @@ import fu.hl.g64.motorflow.inventory.entity.enums.StockCountRequestStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
-import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountableLot;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountedLot;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -529,9 +528,9 @@ public class StockCountServiceImpl implements StockCountService {
         Map<Long, String> skus = products.findAllById(productIds).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getSku));
         Map<Long, Integer> held = new HashMap<>();
-        Map<Long, List<CountableLot>> withoutExpiry = new HashMap<>();
-        for (CountableLot lot : lotBalances.findCountableLots(count.getStoreId(), productIds)) {
-            held.put(lot.getLotId(), lot.getQuantity());
+        Map<Long, List<CountedLot>> withoutExpiry = new HashMap<>();
+        for (CountedLot lot : lotBalances.findCountedLots(count.getStoreId(), productIds)) {
+            held.put(lot.getLotId(), lot.getAvailable());
             if (lot.getExpiryDate() == null) {
                 withoutExpiry.computeIfAbsent(lot.getProductId(), k -> new ArrayList<>()).add(lot);
             }
@@ -550,11 +549,11 @@ public class StockCountServiceImpl implements StockCountService {
                 steps.add(new ApprovalStep(product, null, difference, line.getReason()));
             } else {
                 int left = -difference;
-                for (CountableLot lot : withoutExpiry.getOrDefault(product, List.of())) {
+                for (CountedLot lot : withoutExpiry.getOrDefault(product, List.of())) {
                     if (left == 0) {
                         break;
                     }
-                    int take = Math.min(left, lot.getQuantity());
+                    int take = Math.min(left, lot.getAvailable());
                     steps.add(new ApprovalStep(product, lot.getLotId(), -take, line.getReason()));
                     left -= take;
                 }

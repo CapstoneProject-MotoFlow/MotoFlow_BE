@@ -98,19 +98,6 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
             order by b.storeId, b.lotId""")
     List<ExpiringLotRow> findAvailableOf(Collection<Long> lotIds);
 
-    /** One lot holding AVAILABLE stock in a warehouse, as a stock count sees it. */
-    interface CountableLot {
-        Long getProductId();
-
-        Long getLotId();
-
-        LocalDate getExpiryDate();
-
-        LocalDate getReceivedDate();
-
-        int getQuantity();
-    }
-
     /** One lot of a part in a warehouse with its AVAILABLE and DAMAGED quantities, as a stock count sees it. */
     interface CountedLot {
         Long getProductId();
@@ -127,18 +114,10 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
     }
 
     /**
-     * UC-91, UC-93, UC-95: the lots of the listed parts holding AVAILABLE stock in the warehouse, by part, then earliest
-     * expiry (lots without expiry last), then oldest received (FIFO among the lots without expiry). Not locked.
+     * UC-91, UC-93, UC-95: the lots of the listed parts with AVAILABLE or DAMAGED stock in the warehouse, by part,
+     * then earliest expiry (lots without expiry last), then oldest received (FIFO among the lots without expiry).
+     * Not locked.
      */
-    @Query("""
-            select l.productId as productId, l.id as lotId, l.expiryDate as expiryDate,
-                   l.receivedDate as receivedDate, b.quantity as quantity
-            from LotBalance b, Lot l
-            where l.id = b.lotId and b.storeId = :storeId and l.productId in :productIds
-              and b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE and b.quantity > 0
-            order by l.productId, l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
-    List<CountableLot> findCountableLots(Long storeId, Collection<Long> productIds);
-
     @Query("""
             select l.productId as productId, l.id as lotId, l.expiryDate as expiryDate,
                    l.receivedDate as receivedDate,
