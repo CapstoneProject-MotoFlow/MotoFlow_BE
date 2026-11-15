@@ -160,11 +160,9 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         long receipt = arrive("bmlb", order);
         result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
-        assign("bmlb", "INSPECTION", receipt, destManager).andExpect(status().isOk());
-        result("bmlb", order, receipt, brake, 1, 0).andExpect(status().isOk());
+        assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
+        result("nvlb", order, receipt, brake, 1, 0).andExpect(status().isOk());
 
-        confirm("bmlb", order, receipt).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG32"));
         confirm("bmcg", order, receipt).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
         confirm("owner", order, receipt).andExpect(status().isForbidden());
@@ -172,18 +170,19 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.code").value("MSG175"));
         assertThat(stock(dest, brake, "available_qty")).isZero();
 
-        // The second Branch Manager sends it back; the recorder counts again and the second one confirms.
         mvc.perform(post(ORDERS + "/" + order + "/receipts/" + receipt + "/recount")
                         .header(HttpHeaders.AUTHORIZATION, signIn("bmlb2")).contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("reason", "Đếm lại thùng 2"))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_RECOUNT"));
-        assertThat(recipients("TRANSFER_RECEIPT_RECOUNT")).containsExactly(destManager.getId());
-        result("bmlb", order, receipt, brake, 2, 0).andExpect(status().isOk());
+        assertThat(recipients("TRANSFER_RECEIPT_RECOUNT")).containsExactly(destStaff.getId());
+        result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isOk());
         confirm("bmlb2", order, receipt).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isZero();
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT confirmed_by FROM goods_receipt_note WHERE id = ?", Long.class, receipt))
                 .isEqualTo(secondDestManager.getId());
-        result("bmlb", order, receipt, brake, 2, 0).andExpect(status().isForbidden());
+        result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isForbidden());
     }
 
     // ------------------------------------------------------------------------------------------------------------

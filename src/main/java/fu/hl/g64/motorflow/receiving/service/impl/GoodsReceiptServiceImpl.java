@@ -333,10 +333,6 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         if (receipt.getStatus() != GoodsReceiptNoteStatus.AWAITING_CONFIRMATION) {
             throw changed();
         }
-        // BR-26: the confirmer did not record the result (the task check covers a Branch Manager who took it).
-        if (Objects.equals(receipt.getRecordedBy(), manager.id())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG32");
-        }
         warehouseTasks.confirmResult(manager, TaskType.INSPECTION, id);
         LocalDateTime now = LocalDateTime.now(clock);
 

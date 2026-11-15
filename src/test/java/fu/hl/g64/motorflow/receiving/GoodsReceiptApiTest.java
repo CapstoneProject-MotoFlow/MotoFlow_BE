@@ -221,26 +221,21 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
     }
 
     @Test
-    void whoRecordedTheResultCannotConfirmIt() throws Exception {
+    void aBranchManagerWhoInspectedCanConfirmAndTheOwnerIsTold() throws Exception {
         long grn = receive("PX-001");
-        // The Branch Manager takes the inspection themself (MSG40), which needs another manager of the store to
-        // confirm it (review R-01).
-        createUser("bm3", Role.BRANCH_MANAGER, giaLam);
         assign(grn, manager);
         record(managerToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 0)))
                 .andExpect(status().isOk())
-                // A part left out did not come.
                 .andExpect(jsonPath("$.lines[*].deliveredQty", contains(10, 0)))
-                .andExpect(jsonPath("$.canConfirm").value(false))
+                .andExpect(jsonPath("$.canConfirm").value(true))
                 .andExpect(jsonPath("$.canReturnForRecount").value(true));
         confirm(managerToken, grn)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG32"))
-                .andExpect(jsonPath("$.message").value("Bạn đã ghi kết quả kiểm nhận của lượt này nên không thể tự xác "
-                        + "nhận. Lượt này cần người khác xác nhận."));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement", Long.class)).isZero();
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT status FROM goods_receipt_note WHERE id = ?", String.class, grn))
-                .isEqualTo("AWAITING_CONFIRMATION");
+                .isEqualTo("CONFIRMED");
     }
 
     @Test

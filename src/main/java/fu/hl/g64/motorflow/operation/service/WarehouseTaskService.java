@@ -10,9 +10,9 @@ import java.util.List;
 
 /**
  * UC-86 Assign Warehouse Staff and BR-32: only the person a Branch Manager gave the task to records its result.
- * That person is a Staff member of the store, or the Branch Manager themself (MSG40); either way someone else
- * confirms the result (BR-26). A Branch Manager takes an inspection, a dispatch preparation or a count themself only
- * while the store has another active Branch Manager to confirm it. A task belongs to a sales order (PICKING), a goods receipt note (INSPECTION),
+ * That person is a Staff member of the store, or the Branch Manager themself (MSG40). Staff's result is confirmed by
+ * another Branch Manager; a Branch Manager who took the task may confirm their own result and the Owner is told
+ * (BR-26, K1). A task belongs to a sales order (PICKING),
  * a transfer order (DISPATCH_PREPARATION), a stock count (COUNTING), or is the receiving of a purchase order's goods
  * (SUPPLIER_RECEIVING) or of a transfer order's goods (TRANSFER_RECEIVING): whoever holds a receiving task records the
  * goods receipt note and then inspects it.
@@ -32,8 +32,7 @@ public interface WarehouseTaskService {
 
     /**
      * UC-86 steps 3-6: gives the task to an active Staff member of the document's store and notifies them, or lets
-     * the Branch Manager take it themself (MSG40 is then in the response; MSG177 when the task is not picking and the
-     * store has no other active Branch Manager, who alone could confirm the result). Giving it to someone else before the
+     * the Branch Manager take it themself (MSG40 is then in the response). Giving it to someone else before the
      * result is in cancels the open task, keeps it in the history and notifies both people, except the Branch
      * Manager doing it. MSG39 once the result is in, MSG121 for a finished or cancelled document, MSG41 for a locked
      * Staff account or one at another store, MSG122 for any other account that is not Staff, MSG48 for an unknown
@@ -65,9 +64,9 @@ public interface WarehouseTaskService {
     long returnForRecount(TaskType type, long documentId);
 
     /**
-     * The result was confirmed: the task is done. BR-26: the confirmer must not be the person who recorded the
-     * result, which matters when a Branch Manager took the task themself (MSG32 for a goods receipt note, MSG124
-     * for the other documents). A result already confirmed can be confirmed again when the document changed without
+     * The result was confirmed: the task is done. BR-26: the picker never confirms their own result (MSG124); a
+     * Branch Manager who took another task may confirm it and the Owner is notified. A result already confirmed can be
+     * confirmed again when the document changed without
      * a new result (a sales order whose price or delivered quantities were revised, UC-55, UC-58): the same check
      * applies and the task stays done.
      */

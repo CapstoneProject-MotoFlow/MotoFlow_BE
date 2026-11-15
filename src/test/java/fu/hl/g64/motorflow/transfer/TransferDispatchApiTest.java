@@ -88,8 +88,6 @@ class TransferDispatchApiTest extends TransferFlowTestData {
         assign("bmcg", "DISPATCH_PREPARATION", order, sourceManager).andExpect(status().isOk());
         prepare("bmcg", order, brake, 4).andExpect(status().isOk());
 
-        dispatch("bmcg", order, brake, 4).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG124"));
         dispatch("owner", order, brake, 4).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
         dispatch("bmkt", order, brake, 4).andExpect(status().isForbidden())
@@ -97,9 +95,10 @@ class TransferDispatchApiTest extends TransferFlowTestData {
         dispatch("bmlb", order, brake, 4).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
         dispatch("nvcg", order, brake, 4).andExpect(status().isForbidden());
-        assertThat(stock(source, brake, "available_qty")).isEqualTo(10);
 
-        dispatch("bmcg2", order, brake, 4).andExpect(status().isOk());
+        dispatch("bmcg", order, brake, 4).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isEqualTo(1);
         assertThat(stock(source, brake, "available_qty")).isEqualTo(6);
     }
 

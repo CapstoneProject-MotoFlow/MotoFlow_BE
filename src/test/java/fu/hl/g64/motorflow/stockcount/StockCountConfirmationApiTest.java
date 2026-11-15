@@ -183,17 +183,26 @@ class StockCountConfirmationApiTest extends StockCountTestData {
     }
 
     @Test
-    void theCounterCannotConfirmTheirOwnResultButTheOtherManagerCan() throws Exception {
+    void aManagerWhoCountedCanConfirmAndTheOwnerIsTold() throws Exception {
         long count = count(StockCountStatus.COUNTING).line(oilLine(12, 12))
                 .task(manager, WarehouseTaskStatus.RESULT_SUBMITTED).insert();
 
         postAs(managerToken, url(count, "confirm"), confirmBody(List.of(), List.of()))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG124"));
-        assertStillCounting(count);
-        assertThat(countStatus(count)).isEqualTo("COUNTING");
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isEqualTo(1);
+        assertThat(taskStatuses(count)).containsExactly("DONE");
+    }
+
+    @Test
+    void whenStaffCountedTheOtherManagerConfirmsWithoutTellingTheOwner() throws Exception {
+        long count = count(StockCountStatus.COUNTING).line(oilLine(12, 12))
+                .task(staff, WarehouseTaskStatus.RESULT_SUBMITTED).insert();
 
         postAs(manager2Token, url(count, "confirm"), confirmBody(List.of(), List.of()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isZero();
         assertThat(taskStatuses(count)).containsExactly("DONE");
     }
 

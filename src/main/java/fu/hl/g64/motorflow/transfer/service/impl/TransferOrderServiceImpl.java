@@ -198,7 +198,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .filter(task -> task.getStatus() != WarehouseTaskStatus.CANCELLED).findFirst();
         boolean ready = open && preparer.filter(task -> task.getStatus() == WarehouseTaskStatus.RESULT_SUBMITTED)
                 .isPresent();
-        boolean canConfirm = ready && sourceManager && preparer.get().getAssignedTo() != user.id();
+        boolean canConfirm = ready && sourceManager;
         return new DispatchPreviewResponse(id, order.getStatus(), preparer.map(WarehouseTask::getAssignedTo).orElse(null),
                 ready, canConfirm, orderLines.stream().map(line -> {
                     Product part = parts.get(line.getProductId());
