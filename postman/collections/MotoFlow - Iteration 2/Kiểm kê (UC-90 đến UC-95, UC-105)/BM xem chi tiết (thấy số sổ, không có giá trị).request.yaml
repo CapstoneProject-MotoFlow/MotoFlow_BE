@@ -16,6 +16,6 @@ scripts:
       pm.collectionVariables.set('firstLineId', lines[0].id);
       pm.collectionVariables.set('firstLineCounted', lines[0].bookQty + 1);
       pm.collectionVariables.set('submitLines', JSON.stringify(lines.map((l, i) =>
-          ({ lineId: l.id, countedQty: i === 0 ? l.bookQty + 1 : l.bookQty }))));
+          ({ lineId: l.id, countedQty: i === 0 ? l.bookQty + 1 : l.bookQty, damagedQty: 0 }))));
     language: text/javascript
 order: 14000

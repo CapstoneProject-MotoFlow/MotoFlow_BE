@@ -147,7 +147,7 @@ class CustomerApiTest extends IntegrationTest {
         long tam = createdId(send(post("/api/v1/customers"), bmToken, customer("Cửa hàng Tâm", null)));
         jdbc.update("UPDATE customer SET credit_status = 'ELIGIBLE' WHERE id = ?", hung);
 
-        // At CH02: 1 000 000 + 50 000 corrected - verified 300 000 corrected down to 200 000 = 850 000.
+        // At CH02: 850 000 after payment and an applied adjustment; reversed allocation no longer counts in total debt (BR-71).
         long credit = receivable(hung, branch, order(branch, "COMPLETED", "CREDIT"), 1_000_000);
         long paid = payment("DEBT_PAYMENT", null, credit, 300_000, "VERIFIED");
         payment("DEBT_PAYMENT", null, credit, 100_000, "UNVERIFIED");
@@ -165,14 +165,14 @@ class CustomerApiTest extends IntegrationTest {
         send(get("/api/v1/customers"), bmToken)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[*].customerName", contains("Cửa hàng Tâm", "Garage Hùng", "Nguyễn Văn Bình")))
-                .andExpect(jsonPath("$.items[1].totalDebt").value(1_350_000))
-                .andExpect(jsonPath("$.items[1].debtAtOwnStore").value(850_000))
+                .andExpect(jsonPath("$.items[1].totalDebt").value(1_250_000))
+                .andExpect(jsonPath("$.items[1].debtAtOwnStore").value(750_000))
                 .andExpect(jsonPath("$.items[1].creditStatus").value("ELIGIBLE"))
                 .andExpect(jsonPath("$.items[2].totalDebt").value(0))
                 .andExpect(jsonPath("$.items[0].totalDebt").value(0));
         send(get("/api/v1/customers?q=garage"), ownerToken)
                 .andExpect(jsonPath("$.items[*].id", contains((int) hung)))
-                .andExpect(jsonPath("$.items[0].totalDebt").value(1_350_000))
+                .andExpect(jsonPath("$.items[0].totalDebt").value(1_250_000))
                 .andExpect(jsonPath("$.items[0].debtAtOwnStore").doesNotExist());
         send(get("/api/v1/customers?q=0912345678"), bmToken).andExpect(jsonPath("$.items[*].id", contains((int) hung)));
         send(get("/api/v1/customers?q=NGUYỄN"), bmToken).andExpect(jsonPath("$.items[*].id", contains((int) binh)));
