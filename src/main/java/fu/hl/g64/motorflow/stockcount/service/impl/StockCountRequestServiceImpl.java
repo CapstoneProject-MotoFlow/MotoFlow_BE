@@ -94,6 +94,7 @@ public class StockCountRequestServiceImpl implements StockCountRequestService {
                     && note == null;
             case AREA -> productIds.isEmpty() && note != null
                     && stockBalances.findStorageAreas(store.getId()).contains(note);
+            case CATEGORY -> false;
         };
         if (!valid) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");

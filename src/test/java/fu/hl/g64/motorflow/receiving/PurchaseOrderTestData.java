@@ -230,8 +230,10 @@ abstract class PurchaseOrderTestData extends ApiTestUsers {
     }
 
     protected void inspection(long receipt, UserAccount assignee, String status, LocalDateTime assignedAt) {
-        jdbc.update("INSERT INTO warehouse_task (task_type, goods_receipt_note_id, assigned_to, assigned_by, assigned_at, "
-                + "status, result_submitted_at) VALUES ('INSPECTION', ?, ?, ?, ?, ?, ?)", receipt, assignee.getId(),
+        jdbc.update("INSERT INTO warehouse_task (task_type, goods_receipt_note_id, store_id, assigned_to, assigned_by, "
+                + "assigned_at, status, result_submitted_at) VALUES ('INSPECTION', ?, "
+                + "(SELECT p.store_id FROM goods_receipt_note g JOIN purchase_order p ON p.id = g.purchase_order_id "
+                + "WHERE g.id = ?), ?, ?, ?, ?, ?)", receipt, receipt, assignee.getId(),
                 manager.getId(), assignedAt, status, status.equals("ASSIGNED") ? null : assignedAt.plusMinutes(30));
     }
 

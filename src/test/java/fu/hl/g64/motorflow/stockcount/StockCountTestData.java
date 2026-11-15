@@ -346,9 +346,10 @@ public abstract class StockCountTestData extends ApiTestUsers {
             if (taskAssignee != null) {
                 boolean submitted = taskStatus == WarehouseTaskStatus.RESULT_SUBMITTED
                         || taskStatus == WarehouseTaskStatus.DONE;
-                jdbc.update("INSERT INTO warehouse_task (task_type, stock_count_id, assigned_to, assigned_by, "
-                                + "assigned_at, status, result_submitted_at) VALUES ('COUNTING', ?, ?, ?, ?, ?, ?)",
-                        count, taskAssignee, manager.getId(), now, taskStatus.name(), submitted ? now : null);
+                jdbc.update("INSERT INTO warehouse_task (task_type, stock_count_id, store_id, assigned_to, assigned_by, "
+                                + "assigned_at, status, result_submitted_at) VALUES ('COUNTING', ?, "
+                                + "(SELECT store_id FROM stock_count WHERE id = ?), ?, ?, ?, ?, ?)",
+                        count, count, taskAssignee, manager.getId(), now, taskStatus.name(), submitted ? now : null);
             }
             return count;
         }

@@ -129,8 +129,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             }
         });
         try {
-            tasks.saveAndFlush(WarehouseTask.assign(type, documentId, assignee.getId(), manager.id(),
-                    LocalDateTime.now(clock)));
+            tasks.saveAndFlush(WarehouseTask.assign(type, documentId, document.storeId(), assignee.getId(),
+                    manager.id(), LocalDateTime.now(clock)));
         } catch (DataIntegrityViolationException e) {
             // Another Branch Manager gave the document to someone between our read and our insert.
             throw new BusinessException(HttpStatus.CONFLICT, "MSG123");
@@ -219,7 +219,7 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         receiving.finishReceiving();
         // The new receipt has no task yet; the Branch Manager who gave the receiving gave its inspection too. The
         // receiver knows, so nobody is notified.
-        tasks.saveAndFlush(WarehouseTask.assign(TaskType.INSPECTION, receiptId, receiver.id(),
+        tasks.saveAndFlush(WarehouseTask.assign(TaskType.INSPECTION, receiptId, receiving.getStoreId(), receiver.id(),
                 receiving.getAssignedBy(), LocalDateTime.now(clock)));
     }
 

@@ -78,6 +78,9 @@ public class GoodsReceiptNote {
     @Column(name = "excess_decided_at")
     private LocalDateTime excessDecidedAt;
 
+    @Column(name = "inspection_note", length = 500)
+    private String inspectionNote;
+
     /**
      * UC-106: a supplier delivery that arrived with its delivery document, waiting for a Staff member to inspect it.
      * Stock does not change until the Branch Manager confirms it (UC-44).

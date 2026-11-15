@@ -63,6 +63,12 @@ public class TransferOrder {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
 
+    @Column(name = "deliverer_name", length = 100)
+    private String delivererName;
+
+    @Column(name = "vehicle_plate_no", length = 20)
+    private String vehiclePlateNo;
+
     /** UC-71: waits for the source warehouse to prepare and dispatch the goods. */
     public static TransferOrder create(Long replenishmentRequestId, Long sourceStoreId, Long destStoreId, Long createdBy,
                                        LocalDateTime now) {

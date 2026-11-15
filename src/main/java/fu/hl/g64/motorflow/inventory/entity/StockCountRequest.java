@@ -40,6 +40,9 @@ public class StockCountRequest {
     @Column(name = "scope_note")
     private String scopeNote;
 
+    @Column(name = "part_category_id")
+    private Long partCategoryId;
+
     @Column(nullable = false)
     private String reason;
 

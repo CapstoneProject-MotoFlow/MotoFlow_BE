@@ -39,6 +39,15 @@ public class StockCountLine {
     @Column(name = "book_qty", nullable = false)
     private int bookQty;
 
+    @Column(name = "book_damaged_qty", nullable = false)
+    private int bookDamagedQty;
+
+    @Column(name = "damaged_qty", nullable = false)
+    private int damagedQty;
+
+    @Column(name = "previous_damaged_qty")
+    private Integer previousDamagedQty;
+
     @Column(name = "counted_qty")
     private Integer countedQty;
 

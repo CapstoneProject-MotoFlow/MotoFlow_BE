@@ -178,6 +178,7 @@ public class StockCountServiceImpl implements StockCountService {
             case AREA -> !productIds.isEmpty() || scopeNote == null
                     || !stockBalances.findStorageAreas(storeId).contains(scopeNote);
             case PRODUCTS -> productIds.isEmpty() || new HashSet<>(productIds).size() != productIds.size();
+            case CATEGORY -> true;
         };
         if (bad) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");

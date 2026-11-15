@@ -56,6 +56,9 @@ public class StockCount {
     @Column(name = "scope_note")
     private String scopeNote;
 
+    @Column(name = "part_category_id")
+    private Long partCategoryId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private StockCountStatus status;

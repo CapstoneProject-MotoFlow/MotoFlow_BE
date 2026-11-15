@@ -606,17 +606,31 @@ BEGIN
     WHERE b.store_id = s_hd AND b.stock_status = 'AVAILABLE' AND c.category_name = 'Dầu nhớt';
 
     -- ===== Warehouse tasks =====
-    INSERT INTO warehouse_task (task_type, goods_receipt_note_id, assigned_to, assigned_by, assigned_at, status, result_submitted_at) VALUES
-        ('INSPECTION', gr1, u_kho1, u_bm_kho, pg_temp.ts(0.15), 'DONE', pg_temp.ts(0.16)),
-        ('INSPECTION', gr2, u_kho2, u_bm_kho, pg_temp.ts(0.4), 'DONE', pg_temp.ts(0.41)),
-        ('INSPECTION', gr3, u_kho1, u_bm_kho, pg_temp.ts(0.96), 'ASSIGNED', NULL);
-    INSERT INTO warehouse_task (task_type, transfer_order_id, assigned_to, assigned_by, assigned_at, status, result_submitted_at) VALUES
-        ('DISPATCH_PREPARATION', tr1, u_kho2, u_bm_kho, pg_temp.ts(0.22), 'DONE', pg_temp.ts(0.23)),
-        ('DISPATCH_PREPARATION', tr3, u_kho2, u_bm_kho, pg_temp.ts(0.86), 'ASSIGNED', NULL);
-    INSERT INTO warehouse_task (task_type, sales_order_id, assigned_to, assigned_by, assigned_at, status) VALUES
-        ('PICKING', so4, u_hd1, u_bm_hd, pg_temp.ts(0.98), 'ASSIGNED');
-    INSERT INTO warehouse_task (task_type, stock_count_id, assigned_to, assigned_by, assigned_at, status) VALUES
-        ('COUNTING', sc_cycle, u_hd2, u_bm_hd, pg_temp.ts(0.96), 'ASSIGNED');
+    INSERT INTO warehouse_task (task_type, goods_receipt_note_id, store_id, assigned_to, assigned_by, assigned_at, status, result_submitted_at) VALUES
+        ('INSPECTION', gr1, (SELECT CASE g.receipt_type WHEN 'SUPPLIER_DELIVERY' THEN p.store_id
+            WHEN 'TRANSFER_IN' THEN o.dest_store_id ELSE o.source_store_id END
+            FROM goods_receipt_note g LEFT JOIN purchase_order p ON p.id = g.purchase_order_id
+            LEFT JOIN transfer_order o ON o.id = g.transfer_order_id WHERE g.id = gr1),
+         u_kho1, u_bm_kho, pg_temp.ts(0.15), 'DONE', pg_temp.ts(0.16)),
+        ('INSPECTION', gr2, (SELECT CASE g.receipt_type WHEN 'SUPPLIER_DELIVERY' THEN p.store_id
+            WHEN 'TRANSFER_IN' THEN o.dest_store_id ELSE o.source_store_id END
+            FROM goods_receipt_note g LEFT JOIN purchase_order p ON p.id = g.purchase_order_id
+            LEFT JOIN transfer_order o ON o.id = g.transfer_order_id WHERE g.id = gr2),
+         u_kho2, u_bm_kho, pg_temp.ts(0.4), 'DONE', pg_temp.ts(0.41)),
+        ('INSPECTION', gr3, (SELECT CASE g.receipt_type WHEN 'SUPPLIER_DELIVERY' THEN p.store_id
+            WHEN 'TRANSFER_IN' THEN o.dest_store_id ELSE o.source_store_id END
+            FROM goods_receipt_note g LEFT JOIN purchase_order p ON p.id = g.purchase_order_id
+            LEFT JOIN transfer_order o ON o.id = g.transfer_order_id WHERE g.id = gr3),
+         u_kho1, u_bm_kho, pg_temp.ts(0.96), 'ASSIGNED', NULL);
+    INSERT INTO warehouse_task (task_type, transfer_order_id, store_id, assigned_to, assigned_by, assigned_at, status, result_submitted_at) VALUES
+        ('DISPATCH_PREPARATION', tr1, (SELECT source_store_id FROM transfer_order WHERE id = tr1),
+         u_kho2, u_bm_kho, pg_temp.ts(0.22), 'DONE', pg_temp.ts(0.23)),
+        ('DISPATCH_PREPARATION', tr3, (SELECT source_store_id FROM transfer_order WHERE id = tr3),
+         u_kho2, u_bm_kho, pg_temp.ts(0.86), 'ASSIGNED', NULL);
+    INSERT INTO warehouse_task (task_type, sales_order_id, store_id, assigned_to, assigned_by, assigned_at, status) VALUES
+        ('PICKING', so4, (SELECT store_id FROM sales_order WHERE id = so4), u_hd1, u_bm_hd, pg_temp.ts(0.98), 'ASSIGNED');
+    INSERT INTO warehouse_task (task_type, stock_count_id, store_id, assigned_to, assigned_by, assigned_at, status) VALUES
+        ('COUNTING', sc_cycle, (SELECT store_id FROM stock_count WHERE id = sc_cycle), u_hd2, u_bm_hd, pg_temp.ts(0.96), 'ASSIGNED');
 
     -- ===== Notifications =====
     INSERT INTO notification (recipient_id, notification_type, message, ref_type, ref_id, is_read, created_at, read_at) VALUES

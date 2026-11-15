@@ -457,11 +457,13 @@ class WarehouseTaskApiTest extends ApiTestUsers {
             // The other manager's assignment is written but not committed yet when ours arrives.
             otherManager.setAutoCommit(false);
             try (PreparedStatement insert = otherManager.prepareStatement("INSERT INTO warehouse_task (task_type, "
-                    + "sales_order_id, assigned_to, assigned_by, assigned_at) VALUES ('PICKING', ?, ?, ?, ?)")) {
+                    + "sales_order_id, store_id, assigned_to, assigned_by, assigned_at) "
+                    + "VALUES ('PICKING', ?, (SELECT store_id FROM sales_order WHERE id = ?), ?, ?, ?)")) {
                 insert.setLong(1, order);
-                insert.setLong(2, staff2.getId());
-                insert.setLong(3, peer.getId());
-                insert.setObject(4, LocalDateTime.now(clock));
+                insert.setLong(2, order);
+                insert.setLong(3, staff2.getId());
+                insert.setLong(4, peer.getId());
+                insert.setObject(5, LocalDateTime.now(clock));
                 insert.executeUpdate();
             }
             Future<MvcResult> ours = executor.submit(() ->

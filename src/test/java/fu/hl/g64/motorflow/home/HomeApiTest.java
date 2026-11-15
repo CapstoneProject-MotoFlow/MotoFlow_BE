@@ -285,9 +285,33 @@ class HomeApiTest extends IntegrationTest {
     }
 
     private void task(String type, String documentColumn, long documentId, UserAccount staff, String status) {
-        jdbc.update("INSERT INTO warehouse_task (task_type, " + documentColumn + ", assigned_to, assigned_by, assigned_at, "
-                + "status) VALUES (?, ?, ?, ?, ?, ?)", type, documentId, staff.getId(), owner.getId(),
+        jdbc.update("INSERT INTO warehouse_task (task_type, " + documentColumn + ", store_id, assigned_to, assigned_by, "
+                + "assigned_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)", type, documentId,
+                taskStoreId(type, documentColumn, documentId), staff.getId(), owner.getId(),
                 LocalDateTime.now(clock), status);
+    }
+
+    private long taskStoreId(String type, String documentColumn, long documentId) {
+        return switch (documentColumn) {
+            case "sales_order_id" ->
+                    jdbc.queryForObject("SELECT store_id FROM sales_order WHERE id = ?", Long.class, documentId);
+            case "transfer_order_id" -> {
+                String sql = "DISPATCH_PREPARATION".equals(type)
+                        ? "SELECT source_store_id FROM transfer_order WHERE id = ?"
+                        : "SELECT dest_store_id FROM transfer_order WHERE id = ?";
+                yield jdbc.queryForObject(sql, Long.class, documentId);
+            }
+            case "goods_receipt_note_id" -> jdbc.queryForObject("""
+                    SELECT CASE g.receipt_type
+                        WHEN 'SUPPLIER_DELIVERY' THEN p.store_id
+                        WHEN 'TRANSFER_IN' THEN o.dest_store_id
+                        ELSE o.source_store_id END
+                    FROM goods_receipt_note g
+                    LEFT JOIN purchase_order p ON p.id = g.purchase_order_id
+                    LEFT JOIN transfer_order o ON o.id = g.transfer_order_id
+                    WHERE g.id = ?""", Long.class, documentId);
+            default -> throw new IllegalArgumentException(documentColumn);
+        };
     }
 
     private void adjustment(long storeId, String status) {
