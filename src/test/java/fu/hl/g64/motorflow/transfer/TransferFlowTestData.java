@@ -18,8 +18,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -123,12 +125,24 @@ abstract class TransferFlowTestData extends ApiTestUsers {
 
     /** UC-74: [productId, dispatchedQty, ...]. */
     protected ResultActions dispatch(String manager, long order, long... lines) throws Exception {
+        return dispatch(manager, order, Map.of(), lines);
+    }
+
+    protected ResultActions dispatch(String manager, long order, Map<String, Object> handover, long... lines)
+            throws Exception {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (int i = 0; i < lines.length; i += 2) {
             rows.add(Map.of("productId", lines[i], "dispatchedQty", lines[i + 1]));
         }
+        Map<String, Object> body = new LinkedHashMap<>(handover);
+        body.put("lines", rows);
         return mvc.perform(post(ORDERS + "/" + order + "/dispatch").header(HttpHeaders.AUTHORIZATION, signIn(manager))
-                .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("lines", rows))));
+                .contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    protected static Map<String, Object> uploaded(String fileName) {
+        return Map.of("storageKey", "motoflow/attachments/" + UUID.randomUUID(), "fileName", fileName,
+                "contentType", "image/jpeg", "fileSize", 100_000);
     }
 
     /** Created, prepared by source Staff and dispatched by the source Branch Manager: [productId, quantity, ...]. */

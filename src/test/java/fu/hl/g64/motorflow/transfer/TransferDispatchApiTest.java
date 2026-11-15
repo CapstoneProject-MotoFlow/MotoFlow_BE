@@ -15,6 +15,35 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class TransferDispatchApiTest extends TransferFlowTestData {
 
     @Test
+    void dispatchMayRecordHandOverDetailsAndPhotos() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long order = createOrder(brake, 2);
+        assign("bmcg", "DISPATCH_PREPARATION", order, sourceStaff).andExpect(status().isOk());
+        prepare("nvcg", order, brake, 2).andExpect(status().isOk());
+
+        Map<String, Object> handover = Map.of("delivererName", "  Anh Hùng ", "vehiclePlateNo", "29C-678.90",
+                "evidence", List.of(uploaded("ban-giao.jpg")));
+        dispatch("bmcg", order, handover, brake, 2).andExpect(status().isOk())
+                .andExpect(jsonPath("$.delivererName").value("Anh Hùng"))
+                .andExpect(jsonPath("$.vehiclePlateNo").value("29C-678.90"))
+                .andExpect(jsonPath("$.attachments.length()").value(1))
+                .andExpect(jsonPath("$.attachments[0].fileName").value("ban-giao.jpg"));
+        assertThat(jdbc.queryForObject("SELECT deliverer_name FROM transfer_order WHERE id = ?", String.class, order))
+                .isEqualTo("Anh Hùng");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM attachment WHERE owner_type = 'TRANSFER_ORDER' "
+                + "AND owner_id = ?", Long.class, order)).isEqualTo(1);
+
+        lot(source, chain, 5, 50_000, null, "B");
+        long bare = createOrder(chain, 1);
+        assign("bmcg", "DISPATCH_PREPARATION", bare, sourceStaff).andExpect(status().isOk());
+        prepare("nvcg", bare, chain, 1).andExpect(status().isOk());
+        dispatch("bmcg", bare, chain, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.delivererName").isEmpty())
+                .andExpect(jsonPath("$.vehiclePlateNo").isEmpty())
+                .andExpect(jsonPath("$.attachments").isEmpty());
+    }
+
+    @Test
     void dispatchMovesPreparedLotsIntoTransitFefoSkippingExpired() throws Exception {
         long expired = lot(source, brake, 5, 90_000, today.minusDays(1), "HET");
         long soon = lot(source, brake, 3, 100_000, today.plusDays(10), "SOM");

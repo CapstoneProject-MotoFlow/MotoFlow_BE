@@ -481,13 +481,18 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
     private TransferReceiptResponse view(GoodsReceiptNote receipt) {
         List<GoodsReceiptNoteLine> lines = receiptLines.findByGoodsReceiptNoteIdOrderByIdAsc(receipt.getId());
         Map<Long, Product> parts = parts(lines);
+        TransferOrder transfer = orders.findById(receipt.getTransferOrderId()).orElseThrow();
+        String delivererName = receipt.getReceiptType() == ReceiptType.TRANSFER_IN ? transfer.getDelivererName()
+                : receipt.getDelivererName();
+        String vehiclePlateNo = receipt.getReceiptType() == ReceiptType.TRANSFER_IN ? transfer.getVehiclePlateNo()
+                : receipt.getVehiclePlateNo();
         Long createdBy = auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(RECEIPT_ENTITY,
                 receipt.getId(), List.of(RECEIPT_CREATED)).stream().findFirst().map(AuditLog::getActorId).orElse(null);
         String createdByName = createdBy == null ? null
                 : users.findById(createdBy).map(UserAccount::getFullName).orElse(null);
         return new TransferReceiptResponse(receipt.getId(), receipt.getTransferOrderId(), receipt.getReceiptType(),
                 receipt.getStatus(), receipt.getDeliveryDocumentNo(), receipt.getDeliveryDocumentDate(),
-                receipt.getDelivererName(), receipt.getVehiclePlateNo(), receipt.getArrivedAt(), createdBy,
+                delivererName, vehiclePlateNo, receipt.getArrivedAt(), createdBy,
                 createdByName, receipt.getRecordedBy(), receipt.getSubmittedAt(), receipt.getInspectionNote(),
                 receipt.getRecountReason(), receipt.getConfirmedBy(), receipt.getConfirmedAt(),
                 lines.stream().map(line -> {

@@ -250,7 +250,9 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             row.put("dispatched_qty", quantity);
             recorded.add(row);
         }
-        order.dispatch(user.id(), now);
+        order.dispatch(user.id(), text(body.delivererName()), text(body.vehiclePlateNo()), now);
+        attachments.attach(OwnerType.TRANSFER_ORDER, id, body.evidence() == null ? List.of() : body.evidence(),
+                user.id());
         auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_DISPATCHED", user.id(), null, null,
                 Map.of("lines", recorded), now));
         String sourceName = stores.findById(order.getSourceStoreId()).orElseThrow().getStoreName();
@@ -498,8 +500,9 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 order.getSourceStoreId(), storeNames.get(order.getSourceStoreId()), order.getDestStoreId(),
                 storeNames.get(order.getDestStoreId()),
                 person(order.getCreatedBy(), names), order.getCreatedAt(),
-                person(order.getDispatchedBy(), names), order.getDispatchedAt(),
-                person(order.getExtraDispatchConfirmedBy(), names), order.getExtraDispatchConfirmedAt(),
+                person(order.getDispatchedBy(), names), order.getDispatchedAt(), order.getDelivererName(),
+                order.getVehiclePlateNo(), person(order.getExtraDispatchConfirmedBy(), names),
+                order.getExtraDispatchConfirmedAt(),
                 person(order.getClosedBy(), names), order.getClosedAt(),
                 orderLines.stream().map(line -> {
                     Product part = parts.get(line.getProductId());
@@ -606,6 +609,10 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             }
         }
         return request;
+    }
+
+    private static String text(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
     }
 
     /** UC-48: available minus expired; the source's stock is only checked here, never reserved. */
