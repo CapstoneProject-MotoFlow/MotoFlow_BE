@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.operation.service.impl;
 
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.AccountStatus;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
@@ -424,10 +425,10 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             case INSPECTION -> "kiểm nhận hàng cho phiếu nhận hàng";
             case DISPATCH_PREPARATION -> "chuẩn bị hàng xuất cho phiếu chuyển kho";
             case COUNTING -> "đếm hàng cho phiếu kiểm kê";
-            case SUPPLIER_RECEIVING -> "nhận hàng và lập phiếu nhập cho PO";
+            case SUPPLIER_RECEIVING -> "nhận hàng và lập phiếu nhập cho đơn nhập hàng";
             case TRANSFER_RECEIVING -> "nhận hàng điều chuyển cho lệnh";
         };
-        return work + " #" + documentId;
+        return work + " " + (type == TaskType.SUPPLIER_RECEIVING ? PurchaseOrderCode.of(documentId) : "#" + documentId);
     }
 
     /** notification.ref_type of the document, so that opening the notification opens it. */

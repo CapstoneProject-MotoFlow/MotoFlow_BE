@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.receiving.service.impl;
 
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
@@ -315,8 +316,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         warehouseTasks.submitResult(user, TaskType.INSPECTION, id);
         attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, id, orEmpty(request.evidence()), user.id());
         notifications.notifyStoreManagers(order.getStoreId(), "GOODS_RECEIPT_SUBMITTED",
-                "Phiếu nhận hàng %s của yêu cầu nhập hàng #%d đã có kết quả kiểm nhận và đang chờ xác nhận."
-                        .formatted(label(receipt), order.getId()), REF_TYPE, id);
+                "Phiếu nhận hàng %s của đơn nhập hàng %s đã có kết quả kiểm nhận và đang chờ xác nhận."
+                        .formatted(label(receipt), PurchaseOrderCode.of(order.getId())), REF_TYPE, id);
         return views.detail(user, receipt, order);
     }
 
@@ -413,13 +414,13 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         }
         if (anyExcess) {
             notifications.notifyOwners("EXCESS_AWAITING_DECISION",
-                    "Phiếu nhận hàng %s của yêu cầu nhập hàng #%d có hàng giao thừa đang chờ quyết định nhận hoặc không nhận."
-                            .formatted(label(receipt), order.getId()), REF_TYPE, id);
+                    "Phiếu nhận hàng %s của đơn nhập hàng %s có hàng giao thừa đang chờ quyết định nhận hoặc không nhận."
+                            .formatted(label(receipt), PurchaseOrderCode.of(order.getId())), REF_TYPE, id);
         }
         if (!opened.isEmpty()) {
             notifications.notifyOwners("SUPPLIER_DISCREPANCY_OPENED",
-                    "Phiếu nhận hàng %s của yêu cầu nhập hàng #%d có %d phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà cung cấp."
-                            .formatted(label(receipt), order.getId(), opened.size()), REF_TYPE, id);
+                    "Phiếu nhận hàng %s của đơn nhập hàng %s có %d phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà cung cấp."
+                            .formatted(label(receipt), PurchaseOrderCode.of(order.getId()), opened.size()), REF_TYPE, id);
         }
         return views.detail(manager, receipt, order);
     }
