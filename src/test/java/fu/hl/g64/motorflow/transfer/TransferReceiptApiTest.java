@@ -103,6 +103,55 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
     }
 
+    /** Review FE PR #44 R-01: dispatched 10, passed 7, wrong item 1, damaged 1. */
+    @Test
+    void aWrongItemIsRecordedButTheExpectedPartStaysUnresolved() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 10);
+        long receipt = arrive("bmlb", order);
+        assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
+
+        mvc.perform(put(ORDERS + "/" + order + "/receipts/" + receipt + "/result")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("nvlb")).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("inspectionNote", "1 hộp bugi giao nhầm, 1 má phanh nứt.",
+                                "lines", List.of(Map.of("productId", brake, "passedQty", 7, "wrongItemQty", 1,
+                                        "damagedQty", 1))))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].deliveredQty").value(9))
+                .andExpect(jsonPath("$.lines[0].passedQty").value(7))
+                .andExpect(jsonPath("$.lines[0].wrongItemQty").value(1))
+                .andExpect(jsonPath("$.lines[0].damagedQty").value(1));
+        assertThat(jdbc.queryForMap("SELECT delivered_qty, wrong_item_qty FROM goods_receipt_note_line "
+                + "WHERE goods_receipt_note_id = ?", receipt))
+                .containsEntry("delivered_qty", 9).containsEntry("wrong_item_qty", 1);
+        receiptView("nvlb", order, receipt).andExpect(jsonPath("$.lines[0].wrongItemQty").value(1));
+
+        confirm("bmlb", order, receipt).andExpect(status().isOk());
+
+        // Only the part itself leaves transit; the wrong item is another part, so 2 brakes stay unresolved.
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(7);
+        assertThat(stock(dest, brake, "damaged_qty")).isEqualTo(1);
+        assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(2);
+        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].receivedQty").value(8))
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(2))
+                .andExpect(jsonPath("$.discrepancies[0].shortQty").value(2));
+    }
+
+    /** A wrong item is a discrepancy, so the result needs an inspection note (G06). */
+    @Test
+    void aWrongItemNeedsAnInspectionNote() throws Exception {
+        lot(source, brake, 5, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 5);
+        long receipt = arrive("bmlb", order);
+        assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
+
+        mvc.perform(put(ORDERS + "/" + order + "/receipts/" + receipt + "/result")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("nvlb")).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("lines", List.of(Map.of("productId", brake, "passedQty", 4,
+                                "wrongItemQty", 1, "damagedQty", 0))))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG265"));
+    }
+
     @Test
     void excessStaysOutOfStockAndTheSourceIsTold() throws Exception {
         lot(source, brake, 10, 100_000, null, "A");
