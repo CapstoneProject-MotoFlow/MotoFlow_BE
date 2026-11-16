@@ -149,6 +149,10 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
         list(ownerToken, "q", "ncc-hd", "view", "ALL")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, cancelledOrder))));
+        list(ownerToken, "q", dnh(receivingOrder))
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
+        list(ownerToken, "q", "dnh-" + receivingOrder)
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
         list(ownerToken, "q", "#999999")
                 .andExpect(jsonPath("$.items", hasSize(0)));
     }
@@ -352,9 +356,11 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
         jdbc.update("UPDATE warehouse_task SET status = 'DONE' WHERE purchase_order_id = ?", receivingOrder);
 
         list(ownerToken, "view", "AWAITING_RECEIVING_ASSIGNMENT").andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, lateOrder))));
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, lateOrder))))
+                .andExpect(jsonPath("$.totalItems").value(2));
         list(managerToken, "view", "AWAITING_RECEIVING_ASSIGNMENT")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))))
+                .andExpect(jsonPath("$.totalItems").value(1))
                 .andExpect(jsonPath("$.items[*].supplierName", contains("Honda Việt Nam")));
     }
 }

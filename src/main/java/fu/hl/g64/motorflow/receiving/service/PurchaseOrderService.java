@@ -9,7 +9,7 @@ import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderUpdateRequest;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 
 /**
- * Purchase Orders (PO), shown to users as "yêu cầu nhập hàng" (Owner screens: "phiếu nhập hàng"). Owner creates,
+ * Purchase Orders (PO), shown to users as "đơn nhập hàng (DNH-xxxx)". Owner creates,
  * changes and cancels them; the Branch Manager of the receiving warehouse follows them. Only Owner sees purchase
  * prices and values (BR-72).
  */
