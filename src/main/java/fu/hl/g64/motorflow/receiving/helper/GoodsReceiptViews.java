@@ -147,9 +147,7 @@ public class GoodsReceiptViews {
         boolean awaitingConfirmation = receipt.getStatus() == GoodsReceiptNoteStatus.AWAITING_CONFIRMATION;
         boolean holdsTask = task != null && task.getAssignedTo() == user.id();
         boolean canRecord = receipt.awaitsResult() && holdsTask && task.getStatus() == WarehouseTaskStatus.ASSIGNED;
-        // BR-26: whoever recorded the result, a Branch Manager who took the inspection included, cannot confirm it.
-        boolean canConfirm = manager && awaitingConfirmation && !holdsTask
-                && !Objects.equals(receipt.getRecordedBy(), user.id());
+        boolean canConfirm = manager && awaitingConfirmation;
         boolean canDecideExcess = owner && confirmed
                 && lines.stream().anyMatch(line -> line.getExcessDecision() == ExcessDecision.AWAITING_OWNER);
 
@@ -160,7 +158,8 @@ public class GoodsReceiptViews {
                 receipt.getArrivedAt(), task == null ? null : new Assignee(task.getAssignedTo(),
                 names.get(task.getAssignedTo()), task.getStatus(), task.getAssignedAt()),
                 receipt.getRecordedBy(), names.get(receipt.getRecordedBy()), receipt.getSubmittedAt(),
-                receipt.getRecountReason(), receipt.getConfirmedBy(), names.get(receipt.getConfirmedBy()),
+                receipt.getInspectionNote(), receipt.getRecountReason(), receipt.getConfirmedBy(),
+                names.get(receipt.getConfirmedBy()),
                 receipt.getConfirmedAt(), receipt.getExcessDecidedBy(), names.get(receipt.getExcessDecidedBy()),
                 receipt.getExcessDecidedAt(), openCases, canRecord, canConfirm, manager && awaitingConfirmation,
                 canDecideExcess, rows, attachments.list(OwnerType.GOODS_RECEIPT_NOTE, id));

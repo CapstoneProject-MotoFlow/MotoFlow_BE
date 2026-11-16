@@ -44,6 +44,7 @@ import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptSummary;
 import fu.hl.g64.motorflow.receiving.dto.InspectionResultRequest;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNoteLine;
+import fu.hl.g64.motorflow.receiving.helper.InspectionNoteRules;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrderLine;
 import fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision;
@@ -312,7 +313,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                         text(in.manufacturerLotNo()), in.manufactureDate(), in.expiryDate());
             }
         }
-        receipt.submitResult(user.id(), request.arrivedAt(), now);
+        InspectionNoteRules.requireWhenNeeded(lines, request.inspectionNote());
+        receipt.submitResult(user.id(), request.arrivedAt(), text(request.inspectionNote()), now);
         warehouseTasks.submitResult(user, TaskType.INSPECTION, id);
         attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, id, orEmpty(request.evidence()), user.id());
         notifications.notifyStoreManagers(order.getStoreId(), "GOODS_RECEIPT_SUBMITTED",
@@ -333,10 +335,6 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         GoodsReceiptNote receipt = lockReceipt(id);
         if (receipt.getStatus() != GoodsReceiptNoteStatus.AWAITING_CONFIRMATION) {
             throw changed();
-        }
-        // BR-26: the confirmer did not record the result (the task check covers a Branch Manager who took it).
-        if (Objects.equals(receipt.getRecordedBy(), manager.id())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG32");
         }
         warehouseTasks.confirmResult(manager, TaskType.INSPECTION, id);
         LocalDateTime now = LocalDateTime.now(clock);

@@ -71,9 +71,15 @@ public abstract class StockCountTestData extends ApiTestUsers {
     /** October 2026, OPEN. */
     protected long period;
 
+    /** Root category A: {@link #oil} and {@link #pad}; child A1: {@link #filter}; separate B: {@link #plug}. */
+    protected long categoryA;
+    protected long categoryA1;
+    protected long categoryB;
+
     protected long oil;
     protected long filter;
     protected long pad;
+    protected long plug;
     protected long oilLot1;
     protected long oilLot2;
     protected long filterLotA;
@@ -99,11 +105,16 @@ public abstract class StockCountTestData extends ApiTestUsers {
         signInAll();
 
         period = period(TODAY, true);
-        long category = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Phụ tùng', 'MOTORCYCLE') "
+        categoryA = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Nhóm A', 'MOTORCYCLE') "
                 + "RETURNING id");
-        oil = part("NHOT-01", "Nhớt 10W40", category, 85_000);
-        filter = part("LOC-01", "Lọc gió", category, 50_000);
-        pad = part("MA-PHANH-01", "Má phanh trước", category, null);
+        categoryA1 = id("INSERT INTO part_category (category_name, vehicle_type, parent_id) "
+                + "VALUES ('Nhóm A1', 'MOTORCYCLE', ?) RETURNING id", categoryA);
+        categoryB = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Nhóm B', 'MOTORCYCLE') "
+                + "RETURNING id");
+        oil = part("NHOT-01", "Nhớt 10W40", categoryA, 85_000);
+        filter = part("LOC-01", "Lọc gió", categoryA1, 50_000);
+        pad = part("MA-PHANH-01", "Má phanh trước", categoryA, null);
+        plug = part("BUGI-01", "Bugi", categoryB, 20_000);
         openingCount = id("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, status, created_by) "
                 + "VALUES (?, 'OPENING', '2026-09-30', 'WHOLE', 'COMPLETED', ?) RETURNING id", store, owner.getId());
         oilLot1 = lot(store, oil, LocalDate.of(2026, 10, 1), null, 5, 80_000, "Kệ A");
@@ -111,6 +122,7 @@ public abstract class StockCountTestData extends ApiTestUsers {
         filterLotA = lot(store, filter, LocalDate.of(2026, 10, 3), LocalDate.of(2027, 1, 31), 4, 50_000, "Kệ B");
         filterLotB = lot(store, filter, LocalDate.of(2026, 10, 4), LocalDate.of(2027, 6, 30), 3, 50_000, "Kệ B");
         filterLotPlain = lot(store, filter, LocalDate.of(2026, 10, 2), null, 2, 50_000, "Kệ B");
+        lot(store, plug, LocalDate.of(2026, 10, 6), null, 6, 20_000, "Kệ C");
     }
 
     protected void signInAll() throws Exception {
@@ -179,10 +191,17 @@ public abstract class StockCountTestData extends ApiTestUsers {
     /** An Owner request to {@code storeId}, requested now; {@code productIds} only for PRODUCTS. */
     protected long seedRequest(long storeId, ScopeType scope, String scopeNote, StockCountRequestStatus status,
                                Long... productIds) {
-        long request = id("INSERT INTO stock_count_request (store_id, scope_type, scope_note, reason, status, "
-                        + "requested_by, requested_at, cancelled_at) VALUES (?, ?, ?, 'Kiểm định kỳ', ?, ?, ?, ?) "
-                        + "RETURNING id", storeId, scope.name(), scopeNote, status.name(), owner.getId(),
-                LocalDateTime.now(clock), status == StockCountRequestStatus.CANCELLED ? LocalDateTime.now(clock) : null);
+        return seedRequest(storeId, scope, scopeNote, null, status, productIds);
+    }
+
+    /** {@code partCategoryId} only for CATEGORY. */
+    protected long seedRequest(long storeId, ScopeType scope, String scopeNote, Long partCategoryId,
+                               StockCountRequestStatus status, Long... productIds) {
+        long request = id("INSERT INTO stock_count_request (store_id, scope_type, scope_note, part_category_id, reason, "
+                        + "status, requested_by, requested_at, cancelled_at) VALUES (?, ?, ?, ?, 'Kiểm định kỳ', ?, ?, "
+                        + "?, ?) RETURNING id", storeId, scope.name(), scopeNote, partCategoryId, status.name(),
+                owner.getId(), LocalDateTime.now(clock),
+                status == StockCountRequestStatus.CANCELLED ? LocalDateTime.now(clock) : null);
         for (Long product : productIds) {
             jdbc.update("INSERT INTO stock_count_request_product (stock_count_request_id, product_id) VALUES (?, ?)",
                     request, product);
@@ -198,28 +217,36 @@ public abstract class StockCountTestData extends ApiTestUsers {
     /** A line to seed: part, lot (null for the line of the lots without expiry), book and counted quantity. */
     protected record SeedLine(long productId, Long lotId, LocalDate expiryDate, int bookQty, Integer countedQty,
                               String reason, boolean recountRequested, String recountReason, Integer previousBookQty,
-                              Integer previousCountedQty) {
+                              Integer previousCountedQty, Integer bookDamagedQty, Integer damagedQty,
+                              Integer previousDamagedQty) {
 
         public static SeedLine of(long productId, Long lotId, LocalDate expiryDate, int bookQty, Integer countedQty) {
-            return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, null, false, null, null, null);
+            return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, null, false, null, null, null, 0,
+                    countedQty == null ? 0 : 0, null);
         }
 
         /** The Branch Manager's reason for the difference. */
         public SeedLine because(String why) {
             return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, why, recountRequested,
-                    recountReason, previousBookQty, previousCountedQty);
+                    recountReason, previousBookQty, previousCountedQty, bookDamagedQty, damagedQty, previousDamagedQty);
         }
 
         /** Sent back for a recount. */
         public SeedLine recount(String why) {
             return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, reason, true, why,
-                    previousBookQty, previousCountedQty);
+                    previousBookQty, previousCountedQty, bookDamagedQty, damagedQty, previousDamagedQty);
         }
 
         /** Counted again after a recount: the earlier book and counted quantities. */
         public SeedLine previously(int book, Integer counted) {
             return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, reason, recountRequested,
-                    recountReason, book, counted);
+                    recountReason, book, counted, bookDamagedQty, damagedQty, previousDamagedQty);
+        }
+
+        /** Book and counted damaged quantities for A04. */
+        public SeedLine withDamaged(int bookDamaged, int countedDamaged) {
+            return new SeedLine(productId, lotId, expiryDate, bookQty, countedQty, reason, recountRequested,
+                    recountReason, previousBookQty, previousCountedQty, bookDamaged, countedDamaged, previousDamagedQty);
         }
     }
 
@@ -336,19 +363,24 @@ public abstract class StockCountTestData extends ApiTestUsers {
                     status == StockCountStatus.CANCELLED ? "Hủy thử" : null);
             for (SeedLine line : lines) {
                 jdbc.update("INSERT INTO stock_count_line (stock_count_id, product_id, lot_id, expiry_date, book_qty, "
-                                + "counted_qty, counted_by, counted_at, reason, recount_requested, recount_reason, "
-                                + "previous_book_qty, previous_counted_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        count, line.productId(), line.lotId(), line.expiryDate(), line.bookQty(), line.countedQty(),
-                        line.countedQty() == null ? null : taskAssigneeOr(staff.getId()),
+                                + "book_damaged_qty, damaged_qty, counted_qty, counted_by, counted_at, reason, "
+                                + "recount_requested, recount_reason, previous_book_qty, previous_counted_qty, "
+                                + "previous_damaged_qty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        count, line.productId(), line.lotId(), line.expiryDate(), line.bookQty(),
+                        line.bookDamagedQty() == null ? 0 : line.bookDamagedQty(),
+                        line.countedQty() == null ? 0 : (line.damagedQty() == null ? 0 : line.damagedQty()),
+                        line.countedQty(), line.countedQty() == null ? null : taskAssigneeOr(staff.getId()),
                         line.countedQty() == null ? null : now, line.reason(), line.recountRequested(),
-                        line.recountReason(), line.previousBookQty(), line.previousCountedQty());
+                        line.recountReason(), line.previousBookQty(), line.previousCountedQty(),
+                        line.previousDamagedQty());
             }
             if (taskAssignee != null) {
                 boolean submitted = taskStatus == WarehouseTaskStatus.RESULT_SUBMITTED
                         || taskStatus == WarehouseTaskStatus.DONE;
-                jdbc.update("INSERT INTO warehouse_task (task_type, stock_count_id, assigned_to, assigned_by, "
-                                + "assigned_at, status, result_submitted_at) VALUES ('COUNTING', ?, ?, ?, ?, ?, ?)",
-                        count, taskAssignee, manager.getId(), now, taskStatus.name(), submitted ? now : null);
+                jdbc.update("INSERT INTO warehouse_task (task_type, stock_count_id, store_id, assigned_to, assigned_by, "
+                                + "assigned_at, status, result_submitted_at) VALUES ('COUNTING', ?, "
+                                + "(SELECT store_id FROM stock_count WHERE id = ?), ?, ?, ?, ?, ?)",
+                        count, count, taskAssignee, manager.getId(), now, taskStatus.name(), submitted ? now : null);
             }
             return count;
         }
@@ -398,6 +430,25 @@ public abstract class StockCountTestData extends ApiTestUsers {
     protected int availableOfLot(long lotId) {
         return jdbc.queryForObject("SELECT coalesce(sum(quantity), 0) FROM lot_balance WHERE lot_id = ? "
                 + "AND stock_status = 'AVAILABLE'", Integer.class, lotId);
+    }
+
+    /** DAMAGED quantity of a lot in its warehouse. */
+    protected int damagedOfLot(long lotId) {
+        return jdbc.queryForObject("SELECT coalesce(sum(quantity), 0) FROM lot_balance WHERE lot_id = ? "
+                + "AND stock_status = 'DAMAGED'", Integer.class, lotId);
+    }
+
+    /** Moves units from AVAILABLE to DAMAGED on a lot and keeps stock balances aligned. */
+    protected void markDamaged(long storeId, long productId, long lotId, int qty) {
+        jdbc.update("UPDATE lot_balance SET quantity = quantity - ? WHERE lot_id = ? AND stock_status = 'AVAILABLE'",
+                qty, lotId);
+        jdbc.update("""
+                INSERT INTO lot_balance (lot_id, store_id, stock_status, quantity, updated_at)
+                VALUES (?, ?, 'DAMAGED', ?, now())
+                ON CONFLICT (lot_id, store_id, stock_status) DO UPDATE
+                SET quantity = lot_balance.quantity + excluded.quantity, updated_at = now()""", lotId, storeId, qty);
+        jdbc.update("UPDATE stock_balance SET available_qty = available_qty - ?, damaged_qty = damaged_qty + ? "
+                + "WHERE store_id = ? AND product_id = ?", qty, qty, storeId, productId);
     }
 
     /** AVAILABLE quantity of a part in a warehouse (stock_balance). */

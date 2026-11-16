@@ -7,5 +7,5 @@ import java.time.LocalDateTime;
  * (motoflow.cloudinary.download-url-ttl); it is null while uploads are off (no Cloudinary account configured).
  */
 public record AttachmentResponse(long id, String fileName, String contentType, long fileSize, Long uploadedById,
-                                 String uploadedByName, LocalDateTime uploadedAt, String downloadUrl) {
+                                 String uploadedByName, LocalDateTime uploadedAt, String downloadUrl, String purpose) {
 }

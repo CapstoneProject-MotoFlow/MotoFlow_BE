@@ -209,8 +209,12 @@ class TransferOrderViewApiTest extends ApiTestUsers {
     }
 
     private void task(String type, String documentColumn, long documentId, UserAccount staff, String status) {
-        jdbc.update("INSERT INTO warehouse_task (task_type, " + documentColumn + ", assigned_to, assigned_by, "
-                + "assigned_at, status) VALUES (?, ?, ?, ?, now(), ?)", type, documentId, staff.getId(),
+        String storeSql = "DISPATCH_PREPARATION".equals(type)
+                ? "SELECT source_store_id FROM transfer_order WHERE id = ?"
+                : "SELECT dest_store_id FROM transfer_order WHERE id = ?";
+        long storeId = jdbc.queryForObject(storeSql, Long.class, documentId);
+        jdbc.update("INSERT INTO warehouse_task (task_type, " + documentColumn + ", store_id, assigned_to, assigned_by, "
+                + "assigned_at, status) VALUES (?, ?, ?, ?, ?, now(), ?)", type, documentId, storeId, staff.getId(),
                 branchManager.getId(), status);
     }
 

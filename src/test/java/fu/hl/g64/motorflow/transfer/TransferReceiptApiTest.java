@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.transfer;
 
+import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import org.junit.jupiter.api.Test;
@@ -153,18 +154,16 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         prepare("nvcg", order, brake, 2).andExpect(status().isOk());
         dispatch("bmcg", order, brake, 2).andExpect(status().isOk());
 
-        arriveAs("bmcg", order, arrivalNote("PX-1"))
+        arriveAs("bmcg", order, arrivalNote())
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
-        arriveAs("owner", order, arrivalNote("PX-1"))
+        arriveAs("owner", order, arrivalNote())
                 .andExpect(status().isForbidden());
         long receipt = arrive("bmlb", order);
         result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
-        assign("bmlb", "INSPECTION", receipt, destManager).andExpect(status().isOk());
-        result("bmlb", order, receipt, brake, 1, 0).andExpect(status().isOk());
+        assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
+        result("nvlb", order, receipt, brake, 1, 0).andExpect(status().isOk());
 
-        confirm("bmlb", order, receipt).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG32"));
         confirm("bmcg", order, receipt).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
         confirm("owner", order, receipt).andExpect(status().isForbidden());
@@ -172,18 +171,19 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.code").value("MSG175"));
         assertThat(stock(dest, brake, "available_qty")).isZero();
 
-        // The second Branch Manager sends it back; the recorder counts again and the second one confirms.
         mvc.perform(post(ORDERS + "/" + order + "/receipts/" + receipt + "/recount")
                         .header(HttpHeaders.AUTHORIZATION, signIn("bmlb2")).contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("reason", "Đếm lại thùng 2"))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("AWAITING_RECOUNT"));
-        assertThat(recipients("TRANSFER_RECEIPT_RECOUNT")).containsExactly(destManager.getId());
-        result("bmlb", order, receipt, brake, 2, 0).andExpect(status().isOk());
+        assertThat(recipients("TRANSFER_RECEIPT_RECOUNT")).containsExactly(destStaff.getId());
+        result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isOk());
         confirm("bmlb2", order, receipt).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isZero();
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT confirmed_by FROM goods_receipt_note WHERE id = ?", Long.class, receipt))
                 .isEqualTo(secondDestManager.getId());
-        result("bmlb", order, receipt, brake, 2, 0).andExpect(status().isForbidden());
+        result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isForbidden());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -198,10 +198,10 @@ class TransferReceiptApiTest extends TransferFlowTestData {
 
     // Lecturer feedback 12/11: the Staff member given the receiving records the arrival and then inspects it.
     @Test
-    void theStaffGivenTheReceivingRecordsTheArrivalWithItsDeliveryDocument() throws Exception {
+    void theStaffGivenTheReceivingRecordsTheArrival() throws Exception {
         lot(source, brake, 10, 100_000, null, "A");
         long order = dispatchedOrder(brake, 2);
-        arriveAs("nvlb", order, arrivalNote("PX-1"))
+        arriveAs("nvlb", order, arrivalNote())
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         assign("bmlb", "TRANSFER_RECEIVING", order, destStaff).andExpect(status().isOk());
         mvc.perform(get("/api/v1/warehouse-tasks/assigned-to-me").param("taskType", "TRANSFER_RECEIVING")
@@ -210,37 +210,27 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         view("nvlb", "/" + order).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].productId").value(brake));
 
-        for (String field : List.of("deliveryDocumentNo", "deliveryDocumentDate", "documents")) {
-            Map<String, Object> missing = arrivalNote("PX-1");
-            missing.remove(field);
-            arriveAs("nvlb", order, missing).andExpect(status().isBadRequest());
-        }
-        Map<String, Object> tooLong = arrivalNote("X".repeat(51));
-        arriveAs("nvlb", order, tooLong).andExpect(status().isBadRequest());
-        Map<String, Object> noPhoto = arrivalNote("PX-1");
-        noPhoto.put("documents", List.of());
-        arriveAs("nvlb", order, noPhoto).andExpect(status().isBadRequest());
-        Map<String, Object> tomorrow = arrivalNote("PX-1");
-        tomorrow.put("deliveryDocumentDate", java.time.LocalDate.now(clock).plusDays(1).toString());
-        arriveAs("nvlb", order, tomorrow).andExpect(status().isBadRequest())
+        Map<String, Object> future = arrivalNote();
+        future.put("arrivedAt", java.time.LocalDateTime.now(clock).plusHours(1).toString());
+        arriveAs("nvlb", order, future).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG138"));
 
         long staffId = userId("nvlb");
-        arriveAs("nvlb", order, arrivalNote("PX-1"))
+        String created = arriveAs("nvlb", order, arrivalNoteWithPhoto())
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.deliveryDocumentNo").value("PX-1"))
-                .andExpect(jsonPath("$.delivererName").value("Anh Hùng"))
-                .andExpect(jsonPath("$.vehiclePlateNo").value("29C-678.90"))
-                .andExpect(jsonPath("$.deliveryDocumentDate").value(java.time.LocalDate.now(clock).toString()))
+                .andExpect(jsonPath("$.deliveryDocumentNo").isEmpty())
                 .andExpect(jsonPath("$.createdBy").value(staffId))
                 .andExpect(jsonPath("$.documents.length()").value(1))
-                .andExpect(jsonPath("$.lines[0].documentQty").value(2));
-        long receipt = jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
+                .andExpect(jsonPath("$.lines[0].documentQty").value(2))
+                .andReturn().getResponse().getContentAsString();
+        long receipt = ((Number) JsonPath.read(created, "$.id")).longValue();
+        holdReceiving("bmlb", order);
+        arriveAs("bmlb", order, arrivalNote()).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG211"));
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE task_type = 'TRANSFER_RECEIVING' "
-                + "AND transfer_order_id = ?", String.class, order)).isEqualTo("DONE");
+                + "AND transfer_order_id = ? AND status = 'DONE'", String.class, order)).isEqualTo("DONE");
         assertThat(jdbc.queryForObject("SELECT assigned_to FROM warehouse_task WHERE task_type = 'INSPECTION' "
                 + "AND goods_receipt_note_id = ? AND status = 'ASSIGNED'", Long.class, receipt)).isEqualTo(staffId);
-        view("bmlb", "/" + order).andExpect(jsonPath("$.receipts[0].deliveryDocumentNo").value("PX-1"));
 
         result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isOk());
         confirm("bmlb", order, receipt).andExpect(status().isOk());

@@ -12,7 +12,10 @@ import java.util.List;
 public record TransferReceiptResultRequest(
         @NotEmpty(message = "Vui lòng ghi kết quả cho mọi phụ tùng.")
         @Size(max = 200, message = "Tối đa 200 phụ tùng trong một phiếu chuyển kho.")
-        List<@NotNull @Valid Line> lines) {
+        List<@NotNull @Valid Line> lines,
+
+        @Size(max = 500, message = "Ghi chú kiểm nhận tối đa 500 ký tự.")
+        String inspectionNote) {
 
     public record Line(
             @NotNull(message = "Vui lòng chọn phụ tùng.")

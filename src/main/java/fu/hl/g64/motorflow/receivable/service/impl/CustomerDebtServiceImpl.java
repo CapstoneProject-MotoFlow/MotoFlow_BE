@@ -133,13 +133,13 @@ public class CustomerDebtServiceImpl implements CustomerDebtService {
         LocalDate today = ledger.today();
 
         // Debt payments of these debts; each was collected at one store, so all its allocations are listed here.
-        Set<Long> paymentIds = allocations.findByReceivableIdIn(byId.keySet()).stream()
+        Set<Long> paymentIds = allocations.findByReceivableIdInAndReversedAtIsNull(byId.keySet()).stream()
                 .map(PaymentAllocation::getPaymentId).collect(Collectors.toSet());
         List<Payment> paid = payments.findAllById(paymentIds).stream()
                 .filter(p -> p.getPaymentType() == PaymentType.DEBT_PAYMENT)
                 .sorted(Comparator.comparing(Payment::getRecordedAt).thenComparing(Payment::getId).reversed())
                 .toList();
-        Map<Long, List<PaymentAllocation>> split = allocations.findByPaymentIdIn(paymentIds).stream()
+        Map<Long, List<PaymentAllocation>> split = allocations.findByPaymentIdInAndReversedAtIsNull(paymentIds).stream()
                 .collect(Collectors.groupingBy(PaymentAllocation::getPaymentId));
 
         Map<Long, String> storeNames = storeNames(Stream.concat(Stream.ofNullable(scope),

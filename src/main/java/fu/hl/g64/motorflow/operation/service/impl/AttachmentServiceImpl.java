@@ -54,6 +54,13 @@ public class AttachmentServiceImpl implements AttachmentService {
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
     public void attach(OwnerType ownerType, long ownerId, List<AttachmentUpload> files, long uploadedBy) {
+        attach(ownerType, ownerId, files, uploadedBy, null);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void attach(OwnerType ownerType, long ownerId, List<AttachmentUpload> files, long uploadedBy,
+                       String purpose) {
         if (files == null || files.isEmpty()) {
             return;
         }
@@ -75,7 +82,7 @@ public class AttachmentServiceImpl implements AttachmentService {
         LocalDateTime now = LocalDateTime.now(clock);
         attachments.saveAll(files.stream().map(file -> Attachment.create(ownerType, ownerId, file.fileName().strip(),
                 file.contentType().strip().toLowerCase(Locale.ROOT), file.fileSize(), file.storageKey().strip(),
-                uploadedBy, now)).toList());
+                uploadedBy, now, purpose)).toList());
     }
 
     @Transactional(readOnly = true)
@@ -102,7 +109,7 @@ public class AttachmentServiceImpl implements AttachmentService {
             String url = links && format != null ? cloudinary.privateDownloadUrl(file.getStorageKey(), format) : null;
             byOwner.computeIfAbsent(file.getOwnerId(), key -> new ArrayList<>()).add(new AttachmentResponse(
                     file.getId(), file.getFileName(), file.getContentType(), file.getFileSize(), file.getUploadedBy(),
-                    names.get(file.getUploadedBy()), file.getUploadedAt(), url));
+                    names.get(file.getUploadedBy()), file.getUploadedAt(), url, file.getPurpose()));
         }
         return byOwner;
     }

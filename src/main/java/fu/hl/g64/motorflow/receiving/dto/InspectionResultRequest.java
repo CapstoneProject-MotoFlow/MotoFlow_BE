@@ -25,7 +25,10 @@ public record InspectionResultRequest(
         List<@NotNull @Valid Line> lines,
 
         @Size(max = 10, message = "Tối đa 10 tệp.")
-        List<@NotNull @Valid AttachmentUpload> evidence) {
+        List<@NotNull @Valid AttachmentUpload> evidence,
+
+        @Size(max = 500, message = "Ghi chú kiểm nhận tối đa 500 ký tự.")
+        String inspectionNote) {
 
     /**
      * One part of the GRN: the delivered, wrong-item and damaged quantities (wrong item and damaged are 0 when left

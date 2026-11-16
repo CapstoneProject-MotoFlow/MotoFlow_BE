@@ -63,6 +63,12 @@ public class TransferOrder {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
 
+    @Column(name = "deliverer_name", length = 100)
+    private String delivererName;
+
+    @Column(name = "vehicle_plate_no", length = 20)
+    private String vehiclePlateNo;
+
     /** UC-71: waits for the source warehouse to prepare and dispatch the goods. */
     public static TransferOrder create(Long replenishmentRequestId, Long sourceStoreId, Long destStoreId, Long createdBy,
                                        LocalDateTime now) {
@@ -77,13 +83,15 @@ public class TransferOrder {
     }
 
     /** UC-74: the goods left the source and are on the road (BR-58). */
-    public void dispatch(Long by, LocalDateTime now) {
+    public void dispatch(Long by, String delivererName, String vehiclePlateNo, LocalDateTime now) {
         if (status != TransferOrderStatus.AWAITING_DISPATCH) {
             throw new IllegalStateException("transfer order " + id + " is " + status);
         }
         status = TransferOrderStatus.IN_TRANSIT;
         dispatchedBy = by;
         dispatchedAt = now;
+        this.delivererName = delivererName;
+        this.vehiclePlateNo = vehiclePlateNo;
     }
 
     /** UC-75: the source confirmed (part of) the excess received; posted at closing (BR-68). */

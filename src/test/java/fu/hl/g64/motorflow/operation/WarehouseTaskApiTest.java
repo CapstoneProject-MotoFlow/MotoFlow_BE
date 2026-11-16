@@ -42,7 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class WarehouseTaskApiTest extends ApiTestUsers {
 
     private static final String MSG39 = "Staff đã gửi kết quả cho chứng từ này nên không thể đổi người được giao.";
-    private static final String MSG40 = "Bạn tự nhận việc này nên kết quả phải do người khác xác nhận.";
+    private static final String MSG40 = "Bạn tự nhận việc này. Khi bạn tự xác nhận kết quả, Owner sẽ được thông báo.";
 
     @Autowired
     private WarehouseTaskService warehouseTasks;
@@ -226,8 +226,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.current.assigneeId").value(manager.getId()))
                 .andExpect(jsonPath("$.current.selfAssigned").value(true))
-                .andExpect(jsonPath("$.noticeCode").value("MSG40"))
-                .andExpect(jsonPath("$.noticeMessage").value(MSG40))
+                .andExpect(jsonPath("$.noticeCode").doesNotExist())
                 .andExpect(jsonPath("$.eligibleAssignees[2].self").value(true))
                 .andExpect(jsonPath("$.eligibleAssignees[2].openTasks").value(1));
         // MSG40 speaks to the manager who took the task; another manager of the store sees who holds it.
@@ -248,54 +247,57 @@ class WarehouseTaskApiTest extends ApiTestUsers {
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE sales_order_id = ?", String.class,
                 order)).isEqualTo("DONE");
 
-        // A goods receipt note has its own SRS message for this.
-        assign(token, TaskType.INSPECTION, receipt, manager.getId()).andExpect(status().isOk());
+        assign(token, TaskType.INSPECTION, receipt, manager.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.noticeCode").value("MSG40"));
         warehouseTasks.submitResult(principal(manager), TaskType.INSPECTION, receipt);
-        assertThatThrownBy(() -> warehouseTasks.confirmResult(principal(manager), TaskType.INSPECTION, receipt))
-                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG32"));
+        warehouseTasks.confirmResult(principal(manager), TaskType.INSPECTION, receipt);
+        assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ?", String.class,
+                receipt)).isEqualTo("DONE");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isEqualTo(1);
     }
 
     @Test
-    void aManagerTakesAnInspectionDispatchOrCountOnlyWhileAnotherManagerCanConfirmIt() throws Exception {
-        String msg177 = "Cửa hàng không còn Branch Manager nào khác để xác nhận kết quả nên bạn không thể tự nhận "
-                + "việc này. Vui lòng giao cho Staff.";
+    void branchManagerCanTakeTasksWhileStaffAreActive() throws Exception {
         long receipt = supplierReceipt(store, "AWAITING_INSPECTION");
         long outgoing = transfer(store, otherStore, "AWAITING_DISPATCH");
         long count = stockCount("DRAFT");
         long order = order("AWAITING_PICKING");
-        // A locked manager of the store, and the active one of Long Biên, cannot confirm Gia Lâm's results.
         UserAccount lockedPeer = createUser("bm3", Role.BRANCH_MANAGER, store);
         jdbc.update("UPDATE user_account SET status = 'LOCKED' WHERE id = ?", lockedPeer.getId());
 
         assignment(token, TaskType.INSPECTION, receipt)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.eligibleAssignees[*].fullName", contains("Test staff1", "Test staff2")));
+                .andExpect(jsonPath("$.eligibleAssignees[*].fullName", contains("Test staff1", "Test staff2", "Test bm")))
+                .andExpect(jsonPath("$.eligibleAssignees[2].self").value(true));
         for (TaskType type : List.of(TaskType.INSPECTION, TaskType.DISPATCH_PREPARATION, TaskType.COUNTING)) {
             long document = switch (type) {
                 case INSPECTION -> receipt;
                 case DISPATCH_PREPARATION -> outgoing;
                 default -> count;
             };
-            assign(token, type, document, manager.getId())
-                    .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("MSG177"))
-                    .andExpect(jsonPath("$.message").value(msg177));
+            assign(token, type, document, manager.getId()).andExpect(status().isOk());
         }
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM warehouse_task", Long.class)).isZero();
-        // The Owner may confirm a sales order, so picking stays open to the manager.
         assignment(token, TaskType.PICKING, order)
                 .andExpect(jsonPath("$.eligibleAssignees[*].self", contains(false, false, true)));
         assign(token, TaskType.PICKING, order, manager.getId()).andExpect(status().isOk());
+    }
 
-        createUser("bm4", Role.BRANCH_MANAGER, store);
-        assignment(token, TaskType.INSPECTION, receipt)
-                .andExpect(jsonPath("$.eligibleAssignees[*].fullName", contains("Test staff1", "Test staff2", "Test bm")))
-                .andExpect(jsonPath("$.eligibleAssignees[2].self").value(true));
-        assign(token, TaskType.INSPECTION, receipt, manager.getId())
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.noticeCode").value("MSG40"));
-        assign(token, TaskType.DISPATCH_PREPARATION, outgoing, manager.getId()).andExpect(status().isOk());
-        assign(token, TaskType.COUNTING, count, manager.getId()).andExpect(status().isOk());
+    @Test
+    void whenStaffRecordsAndManagerConfirmsTheOwnerIsNotToldOfSelfConfirmation() throws Exception {
+        long receipt = supplierReceipt(store, "AWAITING_INSPECTION");
+        assign(token, TaskType.INSPECTION, receipt, staff1.getId()).andExpect(status().isOk());
+        warehouseTasks.submitResult(principal(staff1), TaskType.INSPECTION, receipt);
+        jdbc.update("UPDATE goods_receipt_note SET status = 'AWAITING_CONFIRMATION', recorded_by = ?, submitted_at = ? "
+                + "WHERE id = ?", staff1.getId(), LocalDateTime.now(clock), receipt);
+
+        warehouseTasks.confirmResult(principal(manager), TaskType.INSPECTION, receipt);
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ?", String.class,
+                receipt)).isEqualTo("DONE");
     }
 
     @Test
@@ -457,11 +459,13 @@ class WarehouseTaskApiTest extends ApiTestUsers {
             // The other manager's assignment is written but not committed yet when ours arrives.
             otherManager.setAutoCommit(false);
             try (PreparedStatement insert = otherManager.prepareStatement("INSERT INTO warehouse_task (task_type, "
-                    + "sales_order_id, assigned_to, assigned_by, assigned_at) VALUES ('PICKING', ?, ?, ?, ?)")) {
+                    + "sales_order_id, store_id, assigned_to, assigned_by, assigned_at) "
+                    + "VALUES ('PICKING', ?, (SELECT store_id FROM sales_order WHERE id = ?), ?, ?, ?)")) {
                 insert.setLong(1, order);
-                insert.setLong(2, staff2.getId());
-                insert.setLong(3, peer.getId());
-                insert.setObject(4, LocalDateTime.now(clock));
+                insert.setLong(2, order);
+                insert.setLong(3, staff2.getId());
+                insert.setLong(4, peer.getId());
+                insert.setObject(5, LocalDateTime.now(clock));
                 insert.executeUpdate();
             }
             Future<MvcResult> ours = executor.submit(() ->

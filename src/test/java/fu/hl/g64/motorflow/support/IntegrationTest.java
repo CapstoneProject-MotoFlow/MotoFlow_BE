@@ -48,10 +48,13 @@ public abstract class IntegrationTest {
      */
     protected void holdReceiving(String taskType, long documentId, long assigneeId, long assignedBy) {
         String column = "SUPPLIER_RECEIVING".equals(taskType) ? "purchase_order_id" : "transfer_order_id";
+        long storeId = "SUPPLIER_RECEIVING".equals(taskType)
+                ? jdbc.queryForObject("SELECT store_id FROM purchase_order WHERE id = ?", Long.class, documentId)
+                : jdbc.queryForObject("SELECT dest_store_id FROM transfer_order WHERE id = ?", Long.class, documentId);
         jdbc.update("UPDATE warehouse_task SET status = 'CANCELLED' WHERE task_type = ? AND " + column + " = ? "
                 + "AND status IN ('ASSIGNED', 'RESULT_SUBMITTED')", taskType, documentId);
-        jdbc.update("INSERT INTO warehouse_task (task_type, " + column + ", assigned_to, assigned_by, assigned_at) "
-                + "VALUES (?, ?, ?, ?, ?)", taskType, documentId, assigneeId, assignedBy,
+        jdbc.update("INSERT INTO warehouse_task (task_type, " + column + ", store_id, assigned_to, assigned_by, "
+                + "assigned_at) VALUES (?, ?, ?, ?, ?, ?)", taskType, documentId, storeId, assigneeId, assignedBy,
                 java.sql.Timestamp.valueOf(java.time.LocalDateTime.now(clock)));
     }
 

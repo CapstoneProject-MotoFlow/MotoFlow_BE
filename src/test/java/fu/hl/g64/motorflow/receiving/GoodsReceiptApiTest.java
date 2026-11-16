@@ -87,6 +87,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         // Two pads are damaged and four oils did not come.
         record(staffToken, grn, findings(pads, counted(oilLine, 24, 20, 0, 0)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inspectionNote").value("Ghi chú kiểm nhận (fixture)."))
                 .andExpect(jsonPath("$.status").value("AWAITING_CONFIRMATION"))
                 .andExpect(jsonPath("$.recordedById").value(staff.getId()))
                 .andExpect(jsonPath("$.recordedByName").value("Test staff"))
@@ -221,26 +222,21 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
     }
 
     @Test
-    void whoRecordedTheResultCannotConfirmIt() throws Exception {
+    void aBranchManagerWhoInspectedCanConfirmAndTheOwnerIsTold() throws Exception {
         long grn = receive("PX-001");
-        // The Branch Manager takes the inspection themself (MSG40), which needs another manager of the store to
-        // confirm it (review R-01).
-        createUser("bm3", Role.BRANCH_MANAGER, giaLam);
         assign(grn, manager);
         record(managerToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 0)))
                 .andExpect(status().isOk())
-                // A part left out did not come.
                 .andExpect(jsonPath("$.lines[*].deliveredQty", contains(10, 0)))
-                .andExpect(jsonPath("$.canConfirm").value(false))
+                .andExpect(jsonPath("$.canConfirm").value(true))
                 .andExpect(jsonPath("$.canReturnForRecount").value(true));
         confirm(managerToken, grn)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG32"))
-                .andExpect(jsonPath("$.message").value("Bạn đã ghi kết quả kiểm nhận của lượt này nên không thể tự xác "
-                        + "nhận. Lượt này cần người khác xác nhận."));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement", Long.class)).isZero();
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT status FROM goods_receipt_note WHERE id = ?", String.class, grn))
-                .isEqualTo("AWAITING_CONFIRMATION");
+                .isEqualTo("CONFIRMED");
     }
 
     @Test
@@ -251,6 +247,9 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         long padLine = lineOf(grn, pad);
         long oilLine = lineOf(grn, oil);
 
+        recordAsIs(staffToken, grn, findings(counted(padLine, 10, 9, 0, 0), counted(oilLine, 24, 24, 0, 0)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG265"));
         record(staffToken, grn, findings(counted(padLine, 10, 3, 2, 2)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG27"))
@@ -610,7 +609,9 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         Map<String, Object> pads = counted(lineOf(grn, pad), null, 8, 0, 0);
         Map<String, Object> oils = counted(lineOf(grn, oil), null, 0, 0, 0);
         oils.put("documentQty", 24);
-        recordAsIs(staffToken, grn, findings(pads, oils)).andExpect(status().isOk());
+        Map<String, Object> result = findings(pads, oils);
+        result.put("inspectionNote", "Thiếu 2 má phanh.");
+        recordAsIs(staffToken, grn, result).andExpect(status().isOk());
         assertThat(jdbc.queryForList("SELECT document_qty FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? "
                 + "ORDER BY id", Integer.class, grn)).containsExactly(10, 0);
         receipt(managerToken, grn).andExpect(jsonPath("$.lines[0].shortQty").value(2));
