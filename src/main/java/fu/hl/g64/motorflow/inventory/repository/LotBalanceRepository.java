@@ -41,6 +41,18 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
             order by l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
     List<LotBalance> findPickableForUpdate(Long storeId, Long productId, StockStatus status);
 
+    /**
+     * Pickable lots of several parts in one warehouse and status, row-locked, in product id order and then the
+     * picking order of {@link #findPickableForUpdate(Long, Long, StockStatus)}.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select b from LotBalance b, Lot l
+            where l.id = b.lotId and l.productId in :productIds
+              and b.storeId = :storeId and b.stockStatus = :status and b.quantity > 0
+            order by l.productId asc, l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
+    List<LotBalance> findPickableForUpdate(Long storeId, Collection<Long> productIds, StockStatus status);
+
     @Query("select coalesce(sum(b.quantity), 0) from LotBalance b where b.lotId = :lotId")
     long sumQuantityOfLot(Long lotId);
 

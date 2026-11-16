@@ -118,8 +118,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         Store destination = activeStore(body.destStoreId(), user.role() == Role.OWNER);
         Map<Long, Product> parts = requestedParts.requireActive(body.lines().stream()
                 .map(TransferOrderCreateRequest.Line::productId).toList());
-        body.lines().stream().filter(line -> line.makeupForCaseId() != null)
-                .forEach(line -> checkMakeup(line, body.destStoreId(), parts.get(line.productId())));
+        checkMakeups(body, parts);
         ReplenishmentRequest request = body.replenishmentRequestId() == null ? null : coveredRequest(body, parts);
         checkSellable(user, body, parts);
 
@@ -235,14 +234,19 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .toList()).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
         Map<Long, Integer> sent = sentQuantities(body, orderLines, parts);
         LocalDateTime now = LocalDateTime.now(clock);
-        List<Map<String, Object>> recorded = new ArrayList<>();
+        List<MovePosting> moves = new ArrayList<>();
         for (TransferOrderLine line : orderLines) {
             int quantity = sent.get(line.getProductId());
             if (quantity > 0) {
-                posting.move(new MovePosting(line.getProductId(), order.getSourceStoreId(), StockStatus.AVAILABLE,
+                moves.add(new MovePosting(line.getProductId(), order.getSourceStoreId(), StockStatus.AVAILABLE,
                         order.getDestStoreId(), StockStatus.IN_TRANSIT, quantity, null, MovementType.TRANSFER_DISPATCH,
                         SourceRef.transferOrder(id), user.id(), null));
             }
+        }
+        posting.moveAll(moves);
+        List<Map<String, Object>> recorded = new ArrayList<>();
+        for (TransferOrderLine line : orderLines) {
+            int quantity = sent.get(line.getProductId());
             line.recordDispatched(quantity);
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("product_id", line.getProductId());
@@ -359,16 +363,18 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             throw new BusinessException(HttpStatus.CONFLICT, first.getKey(), first.getValue());
         }
         LocalDateTime now = LocalDateTime.now(clock);
+        List<MovePosting> moves = new ArrayList<>();
         List<Map<String, Object>> posted = new ArrayList<>();
         // BR-68: the confirmed excess leaves the source's available stock for the destination's, FEFO then FIFO.
         for (ClosingPreviewResponse.Line row : rows) {
             if (row.extraDispatchedQty() > 0) {
-                posting.move(new MovePosting(row.productId(), order.getSourceStoreId(), StockStatus.AVAILABLE,
+                moves.add(new MovePosting(row.productId(), order.getSourceStoreId(), StockStatus.AVAILABLE,
                         order.getDestStoreId(), StockStatus.AVAILABLE, row.extraDispatchedQty(), null,
                         MovementType.TRANSFER_EXTRA_DISPATCH, SourceRef.transferOrder(id), user.id(), null));
                 posted.add(Map.of("product_id", row.productId(), "extra_qty", row.extraDispatchedQty()));
             }
         }
+        posting.moveAll(moves);
         order.close(user.id(), now);
         warehouseTasks.cancelForDocument(TaskType.TRANSFER_RECEIVING, id);
         auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_CLOSED", user.id(), null, null,
@@ -571,14 +577,28 @@ public class TransferOrderServiceImpl implements TransferOrderService {
     }
 
     /** BR-62: a make-up line replaces goods missing on another order to the same store, up to the shortage. */
-    private void checkMakeup(TransferOrderCreateRequest.Line line, long destStoreId, Product part) {
-        boolean valid = cases.findById(line.makeupForCaseId())
-                .filter(found -> found.getSourceType() == SourceType.TRANSFER && found.isOpen()
-                        && found.getProductId().equals(line.productId()) && line.plannedQty() <= found.getShortQty())
-                .map(DiscrepancyCase::getTransferOrderId).flatMap(orders::findById)
-                .filter(original -> original.getDestStoreId().equals(destStoreId)).isPresent();
-        if (!valid) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG206", part.getSku());
+    private void checkMakeups(TransferOrderCreateRequest body, Map<Long, Product> parts) {
+        List<TransferOrderCreateRequest.Line> makeups = body.lines().stream()
+                .filter(line -> line.makeupForCaseId() != null).toList();
+        if (makeups.isEmpty()) {
+            return;
+        }
+        Map<Long, DiscrepancyCase> byCase = cases.findAllById(makeups.stream()
+                        .map(TransferOrderCreateRequest.Line::makeupForCaseId).toList()).stream()
+                .collect(Collectors.toMap(DiscrepancyCase::getId, Function.identity()));
+        Map<Long, TransferOrder> byOrder = orders.findAllById(byCase.values().stream()
+                        .map(DiscrepancyCase::getTransferOrderId).filter(Objects::nonNull).collect(Collectors.toSet()))
+                .stream().collect(Collectors.toMap(TransferOrder::getId, Function.identity()));
+        for (TransferOrderCreateRequest.Line line : makeups) {
+            DiscrepancyCase found = byCase.get(line.makeupForCaseId());
+            TransferOrder original = found == null || found.getTransferOrderId() == null ? null
+                    : byOrder.get(found.getTransferOrderId());
+            boolean valid = found != null && found.getSourceType() == SourceType.TRANSFER && found.isOpen()
+                    && found.getProductId().equals(line.productId()) && line.plannedQty() <= found.getShortQty()
+                    && original != null && original.getDestStoreId().equals(body.destStoreId());
+            if (!valid) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG206", parts.get(line.productId()).getSku());
+            }
         }
     }
 

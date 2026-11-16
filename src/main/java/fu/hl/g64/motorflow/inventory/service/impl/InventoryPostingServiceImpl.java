@@ -39,13 +39,19 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -108,18 +114,37 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
     public List<LotQuantity> takeOut(OutPosting p) {
+        return takeOutAll(List.of(p)).getFirst();
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public List<List<LotQuantity>> takeOutAll(List<OutPosting> postings) {
+        if (postings.isEmpty()) {
+            return List.of();
+        }
         LocalDateTime now = LocalDateTime.now(clock);
         InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
-        StockBalance balance = lockBalance(p.storeId(), p.productId(), now);
-        Product product = product(p.productId());
-        List<Pick> picks = pick(p.storeId(), product, p.fromStatus(), p.quantity(), p.lots(), p.movementType(),
-                now);
-        List<LotQuantity> taken = new ArrayList<>();
-        for (Pick pick : picks) {
-            post(balance, pick.lot, p.fromStatus(), -pick.quantity, costOf(product, pick.lot), p.movementType(),
-                    p.source(), p.reason(), p.performedBy(), period, now, now);
-            refreshDepletion(pick.lot);
-            taken.add(new LotQuantity(pick.lot.getId(), pick.quantity));
+        Map<StoreProduct, StockBalance> balances = lockBalances(postings.stream()
+                .map(p -> new StoreProduct(p.storeId(), p.productId())).toList(), now);
+        Batch batch = batch(postings.stream().map(OutPosting::productId).toList(), postings.stream()
+                .filter(p -> p.lots() == null || p.lots().isEmpty())
+                .map(p -> new PoolKey(p.storeId(), p.fromStatus(), p.productId())).toList(),
+                namedLots(postings.stream().map(OutPosting::lots).toList()), now);
+        List<List<LotQuantity>> taken = new ArrayList<>();
+        for (OutPosting p : postings) {
+            Product product = batch.product(p.productId());
+            List<Pick> picks = choose(p.storeId(), product, p.fromStatus(), p.quantity(), p.lots(), p.movementType(),
+                    batch, now);
+            StockBalance balance = balances.get(new StoreProduct(p.storeId(), p.productId()));
+            List<LotQuantity> line = new ArrayList<>();
+            for (Pick pick : picks) {
+                post(balance, pick.lot, p.fromStatus(), -pick.quantity, costOf(product, pick.lot), p.movementType(),
+                        p.source(), p.reason(), p.performedBy(), period, now, now);
+                refreshDepletion(pick.lot);
+                line.add(new LotQuantity(pick.lot.getId(), pick.quantity));
+            }
+            taken.add(line);
         }
         return taken;
     }
@@ -127,35 +152,49 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
     public List<LotQuantity> move(MovePosting p) {
+        return moveAll(List.of(p)).getFirst();
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public List<List<LotQuantity>> moveAll(List<MovePosting> postings) {
+        if (postings.isEmpty()) {
+            return List.of();
+        }
+        for (MovePosting p : postings) {
+            if (p.fromStoreId().equals(p.toStoreId()) && p.fromStatus() == p.toStatus()) {
+                throw new IllegalArgumentException("a move must change the status or the warehouse");
+            }
+        }
         LocalDateTime now = LocalDateTime.now(clock);
         InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
-        boolean sameStore = p.fromStoreId().equals(p.toStoreId());
-        if (sameStore && p.fromStatus() == p.toStatus()) {
-            throw new IllegalArgumentException("a move must change the status or the warehouse");
-        }
-        // Lock both warehouses' rows in store id order so two opposite transfers cannot deadlock.
-        StockBalance from;
-        StockBalance to;
-        if (sameStore) {
-            from = to = lockBalance(p.fromStoreId(), p.productId(), now);
-        } else if (p.fromStoreId() < p.toStoreId()) {
-            from = lockBalance(p.fromStoreId(), p.productId(), now);
-            to = lockBalance(p.toStoreId(), p.productId(), now);
-        } else {
-            to = lockBalance(p.toStoreId(), p.productId(), now);
-            from = lockBalance(p.fromStoreId(), p.productId(), now);
-        }
-        Product product = product(p.productId());
-        List<Pick> picks = pick(p.fromStoreId(), product, p.fromStatus(), p.quantity(), p.lots(), p.movementType(),
-                now);
-        List<LotQuantity> moved = new ArrayList<>();
-        for (Pick pick : picks) {
-            BigDecimal unitCost = costOf(product, pick.lot);
-            post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
-                    p.performedBy(), period, now, now);
-            post(to, pick.lot, p.toStatus(), pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
-                    p.performedBy(), period, now, now);
-            moved.add(new LotQuantity(pick.lot.getId(), pick.quantity));
+        List<StoreProduct> keys = new ArrayList<>();
+        postings.forEach(p -> {
+            keys.add(new StoreProduct(p.fromStoreId(), p.productId()));
+            keys.add(new StoreProduct(p.toStoreId(), p.productId()));
+        });
+        Map<StoreProduct, StockBalance> balances = lockBalances(keys, now);
+        Batch batch = batch(postings.stream().map(MovePosting::productId).toList(), postings.stream()
+                .filter(p -> p.lots() == null || p.lots().isEmpty())
+                .map(p -> new PoolKey(p.fromStoreId(), p.fromStatus(), p.productId())).toList(),
+                namedLots(postings.stream().map(MovePosting::lots).toList()), now);
+        List<List<LotQuantity>> moved = new ArrayList<>();
+        for (MovePosting p : postings) {
+            Product product = batch.product(p.productId());
+            List<Pick> picks = choose(p.fromStoreId(), product, p.fromStatus(), p.quantity(), p.lots(),
+                    p.movementType(), batch, now);
+            StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
+            StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
+            List<LotQuantity> line = new ArrayList<>();
+            for (Pick pick : picks) {
+                BigDecimal unitCost = costOf(product, pick.lot);
+                post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
+                        p.reason(), p.performedBy(), period, now, now);
+                post(to, pick.lot, p.toStatus(), pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
+                        p.performedBy(), period, now, now);
+                line.add(new LotQuantity(pick.lot.getId(), pick.quantity));
+            }
+            moved.add(line);
         }
         return moved;
     }
@@ -163,53 +202,66 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
     public void moveToStatuses(SplitMovePosting p) {
-        if (p.lots() == null || p.lots().isEmpty()) {
-            throw new IllegalArgumentException("the lots to move must be given");
+        moveToStatusesAll(List.of(p));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void moveToStatusesAll(List<SplitMovePosting> postings) {
+        if (postings.isEmpty()) {
+            return;
         }
-        Map<StockStatus, Integer> wanted = new EnumMap<>(StockStatus.class);
-        p.toQuantities().forEach((status, quantity) -> {
-            if (quantity < 0 || (p.fromStoreId().equals(p.toStoreId()) && status == p.fromStatus())) {
-                throw new IllegalArgumentException("cannot move " + quantity + " into " + status);
+        List<PreparedSplit> prepared = new ArrayList<>();
+        List<StoreProduct> keys = new ArrayList<>();
+        for (SplitMovePosting p : postings) {
+            if (p.lots() == null || p.lots().isEmpty()) {
+                throw new IllegalArgumentException("the lots to move must be given");
             }
-            if (quantity > 0) {
-                wanted.put(status, quantity);
-            }
-        });
-        int total = wanted.values().stream().mapToInt(Integer::intValue).sum();
+            Map<StockStatus, Integer> wanted = new EnumMap<>(StockStatus.class);
+            p.toQuantities().forEach((status, quantity) -> {
+                if (quantity < 0 || (p.fromStoreId().equals(p.toStoreId()) && status == p.fromStatus())) {
+                    throw new IllegalArgumentException("cannot move " + quantity + " into " + status);
+                }
+                if (quantity > 0) {
+                    wanted.put(status, quantity);
+                }
+            });
+            prepared.add(new PreparedSplit(p, wanted));
+            keys.add(new StoreProduct(p.fromStoreId(), p.productId()));
+            keys.add(new StoreProduct(p.toStoreId(), p.productId()));
+        }
         LocalDateTime now = LocalDateTime.now(clock);
         InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
-        boolean sameStore = p.fromStoreId().equals(p.toStoreId());
-        StockBalance from;
-        StockBalance to;
-        if (sameStore) {
-            from = to = lockBalance(p.fromStoreId(), p.productId(), now);
-        } else if (p.fromStoreId() < p.toStoreId()) {
-            from = lockBalance(p.fromStoreId(), p.productId(), now);
-            to = lockBalance(p.toStoreId(), p.productId(), now);
-        } else {
-            to = lockBalance(p.toStoreId(), p.productId(), now);
-            from = lockBalance(p.fromStoreId(), p.productId(), now);
-        }
-        Product product = product(p.productId());
-        List<Pick> picks = pick(p.fromStoreId(), product, p.fromStatus(), total, p.lots(), p.movementType(), now);
-        Iterator<Map.Entry<StockStatus, Integer>> statuses = wanted.entrySet().iterator();
-        Map.Entry<StockStatus, Integer> filling = statuses.next();
-        int left = filling.getValue();
-        for (Pick pick : picks) {
-            BigDecimal unitCost = costOf(product, pick.lot);
-            post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
-                    p.performedBy(), period, now, now);
-            int lotLeft = pick.quantity;
-            while (lotLeft > 0) {
-                if (left == 0) {
-                    filling = statuses.next();
-                    left = filling.getValue();
+        Map<StoreProduct, StockBalance> balances = lockBalances(keys, now);
+        Batch batch = batch(postings.stream().map(SplitMovePosting::productId).toList(), List.of(),
+                namedLots(postings.stream().map(SplitMovePosting::lots).toList()), now);
+        for (PreparedSplit row : prepared) {
+            SplitMovePosting p = row.posting;
+            Product product = batch.product(p.productId());
+            int total = row.wanted.values().stream().mapToInt(Integer::intValue).sum();
+            List<Pick> picks = choose(p.fromStoreId(), product, p.fromStatus(), total, p.lots(), p.movementType(),
+                    batch, now);
+            StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
+            StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
+            Iterator<Map.Entry<StockStatus, Integer>> statuses = row.wanted.entrySet().iterator();
+            Map.Entry<StockStatus, Integer> filling = statuses.next();
+            int left = filling.getValue();
+            for (Pick pick : picks) {
+                BigDecimal unitCost = costOf(product, pick.lot);
+                post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
+                        p.reason(), p.performedBy(), period, now, now);
+                int lotLeft = pick.quantity;
+                while (lotLeft > 0) {
+                    if (left == 0) {
+                        filling = statuses.next();
+                        left = filling.getValue();
+                    }
+                    int part = Math.min(lotLeft, left);
+                    post(to, pick.lot, filling.getKey(), part, unitCost, p.movementType(), p.source(), p.reason(),
+                            p.performedBy(), period, now, now);
+                    lotLeft -= part;
+                    left -= part;
                 }
-                int part = Math.min(lotLeft, left);
-                post(to, pick.lot, filling.getKey(), part, unitCost, p.movementType(), p.source(), p.reason(),
-                        p.performedBy(), period, now, now);
-                lotLeft -= part;
-                left -= part;
             }
         }
     }
@@ -273,9 +325,109 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private record Pick(Lot lot, int quantity) {
     }
 
+    private record StoreProduct(long storeId, long productId) {
+    }
+
+    private record PoolKey(long storeId, StockStatus status, long productId) {
+    }
+
+    private record PreparedSplit(SplitMovePosting posting, Map<StockStatus, Integer> wanted) {
+    }
+
+    /** Lots still available to a later line of the same part in this document. */
+    private static final class Held {
+        private final Lot lot;
+        private int remaining;
+
+        private Held(Lot lot, int remaining) {
+            this.lot = lot;
+            this.remaining = remaining;
+        }
+    }
+
+    private static final class Batch {
+        private final Map<Long, Product> products;
+        private final Map<Long, Lot> lots;
+        private final Map<PoolKey, List<Held>> open;
+
+        private Batch(Map<Long, Product> products, Map<Long, Lot> lots, Map<PoolKey, List<Held>> open) {
+            this.products = products;
+            this.lots = lots;
+            this.open = open;
+        }
+
+        private Product product(long productId) {
+            Product product = products.get(productId);
+            if (product == null) {
+                throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
+            }
+            return product;
+        }
+    }
+
+    /** Locks every warehouse row in store id then product id order, after creating any missing row. */
+    private Map<StoreProduct, StockBalance> lockBalances(List<StoreProduct> keys, LocalDateTime now) {
+        List<StoreProduct> ordered = keys.stream().distinct()
+                .sorted(Comparator.comparingLong(StoreProduct::storeId).thenComparingLong(StoreProduct::productId))
+                .toList();
+        for (StoreProduct key : ordered) {
+            stockBalances.insertIfMissing(key.storeId(), key.productId(), now);
+        }
+        Map<Long, List<Long>> byStore = ordered.stream().collect(Collectors.groupingBy(StoreProduct::storeId,
+                LinkedHashMap::new, Collectors.mapping(StoreProduct::productId, Collectors.toList())));
+        Map<StoreProduct, StockBalance> locked = new HashMap<>();
+        em.flush();
+        for (Map.Entry<Long, List<Long>> store : byStore.entrySet()) {
+            for (StockBalance balance : stockBalances.findByStoreForUpdate(store.getKey(), store.getValue())) {
+                em.refresh(balance);
+                locked.put(new StoreProduct(balance.getStoreId(), balance.getProductId()), balance);
+            }
+        }
+        return locked;
+    }
+
+    private static List<Long> namedLots(List<List<LotQuantity>> lines) {
+        return lines.stream().filter(line -> line != null).flatMap(Collection::stream).map(LotQuantity::lotId).distinct()
+                .toList();
+    }
+
+    /** One read of the parts and of every lot the document may take, grouped so later lines see what earlier lines took. */
+    private Batch batch(Collection<Long> productIds, List<PoolKey> openKeys, Collection<Long> namedLotIds,
+                        LocalDateTime now) {
+        Map<Long, Product> parts = products.findAllById(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<PoolKey, List<Long>> productsByPool = openKeys.stream().collect(Collectors.groupingBy(
+                key -> new PoolKey(key.storeId(), key.status(), 0),
+                Collectors.mapping(PoolKey::productId, Collectors.toList())));
+        Map<PoolKey, List<Held>> open = new HashMap<>();
+        Set<Long> lotIds = new HashSet<>(namedLotIds);
+        List<LotBalance> picked = new ArrayList<>();
+        for (Map.Entry<PoolKey, List<Long>> pool : productsByPool.entrySet()) {
+            List<Long> ids = pool.getValue().stream().distinct().toList();
+            if (ids.isEmpty()) {
+                continue;
+            }
+            List<LotBalance> rows = lotBalances.findPickableForUpdate(pool.getKey().storeId(), ids,
+                    pool.getKey().status());
+            rows.forEach(em::refresh);
+            rows.forEach(row -> lotIds.add(row.getLotId()));
+            picked.addAll(rows);
+        }
+        Map<Long, Lot> loaded = lotIds.isEmpty() ? Map.of() : lots.findAllById(lotIds).stream()
+                .collect(Collectors.toMap(Lot::getId, Function.identity()));
+        Map<PoolKey, List<Held>> built = new HashMap<>();
+        for (LotBalance row : picked) {
+            Lot lot = loaded.get(row.getLotId());
+            built.computeIfAbsent(new PoolKey(row.getStoreId(), row.getStockStatus(), lot.getProductId()),
+                    id -> new ArrayList<>()).add(new Held(lot, row.getQuantity()));
+        }
+        open.putAll(built);
+        return new Batch(parts, loaded, open);
+    }
+
     /** Chooses the lots to take {@code quantity} from, after checking there is enough (MSG84) and no expired lot (MSG86). */
-    private List<Pick> pick(Long storeId, Product product, StockStatus status, int quantity, List<LotQuantity> wanted,
-                            MovementType type, LocalDateTime now) {
+    private List<Pick> choose(Long storeId, Product product, StockStatus status, int quantity, List<LotQuantity> wanted,
+                              MovementType type, Batch batch, LocalDateTime now) {
         LocalDate today = now.toLocalDate();
         if (quantity <= 0) {
             throw new IllegalArgumentException("quantity must be positive");
@@ -292,9 +444,13 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 if (!seen.add(w.lotId())) {
                     throw new IllegalArgumentException("lot " + w.lotId() + " is listed twice");
                 }
-                Lot lot = lots.findById(w.lotId())
-                        .filter(l -> l.getProductId().equals(product.getId()))
-                        .orElseThrow(() -> new IllegalArgumentException("lot " + w.lotId() + " is not of this part"));
+                Lot lot = batch.lots.get(w.lotId());
+                if (lot == null) {
+                    lot = lots.findById(w.lotId()).orElse(null);
+                }
+                if (lot == null || !lot.getProductId().equals(product.getId())) {
+                    throw new IllegalArgumentException("lot " + w.lotId() + " is not of this part");
+                }
                 if (freshOnly && lot.isExpiredOn(today)) {
                     throw new BusinessException(HttpStatus.CONFLICT, "MSG86", lot.getId(), product.getSku());
                 }
@@ -312,16 +468,15 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         }
         int left = quantity;
         int usable = 0;
-        for (LotBalance locked : lotBalances.findPickableForUpdate(storeId, product.getId(), status)) {
-            LotBalance lb = fresh(locked);
-            Lot lot = lots.findById(lb.getLotId()).orElseThrow();
-            if (freshOnly && lot.isExpiredOn(today)) {
+        for (Held held : batch.open.getOrDefault(new PoolKey(storeId, status, product.getId()), List.of())) {
+            if (freshOnly && held.lot.isExpiredOn(today)) {
                 continue;
             }
-            usable += lb.getQuantity();
-            if (left > 0) {
-                int take = Math.min(left, lb.getQuantity());
-                picks.add(new Pick(lot, take));
+            usable += held.remaining;
+            if (left > 0 && held.remaining > 0) {
+                int take = Math.min(left, held.remaining);
+                held.remaining -= take;
+                picks.add(new Pick(held.lot, take));
                 left -= take;
             }
         }

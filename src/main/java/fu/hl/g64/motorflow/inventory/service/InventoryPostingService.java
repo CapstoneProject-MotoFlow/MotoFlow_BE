@@ -47,6 +47,12 @@ public interface InventoryPostingService {
     List<LotQuantity> takeOut(OutPosting posting);
 
     /**
+     * {@link #takeOut} for every line of one document. Locks the warehouses' stock rows in store id then product id
+     * order, then reads the lots once. The returned lists follow {@code postings}.
+     */
+    List<List<LotQuantity>> takeOutAll(List<OutPosting> postings);
+
+    /**
      * Moves goods between statuses or warehouses lot by lot, at the moving average; the value leaves and enters
      * with the same unit cost, so the average does not change.
      *
@@ -55,10 +61,19 @@ public interface InventoryPostingService {
     List<LotQuantity> move(MovePosting posting);
 
     /**
+     * {@link #move} for every line of one document. Stock rows are locked in store id then product id order before
+     * any lot is chosen. The returned lists follow {@code postings}.
+     */
+    List<List<LotQuantity>> moveAll(List<MovePosting> postings);
+
+    /**
      * {@link #move} of exactly the given lots into several statuses at once (a transfer receipt: passed into AVAILABLE,
      * damaged into DAMAGED). The statuses are filled in enum order from the lots in the given order.
      */
     void moveToStatuses(SplitMovePosting posting);
+
+    /** {@link #moveToStatuses} for every line of one document, locking stock rows before choosing lots. */
+    void moveToStatusesAll(List<SplitMovePosting> postings);
 
     /**
      * Plus or minus on one known lot; never below zero (MSG84). A COUNT_ADJUSTMENT may name {@code periodId} and

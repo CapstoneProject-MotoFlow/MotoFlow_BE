@@ -294,6 +294,8 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         warehouseTasks.confirmResult(user, TaskType.INSPECTION, receiptId);
         List<GoodsReceiptNoteLine> lines = receiptLines.findByGoodsReceiptNoteIdOrderByIdAsc(receiptId).stream()
                 .sorted(Comparator.comparing(GoodsReceiptNoteLine::getProductId)).toList();
+        Map<Long, List<LotQuantity>> inTransit = transitLots(order);
+        List<SplitMovePosting> moves = new ArrayList<>();
         for (GoodsReceiptNoteLine line : lines) {
             int arrived = line.getDeliveredQty() - line.getExcessQty();
             if (arrived == 0) {
@@ -302,10 +304,11 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             Map<StockStatus, Integer> into = new EnumMap<>(StockStatus.class);
             into.put(StockStatus.AVAILABLE, line.getPassedQty() - line.getExcessQty());
             into.put(StockStatus.DAMAGED, line.getDamagedQty());
-            posting.moveToStatuses(new SplitMovePosting(line.getProductId(), order.getDestStoreId(),
-                    StockStatus.IN_TRANSIT, receivingStore, into, transitLots(order, line.getProductId(), arrived),
+            moves.add(new SplitMovePosting(line.getProductId(), order.getDestStoreId(), StockStatus.IN_TRANSIT,
+                    receivingStore, into, takeTransit(inTransit, line.getProductId(), arrived),
                     MovementType.TRANSFER_RECEIPT, SourceRef.goodsReceiptNote(receiptId), user.id(), null));
         }
+        posting.moveToStatusesAll(moves);
         LocalDateTime now = LocalDateTime.now(clock);
         receipt.confirm(user.id(), now);
         receiptLines.flush();
@@ -424,22 +427,31 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         return found;
     }
 
-    /** The order's own lots in transit, FEFO then FIFO, covering {@code quantity} (BR-75). */
-    private List<LotQuantity> transitLots(TransferOrder order, long productId, int quantity) {
+    /** The order's own lots in transit, FEFO then FIFO, read once for every part (BR-75). */
+    private Map<Long, List<LotQuantity>> transitLots(TransferOrder order) {
+        Map<Long, List<LotQuantity>> byPart = new LinkedHashMap<>();
+        for (TransferOrderRepository.TransitLotOfPart lot : orders.findTransitLots(order.getId(),
+                order.getDestStoreId())) {
+            byPart.computeIfAbsent(lot.getProductId(), id -> new ArrayList<>())
+                    .add(new LotQuantity(lot.getLotId(), (int) lot.getQuantity()));
+        }
+        return byPart;
+    }
+
+    private static List<LotQuantity> takeTransit(Map<Long, List<LotQuantity>> inTransit, long productId, int quantity) {
         List<LotQuantity> taken = new ArrayList<>();
         int left = quantity;
-        for (TransferOrderRepository.TransitLot lot : orders.findTransitLots(order.getId(), order.getDestStoreId(),
-                productId)) {
+        for (LotQuantity lot : inTransit.getOrDefault(productId, List.of())) {
             if (left == 0) {
                 break;
             }
-            int take = (int) Math.min(left, lot.getQuantity());
-            taken.add(new LotQuantity(lot.getLotId(), take));
+            int take = Math.min(left, lot.quantity());
+            taken.add(new LotQuantity(lot.lotId(), take));
             left -= take;
         }
         if (left > 0) {
-            throw new IllegalStateException("transfer order " + order.getId() + " has " + (quantity - left) + " of part "
-                    + productId + " in transit, not " + quantity);
+            throw new IllegalStateException("transfer order has " + (quantity - left) + " of part " + productId
+                    + " in transit, not " + quantity);
         }
         return taken;
     }

@@ -491,6 +491,9 @@ public class StockCountServiceImpl implements StockCountService {
         LocalDateTime now = LocalDateTime.now(clock);
         // BR-83: the differences belong to the period and the end of the count day, even if approved a month later.
         LocalDateTime occurredAt = count.getCountDate().atTime(23, 59, 59);
+        Map<Long, Product> surplusParts = products.findAllById(steps.stream().filter(step -> step.lotId() == null)
+                .map(CountPosting::productId).collect(Collectors.toSet())).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
         for (CountPosting step : steps) {
             if (step.lotId() != null) {
                 posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), step.status(),
@@ -498,7 +501,8 @@ public class StockCountServiceImpl implements StockCountService {
                         step.reason(), count.getInventoryPeriodId(), occurredAt));
             } else {
                 // Surplus with no lot: a new lot at the moving average, so the average does not move (BR-74, BR-81).
-                BigDecimal average = products.findById(step.productId()).map(Product::getMovingAvgCost).orElse(null);
+                Product part = surplusParts.get(step.productId());
+                BigDecimal average = part == null ? null : part.getMovingAvgCost();
                 long price = average == null ? 0 : average.setScale(0, RoundingMode.HALF_UP).longValueExact();
                 posting.receiveNewLot(new NewLotPosting(count.getStoreId(), step.productId(),
                         LotSourceType.COUNT_SURPLUS, null, null, count.getCountDate(), price, null, null, null,
