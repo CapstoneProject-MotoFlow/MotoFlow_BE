@@ -20,8 +20,11 @@ public record TransferReceiptResponse(long id, long transferOrderId, ReceiptType
                                       Long confirmedBy, LocalDateTime confirmedAt, List<Line> lines,
                                       List<AttachmentResponse> documents) {
 
-    /** {@code documentQty}: what the order still expected when the goods arrived; above it is excess (BR-68). */
+    /**
+     * {@code documentQty}: what the order still expected when the goods arrived; above it is excess (BR-68).
+     * {@code deliveredQty} = passed + wrong item + damaged.
+     */
     public record Line(long productId, String sku, String partName, String baseUnit, int documentQty,
-                       int deliveredQty, int passedQty, int damagedQty, int excessQty) {
+                       int deliveredQty, int passedQty, int wrongItemQty, int damagedQty, int excessQty) {
     }
 }

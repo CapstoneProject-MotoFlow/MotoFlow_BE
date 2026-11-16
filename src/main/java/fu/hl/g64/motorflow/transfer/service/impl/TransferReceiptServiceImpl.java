@@ -238,18 +238,21 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG212", parts.get(line.getProductId()).getSku(),
                         line.getDocumentQty());
             }
-            int delivered = result.passedQty() + result.damagedQty();
+            // What arrived of this part; a wrong item is another part sent in its place and is never this part.
+            int arrived = result.passedQty() + result.damagedQty();
             // Goods coming back can only be goods that left (BR-61): nothing above what is expected.
-            if (receipt.getReceiptType() == ReceiptType.RETURN_TO_SOURCE && delivered > line.getDocumentQty()) {
+            if (receipt.getReceiptType() == ReceiptType.RETURN_TO_SOURCE && arrived > line.getDocumentQty()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG220", parts.get(line.getProductId()).getSku(),
                         line.getDocumentQty());
             }
-            if (claimed.getOrDefault(line.getProductId(), 0L) > 0 && delivered > line.getDocumentQty()) {
+            if (claimed.getOrDefault(line.getProductId(), 0L) > 0 && arrived > line.getDocumentQty()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG224", parts.get(line.getProductId()).getSku(),
                         line.getDocumentQty());
             }
-            line.record(line.getDocumentQty(), delivered, 0, result.damagedQty(), null, null, null);
-            line.settleTransferExcess(Math.max(delivered - line.getDocumentQty(), 0));
+            // Review FE PR #44 R-01: delivered = passed + wrong item + damaged, as on a supplier receipt (BR-24).
+            int wrongItem = result.wrongItemQty() == null ? 0 : result.wrongItemQty();
+            line.record(line.getDocumentQty(), arrived + wrongItem, wrongItem, result.damagedQty(), null, null, null);
+            line.settleTransferExcess(Math.max(arrived - line.getDocumentQty(), 0));
         }
         LocalDateTime now = LocalDateTime.now(clock);
         InspectionNoteRules.requireWhenNeeded(lines, body.inspectionNote());
@@ -297,7 +300,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         Map<Long, List<LotQuantity>> inTransit = transitLots(order);
         List<SplitMovePosting> moves = new ArrayList<>();
         for (GoodsReceiptNoteLine line : lines) {
-            int arrived = line.getDeliveredQty() - line.getExcessQty();
+            int arrived = arrivedOfPart(line);
             if (arrived == 0) {
                 continue;
             }
@@ -341,7 +344,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                 ? ResolutionType.LATE_DELIVERY_RECEIVED : ResolutionType.RECEIVED_BACK_AT_SOURCE;
         for (GoodsReceiptNoteLine line : lines) {
             DiscrepancyCase shortage = opened.get(line.getProductId());
-            int arrived = line.getDeliveredQty() - line.getExcessQty();
+            int arrived = arrivedOfPart(line);
             if (shortage == null || arrived <= 0) {
                 continue;
             }
@@ -524,7 +527,16 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                     Product part = parts.get(line.getProductId());
                     return new TransferReceiptResponse.Line(part.getId(), part.getSku(), part.getPartName(),
                             part.getBaseUnit(), line.getDocumentQty(), line.getDeliveredQty(), line.getPassedQty(),
-                            line.getDamagedQty(), line.getExcessQty());
+                            line.getWrongItemQty(), line.getDamagedQty(), line.getExcessQty());
                 }).toList(), attachments.list(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId()));
+    }
+
+    /**
+     * Units of the line's own part that leave IN_TRANSIT on confirmation: passed and damaged, less the excess that was
+     * never in transit (BR-68). Wrong items are another part sent in its place, so they stay out and the part stays
+     * unresolved for the coordinators (BR-59, BR-60).
+     */
+    private static int arrivedOfPart(GoodsReceiptNoteLine line) {
+        return line.getPassedQty() + line.getDamagedQty() - line.getExcessQty();
     }
 }
