@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.stockcount.service.impl;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.catalog.entity.enums.PartCategoryStatus;
 import fu.hl.g64.motorflow.catalog.repository.PartCategoryRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
@@ -98,7 +99,7 @@ public class StockCountRequestServiceImpl implements StockCountRequestService {
             case AREA -> productIds.isEmpty() && note != null && partCategoryId == null
                     && stockBalances.findStorageAreas(store.getId()).contains(note);
             case CATEGORY -> productIds.isEmpty() && note == null && partCategoryId != null
-                    && categories.existsById(partCategoryId);
+                    && countableCategory(partCategoryId);
         };
         if (!valid) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
@@ -129,6 +130,17 @@ public class StockCountRequestServiceImpl implements StockCountRequestService {
                         stores.findById(request.getStoreId()).orElseThrow().getStoreName()),
                 "STOCK_COUNT_REQUEST", id);
         return mapper.toRequest(request);
+    }
+
+    /** A request may name only a category that exists and is still in use. */
+    private boolean countableCategory(long partCategoryId) {
+        boolean active = categories.findById(partCategoryId)
+                .filter(category -> category.getStatus() == PartCategoryStatus.ACTIVE)
+                .isPresent();
+        if (!active) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG269");
+        }
+        return true;
     }
     // endregion
 }

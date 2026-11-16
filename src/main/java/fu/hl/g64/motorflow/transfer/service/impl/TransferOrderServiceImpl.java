@@ -251,10 +251,15 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             recorded.add(row);
         }
         order.dispatch(user.id(), text(body.delivererName()), text(body.vehiclePlateNo()), now);
+        List<?> evidence = body.evidence() == null ? List.of() : body.evidence();
         attachments.attach(OwnerType.TRANSFER_ORDER, id, body.evidence() == null ? List.of() : body.evidence(),
-                user.id());
-        auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_DISPATCHED", user.id(), null, null,
-                Map.of("lines", recorded), now));
+                user.id(), "DISPATCH");
+        Map<String, Object> dispatched = new LinkedHashMap<>();
+        dispatched.put("lines", recorded);
+        dispatched.put("deliverer_name", text(body.delivererName()));
+        dispatched.put("vehicle_plate_no", text(body.vehiclePlateNo()));
+        dispatched.put("photo_count", evidence.size());
+        auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_DISPATCHED", user.id(), null, null, dispatched, now));
         String sourceName = stores.findById(order.getSourceStoreId()).orElseThrow().getStoreName();
         notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_DISPATCHED",
                 "Phiếu chuyển kho #%d đã xuất từ %s, chờ nhận hàng".formatted(id, sourceName), ENTITY, id);
@@ -310,7 +315,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_EXTRA_DISPATCH_CONFIRMED", user.id(), reason, null,
                 Map.of("lines", recorded), now));
         attachments.attach(OwnerType.TRANSFER_ORDER, id, body.evidence() == null ? List.of() : body.evidence(),
-                user.id());
+                user.id(), "EXTRA_DISPATCH");
         if (order.getCreatedBy() != user.id()) {
             notifications.notify(order.getCreatedBy(), "TRANSFER_EXTRA_DISPATCH_CONFIRMED",
                     "Phiếu chuyển kho #%d: kho nguồn đã xác nhận phần xuất thêm, có thể đối soát để đóng phiếu"
@@ -517,11 +522,15 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 orders.findDispatchedLots(id).stream().map(lot -> new TransferOrderDetailResponse.Lot(
                         lot.getProductId(), lot.getLotId(), lot.getManufacturerLotNo(), lot.getExpiryDate(),
                         lot.getQuantity(), owner ? lot.getUnitCost() : null)).toList(),
-                orders.findReceipts(id).stream().map(receipt -> new TransferOrderDetailResponse.Receipt(
+                orders.findReceipts(id).stream().map(receipt -> {
+                    boolean incoming = receipt.getReceiptType() == fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN;
+                    return new TransferOrderDetailResponse.Receipt(
                         receipt.getId(), receipt.getReceiptType(), receipt.getStatus(),
                         receipt.getDeliveryDocumentNo(), receipt.getDeliveryDocumentDate(),
-                        receipt.getDelivererName(), receipt.getVehiclePlateNo(), receipt.getArrivedAt(),
-                        receipt.getConfirmedAt())).toList(),
+                        incoming ? order.getDelivererName() : receipt.getDelivererName(),
+                        incoming ? order.getVehiclePlateNo() : receipt.getVehiclePlateNo(), receipt.getArrivedAt(),
+                        receipt.getConfirmedAt());
+                }).toList(),
                 discrepancies, staff ? List.of() : attachments.list(OwnerType.TRANSFER_ORDER, id));
     }
 

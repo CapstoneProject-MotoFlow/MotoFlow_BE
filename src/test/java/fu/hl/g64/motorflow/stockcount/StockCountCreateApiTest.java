@@ -213,11 +213,22 @@ class StockCountCreateApiTest extends StockCountTestData {
         refused(cycle(ScopeType.AREA, "Kệ Z", null), 400, "MSG02");
         refused(cycle(ScopeType.AREA, "Kệ A", List.of(oil)), 400, "MSG02");
         refused(cycle(ScopeType.PRODUCTS, null, List.of(oil, 999_999L)), 400, "MSG242");
-        refused(cycleCategory(99_999L), 400, "MSG02");
+        refused(cycleCategory(99_999L), 400, "MSG269");
         refused(create(managerToken, body("CYCLE", TODAY, ScopeType.CATEGORY, null, List.of(oil), categoryA, null)),
                 400, "MSG02");
         refused(create(managerToken, body("CYCLE", TODAY, ScopeType.CATEGORY, "Kệ A", null, categoryA, null)),
                 400, "MSG02");
+        assertThat(countRows()).isZero();
+    }
+
+    @Test
+    void anEmptyOrInactiveCategoryCannotBeCounted() throws Exception {
+        long empty = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Nhóm trống', 'MOTORCYCLE') "
+                + "RETURNING id");
+        refused(cycleCategory(empty), 400, "MSG268");
+
+        jdbc.update("UPDATE part_category SET status = 'INACTIVE' WHERE id = ?", categoryB);
+        refused(cycleCategory(categoryB), 400, "MSG269");
         assertThat(countRows()).isZero();
     }
 

@@ -176,7 +176,7 @@ class StockCountRecordingApiTest extends StockCountTestData {
         String url = "/api/v1/stock-counts/" + count + "/lines";
         refused(putAs(staffToken, url, lines(line(ids.get(0), 5), line(ids.get(1), -1))), 400, "MSG237");
         refused(putAs(staffToken, url, lines(line(ids.get(0), 5, -1))), 400, "MSG02");
-        refused(putAs(staffToken, url, lines(line(ids.get(0), 3, 4))), 400, "MSG237");
+        refused(putAs(staffToken, url, lines(line(ids.get(0), 3, 4))), 400, "MSG266");
         refused(putAs(staffToken, url, lines(line(ids.get(0), 5), line(lineIds(other).get(0), 1))), 400, "MSG237");
         assertThat(row(ids.get(0)).get(1)).isNull();
         assertThat(row(lineIds(other).get(0)).get(1)).isNull();

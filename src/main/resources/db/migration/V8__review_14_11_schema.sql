@@ -91,6 +91,16 @@ ALTER TABLE stock_count_line ADD CONSTRAINT ck_stock_count_line_damaged_in_count
 -- 6. Deliverer and vehicle of a transfer, recorded at dispatch (optional).
 ALTER TABLE transfer_order ADD COLUMN deliverer_name VARCHAR(100);
 ALTER TABLE transfer_order ADD COLUMN vehicle_plate_no VARCHAR(20);
+UPDATE transfer_order o
+SET deliverer_name = g.deliverer_name,
+    vehicle_plate_no = g.vehicle_plate_no
+FROM goods_receipt_note g
+WHERE g.transfer_order_id = o.id
+  AND g.receipt_type = 'TRANSFER_IN'
+  AND o.deliverer_name IS NULL
+  AND g.deliverer_name IS NOT NULL;
+
+ALTER TABLE attachment ADD COLUMN purpose VARCHAR(30);
 
 -- 7. The warehouse a task belongs to: the store whose Branch Manager assigns it.
 ALTER TABLE warehouse_task ADD COLUMN store_id BIGINT;

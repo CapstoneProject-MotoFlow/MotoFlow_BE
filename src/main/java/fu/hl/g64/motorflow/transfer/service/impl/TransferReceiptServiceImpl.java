@@ -376,6 +376,19 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         opened.values().stream().filter(DiscrepancyCase::isOpen)
                 .filter(shortage -> figures.get(shortage.getProductId()).unresolved() == 0)
                 .forEach(shortage -> shortage.close(ClosureType.ALL_SETTLED, null, user.id(), now));
+        String wrong = lines.stream()
+                .filter(line -> line.getWrongItemQty() > 0)
+                .filter(line -> {
+                    TransferReconciliation.Part part = figures.get(line.getProductId());
+                    return part != null && part.unresolved() == 0;
+                })
+                .map(line -> catalog.get(line.getProductId()).getSku() + " x" + line.getWrongItemQty())
+                .collect(Collectors.joining(", "));
+        if (!wrong.isEmpty() && receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
+            notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_WRONG_ITEM",
+                    ("Phiếu chuyển kho #%d nhận giao sai %s. Món giao sai chưa nhập kho đích "
+                            + "và chưa trừ tồn kho nguồn.").formatted(id, wrong), ENTITY, id);
+        }
         if (!missing.isEmpty()) {
             String message = "Phiếu chuyển kho #%d còn thiếu %s chưa có kết quả, cần xử lý chênh lệch"
                     .formatted(id, String.join(", ", missing));

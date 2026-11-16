@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.stockcount.service.impl;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.catalog.entity.Product;
+import fu.hl.g64.motorflow.catalog.entity.enums.PartCategoryStatus;
 import fu.hl.g64.motorflow.catalog.repository.PartCategoryRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
@@ -71,6 +72,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -169,7 +171,9 @@ public class StockCountServiceImpl implements StockCountService {
         LocalDateTime now = LocalDateTime.now(clock);
         StockCount count = counts.save(StockCount.create(storeId, periodId, answered == null ? null : answered.getId(),
                 request.countType(), request.countDate(), request.scopeType(), scopeNote, partCategoryId, user.id(), now));
-        countSheets.buildLines(count, productIds);
+        if (countSheets.buildLines(count, productIds).isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG268");
+        }
         if (answered != null) {
             answered.markDone();
         }
@@ -186,7 +190,7 @@ public class StockCountServiceImpl implements StockCountService {
             case PRODUCTS -> productIds.isEmpty() || new HashSet<>(productIds).size() != productIds.size()
                     || scopeNote != null || partCategoryId != null;
             case CATEGORY -> !productIds.isEmpty() || scopeNote != null || partCategoryId == null
-                    || !categories.existsById(partCategoryId);
+                    || !countableCategory(partCategoryId);
         };
         if (bad) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
@@ -194,6 +198,17 @@ public class StockCountServiceImpl implements StockCountService {
         if (products.findAllById(productIds).size() != productIds.size()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG242");
         }
+    }
+
+    /** A count or request may name only a category that exists and is still in use. */
+    private boolean countableCategory(long partCategoryId) {
+        boolean active = categories.findById(partCategoryId)
+                .filter(category -> category.getStatus() == PartCategoryStatus.ACTIVE)
+                .isPresent();
+        if (!active) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG269");
+        }
+        return true;
     }
     // endregion
 
@@ -308,17 +323,33 @@ public class StockCountServiceImpl implements StockCountService {
         LocalDateTime now = LocalDateTime.now(clock);
         for (StockCountLinesSaveRequest.Line item : sent) {
             StockCountLine line = own.get(item.lineId());
-            int damaged = item.damagedQty() == null ? 0 : item.damagedQty();
+            int damaged = keptDamaged(line, item);
             if (line == null || (item.countedQty() != null && item.countedQty() < 0) || damaged < 0
-                    || (item.countedQty() != null && damaged > item.countedQty())
                     || (recounting && !line.isRecountRequested())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG237");
             }
+            if (item.countedQty() != null && damaged > item.countedQty()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG266");
+            }
         }
         for (StockCountLinesSaveRequest.Line item : sent) {
-            int damaged = item.damagedQty() == null ? 0 : item.damagedQty();
-            own.get(item.lineId()).record(item.countedQty(), damaged, user.id(), now);
+            StockCountLine line = own.get(item.lineId());
+            line.record(item.countedQty(), keptDamaged(line, item), user.id(), now);
         }
+    }
+
+    /**
+     * A missing damaged quantity keeps what the line already stored. The first save of an uncounted line stores 0.
+     * Clearing the count (a null counted quantity) drops the damaged quantity, as {@link StockCountLine#record} does.
+     */
+    private static int keptDamaged(StockCountLine line, StockCountLinesSaveRequest.Line item) {
+        if (item.countedQty() == null) {
+            return 0;
+        }
+        if (item.damagedQty() != null) {
+            return item.damagedQty();
+        }
+        return line == null ? 0 : line.getDamagedQty();
     }
     // endregion
 
@@ -360,7 +391,9 @@ public class StockCountServiceImpl implements StockCountService {
             if (removedIds.contains(line.getId())) {
                 invalid |= line.isCounted();
             } else {
-                invalid |= !line.isCounted() || (line.difference() != 0 && !reasons.containsKey(line.getId()));
+                boolean needsReason = line.isCounted()
+                        && (line.difference() != 0 || line.damagedChange() != 0);
+                invalid |= !line.isCounted() || (needsReason && !reasons.containsKey(line.getId()));
             }
         }
         if (invalid) {
@@ -375,7 +408,8 @@ public class StockCountServiceImpl implements StockCountService {
         warehouseTasks.confirmResult(user, TaskType.COUNTING, id);
         lines.deleteAll(all.stream().filter(l -> removedIds.contains(l.getId())).toList());
         for (StockCountLine line : kept) {
-            line.explain(line.difference() != 0 ? reasons.get(line.getId()) : null);
+            boolean needsReason = line.difference() != 0 || line.damagedChange() != 0;
+            line.explain(needsReason ? reasons.get(line.getId()) : null);
             line.clearRecount();
         }
         boolean needsApproval = countSheets.needsApproval(kept);
@@ -453,13 +487,13 @@ public class StockCountServiceImpl implements StockCountService {
         }
         access.requireOpenPeriod(count.getInventoryPeriodId());
 
-        List<ApprovalStep> steps = planDifferenceAdjustments(count);
+        List<CountPosting> steps = planCountAdjustments(count);
         LocalDateTime now = LocalDateTime.now(clock);
         // BR-83: the differences belong to the period and the end of the count day, even if approved a month later.
         LocalDateTime occurredAt = count.getCountDate().atTime(23, 59, 59);
-        for (ApprovalStep step : steps) {
+        for (CountPosting step : steps) {
             if (step.lotId() != null) {
-                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.AVAILABLE,
+                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), step.status(),
                         step.quantity(), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(),
                         step.reason(), count.getInventoryPeriodId(), occurredAt));
             } else {
@@ -468,28 +502,8 @@ public class StockCountServiceImpl implements StockCountService {
                 long price = average == null ? 0 : average.setScale(0, RoundingMode.HALF_UP).longValueExact();
                 posting.receiveNewLot(new NewLotPosting(count.getStoreId(), step.productId(),
                         LotSourceType.COUNT_SURPLUS, null, null, count.getCountDate(), price, null, null, null,
-                        Map.of(StockStatus.AVAILABLE, step.quantity()), MovementType.COUNT_ADJUSTMENT,
-                        SourceRef.stockCount(id), user.id(), step.reason(), count.getInventoryPeriodId(),
-                        occurredAt));
-            }
-        }
-        for (DamageStep step : planDamageAdjustments(count)) {
-            int quantity = step.quantity();
-            if (quantity > 0) {
-                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.AVAILABLE,
-                        -quantity, MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
-                        count.getInventoryPeriodId(), occurredAt));
-                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.DAMAGED, quantity,
-                        MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
-                        count.getInventoryPeriodId(), occurredAt));
-            } else {
-                int abs = -quantity;
-                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.DAMAGED, -abs,
-                        MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
-                        count.getInventoryPeriodId(), occurredAt));
-                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), StockStatus.AVAILABLE, abs,
-                        MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
-                        count.getInventoryPeriodId(), occurredAt));
+                        step.quantities(), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(),
+                        step.reason(), count.getInventoryPeriodId(), occurredAt));
             }
         }
 
@@ -501,155 +515,226 @@ public class StockCountServiceImpl implements StockCountService {
         return mapper.toDetail(count, Viewer.OWNER);
     }
 
-    /** One posting of an approval: a lot (null = new surplus lot of the part) and the quantity to add or take. */
-    private record ApprovalStep(long productId, Long lotId, int quantity, String reason) {
+    /**
+     * One posting of an approval. A null lot is a new surplus lot; {@code quantities} is set only then.
+     * Write-offs are posted before a same-lot move between AVAILABLE and DAMAGED, so the move is visible on its own.
+     */
+    private record CountPosting(long productId, Long lotId, StockStatus status, int quantity,
+                                Map<StockStatus, Integer> quantities, String reason) {
+
+        static CountPosting adjust(long productId, long lotId, StockStatus status, int quantity, String reason) {
+            return new CountPosting(productId, lotId, status, quantity, null, reason);
+        }
+
+        static CountPosting surplus(long productId, Map<StockStatus, Integer> quantities, String reason) {
+            return new CountPosting(productId, null, null, 0, quantities, reason);
+        }
     }
 
-    /** Reclassify stock between AVAILABLE and DAMAGED on one lot. */
-    private record DamageStep(long productId, long lotId, int quantity, String reason) {
-    }
+    private static final class LotStock {
+        private int available;
+        private int damaged;
 
-    private record LotHold(int available, int damaged) {
+        private LotStock(int available, int damaged) {
+            this.available = available;
+            this.damaged = damaged;
+        }
     }
 
     /**
-     * Turns every line with a difference into lot postings, in part order, and checks first that no lot would go
-     * below zero (SC-12), so nothing is written when one would. A line with a lot moves that lot; a missing quantity
-     * with no lot is taken from the lots without expiry, oldest received first; a surplus with no lot is a new lot.
+     * A04: sellable change and damaged change are posted separately. A drop in damaged goods is a write-off of DAMAGED,
+     * not a deduction from AVAILABLE. Where the two changes are opposite, the shared amount moves on the same lot.
+     * A line with no lot uses the lots without expiry, oldest received first; a surplus with no lot is a new lot.
      */
-    private List<ApprovalStep> planDifferenceAdjustments(StockCount count) {
-        List<StockCountLine> withDifference = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId())
-                .stream().filter(l -> l.isCounted() && l.difference() != 0)
+    private List<CountPosting> planCountAdjustments(StockCount count) {
+        List<StockCountLine> changed = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId())
+                .stream().filter(l -> l.isCounted() && (l.difference() != 0 || l.damagedChange() != 0))
                 .sorted(Comparator.comparing(StockCountLine::getProductId)).toList();
-        if (withDifference.isEmpty()) {
+        if (changed.isEmpty()) {
             return List.of();
         }
-        List<Long> productIds = withDifference.stream().map(StockCountLine::getProductId).distinct().toList();
+        List<Long> productIds = changed.stream().map(StockCountLine::getProductId).distinct().toList();
         Map<Long, String> skus = products.findAllById(productIds).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getSku));
-        Map<Long, Integer> held = new HashMap<>();
+        Map<Long, LotStock> held = new HashMap<>();
         Map<Long, List<CountedLot>> withoutExpiry = new HashMap<>();
         for (CountedLot lot : lotBalances.findCountedLots(count.getStoreId(), productIds)) {
-            held.put(lot.getLotId(), lot.getAvailable());
+            held.put(lot.getLotId(), new LotStock(lot.getAvailable(), lot.getDamaged()));
             if (lot.getExpiryDate() == null) {
                 withoutExpiry.computeIfAbsent(lot.getProductId(), k -> new ArrayList<>()).add(lot);
             }
         }
 
-        List<ApprovalStep> steps = new ArrayList<>();
-        for (StockCountLine line : withDifference) {
-            long product = line.getProductId();
-            int difference = line.difference();
+        List<CountPosting> steps = new ArrayList<>();
+        for (StockCountLine line : changed) {
+            int goodChange = (line.getCountedQty() - line.getDamagedQty())
+                    - (line.getBookQty() - line.getBookDamagedQty());
+            int damagedChange = line.damagedChange();
             if (line.getLotId() != null) {
-                if (held.getOrDefault(line.getLotId(), 0) + difference < 0) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
-                }
-                steps.add(new ApprovalStep(product, line.getLotId(), difference, line.getReason()));
-            } else if (difference > 0) {
-                steps.add(new ApprovalStep(product, null, difference, line.getReason()));
+                applyOnLot(held, line.getLotId(), goodChange, damagedChange, steps, line.getProductId(),
+                        skus.get(line.getProductId()), line.getLotId(), line.getReason());
             } else {
-                int left = -difference;
-                for (CountedLot lot : withoutExpiry.getOrDefault(product, List.of())) {
-                    if (left == 0) {
-                        break;
-                    }
-                    int take = Math.min(left, lot.getAvailable());
-                    steps.add(new ApprovalStep(product, lot.getLotId(), -take, line.getReason()));
-                    left -= take;
-                }
-                if (left > 0) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), "không lô");
-                }
+                applyAcrossLots(held, withoutExpiry.getOrDefault(line.getProductId(), List.of()), goodChange,
+                        damagedChange, steps, line.getProductId(), skus.get(line.getProductId()), line.getReason());
             }
         }
         return steps;
     }
 
-    /**
-     * After difference postings, reclassifies damaged quantity changes lot by lot (BR-80). Positive quantity moves stock
-     * from AVAILABLE to DAMAGED on the same lot; negative moves the other way.
-     */
-    private List<DamageStep> planDamageAdjustments(StockCount count) {
-        List<StockCountLine> withChange = lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId())
-                .stream().filter(l -> l.isCounted() && l.damagedChange() != 0)
-                .sorted(Comparator.comparing(StockCountLine::getProductId)).toList();
-        if (withChange.isEmpty()) {
-            return List.of();
+    /** Both changes of one counted lot, checked against that lot before anything is emitted. */
+    private static void applyOnLot(Map<Long, LotStock> held, long lotId, int goodChange, int damagedChange,
+                                   List<CountPosting> steps, long product, String sku, Object lotLabel, String reason) {
+        Split split = Split.of(goodChange, damagedChange);
+        LotStock stock = held.computeIfAbsent(lotId, id -> new LotStock(0, 0));
+        if (stock.available < split.availableTaken()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG241", sku, lotLabel);
         }
-        List<Long> productIds = withChange.stream().map(StockCountLine::getProductId).distinct().toList();
-        Map<Long, String> skus = products.findAllById(productIds).stream()
-                .collect(Collectors.toMap(Product::getId, Product::getSku));
-        Map<Long, LotHold> held = new HashMap<>();
-        Map<Long, List<CountedLot>> withoutExpiry = new HashMap<>();
-        for (CountedLot lot : lotBalances.findCountedLots(count.getStoreId(), productIds)) {
-            held.put(lot.getLotId(), new LotHold(lot.getAvailable(), lot.getDamaged()));
-            if (lot.getExpiryDate() == null) {
-                withoutExpiry.computeIfAbsent(lot.getProductId(), k -> new ArrayList<>()).add(lot);
+        if (stock.damaged < split.damagedTaken()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG267", sku, lotLabel);
+        }
+        if (split.availableWriteOff() > 0) {
+            stock.available -= split.availableWriteOff();
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.AVAILABLE, -split.availableWriteOff(), reason));
+        }
+        if (split.damagedWriteOff() > 0) {
+            stock.damaged -= split.damagedWriteOff();
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.DAMAGED, -split.damagedWriteOff(), reason));
+        }
+        moveOnLot(stock, steps, product, lotId, split, reason);
+        if (split.availableSurplus() > 0) {
+            stock.available += split.availableSurplus();
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.AVAILABLE, split.availableSurplus(), reason));
+        }
+        if (split.damagedSurplus() > 0) {
+            stock.damaged += split.damagedSurplus();
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.DAMAGED, split.damagedSurplus(), reason));
+        }
+    }
+
+    /** The same split for the lots without expiry. A leftover surplus becomes one new lot. */
+    private static void applyAcrossLots(Map<Long, LotStock> held, List<CountedLot> lots, int goodChange,
+                                        int damagedChange, List<CountPosting> steps, long product, String sku,
+                                        String reason) {
+        Split split = Split.of(goodChange, damagedChange);
+        take(held, lots, StockStatus.AVAILABLE, split.availableWriteOff(), steps, product, sku, reason);
+        take(held, lots, StockStatus.DAMAGED, split.damagedWriteOff(), steps, product, sku, reason);
+        moveAcross(held, lots, split.toDamaged(), StockStatus.AVAILABLE, StockStatus.DAMAGED, steps, product, sku,
+                reason);
+        moveAcross(held, lots, split.toAvailable(), StockStatus.DAMAGED, StockStatus.AVAILABLE, steps, product, sku,
+                reason);
+        Map<StockStatus, Integer> surplus = new LinkedHashMap<>();
+        if (split.availableSurplus() > 0) {
+            surplus.put(StockStatus.AVAILABLE, split.availableSurplus());
+        }
+        if (split.damagedSurplus() > 0) {
+            surplus.put(StockStatus.DAMAGED, split.damagedSurplus());
+        }
+        if (!surplus.isEmpty()) {
+            steps.add(CountPosting.surplus(product, surplus, reason));
+        }
+    }
+
+    private static void take(Map<Long, LotStock> held, List<CountedLot> lots, StockStatus status, int quantity,
+                             List<CountPosting> steps, long product, String sku, String reason) {
+        int left = quantity;
+        for (CountedLot lot : lots) {
+            if (left == 0) {
+                break;
             }
+            LotStock stock = held.get(lot.getLotId());
+            if (stock == null) {
+                continue;
+            }
+            int have = status == StockStatus.AVAILABLE ? stock.available : stock.damaged;
+            int take = Math.min(left, have);
+            if (take == 0) {
+                continue;
+            }
+            if (status == StockStatus.AVAILABLE) {
+                stock.available -= take;
+            } else {
+                stock.damaged -= take;
+            }
+            steps.add(CountPosting.adjust(product, lot.getLotId(), status, -take, reason));
+            left -= take;
+        }
+        if (left > 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, status == StockStatus.AVAILABLE ? "MSG241" : "MSG267",
+                    sku, "không lô");
+        }
+    }
+
+    private static void moveAcross(Map<Long, LotStock> held, List<CountedLot> lots, int quantity, StockStatus from,
+                                   StockStatus to, List<CountPosting> steps, long product, String sku, String reason) {
+        int left = quantity;
+        for (CountedLot lot : lots) {
+            if (left == 0) {
+                break;
+            }
+            LotStock stock = held.get(lot.getLotId());
+            if (stock == null) {
+                continue;
+            }
+            int have = from == StockStatus.AVAILABLE ? stock.available : stock.damaged;
+            int take = Math.min(left, have);
+            if (take == 0) {
+                continue;
+            }
+            if (from == StockStatus.AVAILABLE) {
+                stock.available -= take;
+                stock.damaged += take;
+            } else {
+                stock.damaged -= take;
+                stock.available += take;
+            }
+            steps.add(CountPosting.adjust(product, lot.getLotId(), from, -take, reason));
+            steps.add(CountPosting.adjust(product, lot.getLotId(), to, take, reason));
+            left -= take;
+        }
+        if (left > 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, from == StockStatus.AVAILABLE ? "MSG241" : "MSG267",
+                    sku, "không lô");
+        }
+    }
+
+    private static void moveOnLot(LotStock stock, List<CountPosting> steps, long product, long lotId, Split split,
+                                  String reason) {
+        if (split.toDamaged() > 0) {
+            stock.available -= split.toDamaged();
+            stock.damaged += split.toDamaged();
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.AVAILABLE, -split.toDamaged(), reason));
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.DAMAGED, split.toDamaged(), reason));
+        }
+        if (split.toAvailable() > 0) {
+            stock.damaged -= split.toAvailable();
+            stock.available += split.toAvailable();
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.DAMAGED, -split.toAvailable(), reason));
+            steps.add(CountPosting.adjust(product, lotId, StockStatus.AVAILABLE, split.toAvailable(), reason));
+        }
+    }
+
+    /**
+     * Splits the two signed changes into a same-lot move and whatever is left to write off or add.
+     * {@code toDamaged} moves AVAILABLE to DAMAGED; {@code toAvailable} moves the other way.
+     */
+    private record Split(int availableWriteOff, int damagedWriteOff, int toDamaged, int toAvailable,
+                         int availableSurplus, int damagedSurplus) {
+
+        static Split of(int goodChange, int damagedChange) {
+            int toAvailable = Math.min(Math.max(goodChange, 0), Math.max(-damagedChange, 0));
+            int toDamaged = Math.min(Math.max(-goodChange, 0), Math.max(damagedChange, 0));
+            return new Split(Math.max(-goodChange, 0) - toDamaged, Math.max(-damagedChange, 0) - toAvailable,
+                    toDamaged, toAvailable, Math.max(goodChange, 0) - toAvailable,
+                    Math.max(damagedChange, 0) - toDamaged);
         }
 
-        List<DamageStep> steps = new ArrayList<>();
-        for (StockCountLine line : withChange) {
-            long product = line.getProductId();
-            int change = line.damagedChange();
-            String reason = line.getReason();
-            if (line.getLotId() != null) {
-                LotHold stock = held.get(line.getLotId());
-                if (stock == null) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
-                }
-                if (change > 0) {
-                    if (stock.available() < change) {
-                        throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
-                    }
-                    held.put(line.getLotId(), new LotHold(stock.available() - change, stock.damaged() + change));
-                } else {
-                    int abs = -change;
-                    if (stock.damaged() < abs) {
-                        throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), line.getLotId());
-                    }
-                    held.put(line.getLotId(), new LotHold(stock.available() + abs, stock.damaged() - abs));
-                }
-                steps.add(new DamageStep(product, line.getLotId(), change, reason));
-            } else if (change > 0) {
-                int left = change;
-                for (CountedLot lot : withoutExpiry.getOrDefault(product, List.of())) {
-                    if (left == 0) {
-                        break;
-                    }
-                    LotHold stock = held.get(lot.getLotId());
-                    if (stock == null || stock.available() == 0) {
-                        continue;
-                    }
-                    int take = Math.min(left, stock.available());
-                    held.put(lot.getLotId(), new LotHold(stock.available() - take, stock.damaged() + take));
-                    steps.add(new DamageStep(product, lot.getLotId(), take, reason));
-                    left -= take;
-                }
-                if (left > 0) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), "không lô");
-                }
-            } else {
-                int left = -change;
-                for (CountedLot lot : withoutExpiry.getOrDefault(product, List.of())) {
-                    if (left == 0) {
-                        break;
-                    }
-                    LotHold stock = held.get(lot.getLotId());
-                    if (stock == null || stock.damaged() == 0) {
-                        continue;
-                    }
-                    int take = Math.min(left, stock.damaged());
-                    held.put(lot.getLotId(), new LotHold(stock.available() + take, stock.damaged() - take));
-                    steps.add(new DamageStep(product, lot.getLotId(), -take, reason));
-                    left -= take;
-                }
-                if (left > 0) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG241", skus.get(product), "không lô");
-                }
-            }
+        int availableTaken() {
+            return availableWriteOff + toDamaged;
         }
-        return steps;
+
+        int damagedTaken() {
+            return damagedWriteOff + toAvailable;
+        }
     }
     // endregion
 }

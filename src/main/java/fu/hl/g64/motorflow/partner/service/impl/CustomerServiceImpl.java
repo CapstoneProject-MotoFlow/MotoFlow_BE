@@ -101,7 +101,8 @@ public class CustomerServiceImpl implements CustomerService {
         Pageable newest = PageRequest.of(0, HISTORY_SIZE, Sort.by(Sort.Direction.DESC, "id"));
         Page<SalesOrder> orders = salesOrders.findByCustomer(id, storeId, newest);
         Page<Payment> paid = payments.findByCustomer(id, storeId, newest);
-        Map<Long, List<Long>> receivablesByPayment = allocations.findByPaymentIdIn(paid.map(Payment::getId).getContent())
+        Map<Long, List<Long>> receivablesByPayment = allocations.findByPaymentIdInAndReversedAtIsNull(
+                paid.map(Payment::getId).getContent())
                 .stream().collect(Collectors.groupingBy(PaymentAllocation::getPaymentId,
                         Collectors.mapping(PaymentAllocation::getReceivableId, Collectors.toList())));
 

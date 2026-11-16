@@ -371,7 +371,9 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                 .findFirst();
         String blocked = blockedCode(document, open);
         // MSG40 speaks to the Branch Manager who took the task, so only they get it.
-        String notice = open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
+        // Picking still cannot be confirmed by the person who took it (MSG124), so MSG40 would be untrue.
+        String notice = type != TaskType.PICKING && open.filter(task -> task.getAssignedTo() == manager.id()).isPresent()
+                ? "MSG40" : null;
 
         Collator byName = Collator.getInstance(VIETNAMESE);
         List<UserAccount> staff = users.findByRoleAndStoreIdAndStatus(Role.STAFF, document.storeId(),

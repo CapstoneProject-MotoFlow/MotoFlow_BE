@@ -48,6 +48,7 @@ public record StockCountDetailResponse(
      * @param bookQty         null for the counter
      * @param difference      counted minus book; null while uncounted, and for the counter
      * @param differenceValue difference at the current moving average cost; Owner only, null otherwise
+     * @param damagedValue    damaged change at the current moving average cost; Owner only, null otherwise
      * @param reason          why the count differs (Branch Manager); null for the counter
      */
     public record Line(
@@ -67,6 +68,7 @@ public record StockCountDetailResponse(
             Integer difference,
             Integer damagedChange,
             BigDecimal differenceValue,
+            BigDecimal damagedValue,
             String reason,
             boolean recountRequested,
             String recountReason,

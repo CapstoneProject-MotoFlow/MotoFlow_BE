@@ -112,7 +112,7 @@ class StockCountRequestApiTest extends StockCountTestData {
         create(ownerToken, store, ScopeType.WHOLE, null, "x", null, categoryA).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"));
         create(ownerToken, store, ScopeType.CATEGORY, null, "x", null, 99_999L).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG02"));
+                .andExpect(jsonPath("$.code").value("MSG269"));
         assertThat(requestCount()).isZero();
     }
 

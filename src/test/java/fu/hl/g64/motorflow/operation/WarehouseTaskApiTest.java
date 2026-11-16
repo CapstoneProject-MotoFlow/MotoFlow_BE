@@ -226,8 +226,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.current.assigneeId").value(manager.getId()))
                 .andExpect(jsonPath("$.current.selfAssigned").value(true))
-                .andExpect(jsonPath("$.noticeCode").value("MSG40"))
-                .andExpect(jsonPath("$.noticeMessage").value(MSG40))
+                .andExpect(jsonPath("$.noticeCode").doesNotExist())
                 .andExpect(jsonPath("$.eligibleAssignees[2].self").value(true))
                 .andExpect(jsonPath("$.eligibleAssignees[2].openTasks").value(1));
         // MSG40 speaks to the manager who took the task; another manager of the store sees who holds it.
@@ -248,7 +247,9 @@ class WarehouseTaskApiTest extends ApiTestUsers {
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE sales_order_id = ?", String.class,
                 order)).isEqualTo("DONE");
 
-        assign(token, TaskType.INSPECTION, receipt, manager.getId()).andExpect(status().isOk());
+        assign(token, TaskType.INSPECTION, receipt, manager.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.noticeCode").value("MSG40"));
         warehouseTasks.submitResult(principal(manager), TaskType.INSPECTION, receipt);
         warehouseTasks.confirmResult(principal(manager), TaskType.INSPECTION, receipt);
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ?", String.class,
@@ -258,7 +259,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
     }
 
     @Test
-    void aSoleBranchManagerCanTakeInspectionDispatchAndCountTasks() throws Exception {
+    void branchManagerCanTakeTasksWhileStaffAreActive() throws Exception {
         long receipt = supplierReceipt(store, "AWAITING_INSPECTION");
         long outgoing = transfer(store, otherStore, "AWAITING_DISPATCH");
         long count = stockCount("DRAFT");

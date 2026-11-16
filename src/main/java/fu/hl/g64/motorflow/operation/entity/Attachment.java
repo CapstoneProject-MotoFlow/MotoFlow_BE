@@ -51,9 +51,19 @@ public class Attachment {
     @Column(name = "uploaded_at", nullable = false)
     private LocalDateTime uploadedAt;
 
+    /** DISPATCH or EXTRA_DISPATCH when the file belongs to a transfer order; null for older files. */
+    @Column(length = 30)
+    private String purpose;
+
     /** A file the browser already uploaded to Cloudinary, attached to one record. */
     public static Attachment create(OwnerType ownerType, long ownerId, String fileName, String contentType,
                                     long fileSize, String storageKey, long uploadedBy, LocalDateTime now) {
+        return create(ownerType, ownerId, fileName, contentType, fileSize, storageKey, uploadedBy, now, null);
+    }
+
+    public static Attachment create(OwnerType ownerType, long ownerId, String fileName, String contentType,
+                                    long fileSize, String storageKey, long uploadedBy, LocalDateTime now,
+                                    String purpose) {
         Attachment attachment = new Attachment();
         attachment.ownerType = ownerType;
         attachment.ownerId = ownerId;
@@ -63,6 +73,7 @@ public class Attachment {
         attachment.storageKey = storageKey;
         attachment.uploadedBy = uploadedBy;
         attachment.uploadedAt = now;
+        attachment.purpose = purpose;
         return attachment;
     }
 }

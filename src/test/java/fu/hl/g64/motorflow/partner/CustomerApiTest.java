@@ -147,7 +147,8 @@ class CustomerApiTest extends IntegrationTest {
         long tam = createdId(send(post("/api/v1/customers"), bmToken, customer("Cửa hàng Tâm", null)));
         jdbc.update("UPDATE customer SET credit_status = 'ELIGIBLE' WHERE id = ?", hung);
 
-        // At CH02: 850 000 after payment and an applied adjustment; reversed allocation no longer counts in total debt (BR-71).
+        // At CH02: 1 000 000 opening, minus the verified 300 000, plus the applied 50 000 on the debt.
+        // The applied correction of the payment is not subtracted until reallocation runs, so the store debt is 750 000.
         long credit = receivable(hung, branch, order(branch, "COMPLETED", "CREDIT"), 1_000_000);
         long paid = payment("DEBT_PAYMENT", null, credit, 300_000, "VERIFIED");
         payment("DEBT_PAYMENT", null, credit, 100_000, "UNVERIFIED");
