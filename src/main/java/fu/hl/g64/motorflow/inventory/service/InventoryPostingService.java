@@ -67,12 +67,10 @@ public interface InventoryPostingService {
     List<List<LotQuantity>> moveAll(List<MovePosting> postings);
 
     /**
-     * {@link #move} of exactly the given lots into several statuses at once (a transfer receipt: passed into AVAILABLE,
-     * damaged into DAMAGED). The statuses are filled in enum order from the lots in the given order.
+     * Moves the given lots of every line into several statuses at once (a transfer receipt: passed into AVAILABLE,
+     * damaged into DAMAGED). Statuses are filled in enum order from the lots in the given order. Stock rows are
+     * locked before any lot is chosen.
      */
-    void moveToStatuses(SplitMovePosting posting);
-
-    /** {@link #moveToStatuses} for every line of one document, locking stock rows before choosing lots. */
     void moveToStatusesAll(List<SplitMovePosting> postings);
 
     /**

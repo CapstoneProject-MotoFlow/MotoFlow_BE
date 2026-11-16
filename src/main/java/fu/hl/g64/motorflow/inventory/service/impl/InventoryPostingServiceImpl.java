@@ -201,12 +201,6 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
-    public void moveToStatuses(SplitMovePosting p) {
-        moveToStatusesAll(List.of(p));
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    @Override
     public void moveToStatusesAll(List<SplitMovePosting> postings) {
         if (postings.isEmpty()) {
             return;

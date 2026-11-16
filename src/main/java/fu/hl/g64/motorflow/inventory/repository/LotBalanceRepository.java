@@ -30,20 +30,8 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
     Optional<LotBalance> findForUpdate(Long lotId, Long storeId, StockStatus status);
 
     /**
-     * Lots of a part in one warehouse and status that still hold stock, in picking order: earliest expiry first
-     * (lots without expiry last), then oldest received (FEFO, then FIFO). Row-locked.
-     */
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("""
-            select b from LotBalance b, Lot l
-            where l.id = b.lotId and l.productId = :productId
-              and b.storeId = :storeId and b.stockStatus = :status and b.quantity > 0
-            order by l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
-    List<LotBalance> findPickableForUpdate(Long storeId, Long productId, StockStatus status);
-
-    /**
-     * Pickable lots of several parts in one warehouse and status, row-locked, in product id order and then the
-     * picking order of {@link #findPickableForUpdate(Long, Long, StockStatus)}.
+     * Pickable lots of the given parts in one warehouse and status, row-locked. Ordered by product id, then earliest
+     * expiry (lots without expiry last), then oldest received (FEFO, then FIFO).
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
