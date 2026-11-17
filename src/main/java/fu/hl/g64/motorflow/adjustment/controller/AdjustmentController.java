@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.adjustment.dto.AdjustmentDetail;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentPreview;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSearch;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSummary;
+import fu.hl.g64.motorflow.adjustment.dto.CorrectionRequest;
 import fu.hl.g64.motorflow.adjustment.dto.RejectAdjustmentRequest;
 import fu.hl.g64.motorflow.adjustment.dto.StockLossRequest;
 import fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus;
@@ -55,6 +56,21 @@ public class AdjustmentController {
     public AdjustmentDetail submitStockLoss(@AuthenticationPrincipal AuthenticatedUser user,
                                             @Valid @RequestBody StockLossRequest request) {
         return adjustments.submitStockLoss(user, request);
+    }
+
+    @Operation(summary = "Preview the correction of a posted document; nothing is saved (UC-81 steps 2-5)")
+    @PostMapping("/corrections/preview")
+    public AdjustmentPreview previewCorrection(@AuthenticationPrincipal AuthenticatedUser user,
+                                              @Valid @RequestBody CorrectionRequest request) {
+        return adjustments.previewCorrection(user, request);
+    }
+
+    @Operation(summary = "Submit the correction of a posted document for Owner's approval (UC-81 steps 6-7)")
+    @PostMapping("/corrections")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AdjustmentDetail submitCorrection(@AuthenticationPrincipal AuthenticatedUser user,
+                                             @Valid @RequestBody CorrectionRequest request) {
+        return adjustments.submitCorrection(user, request);
     }
 
     @Operation(summary = "Adjustment requests of the user's store, or of every store for Owner (UC-82)",
