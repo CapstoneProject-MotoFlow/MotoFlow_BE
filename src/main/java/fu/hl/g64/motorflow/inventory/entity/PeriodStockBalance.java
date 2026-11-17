@@ -61,4 +61,24 @@ public class PeriodStockBalance {
 
     @Column(name = "period_avg_unit_cost", precision = 18, scale = 4)
     private BigDecimal periodAvgUnitCost;
+
+    /** UC-100: the row stored when the period is closed (BR-85); closing = opening + in − out (CHECK in the schema). */
+    public static PeriodStockBalance of(long periodId, long storeId, long productId, long openingQty,
+                                        long openingValue, long inQty, long inValue, long outQty, long outValue,
+                                        BigDecimal periodAvgUnitCost) {
+        PeriodStockBalance b = new PeriodStockBalance();
+        b.inventoryPeriodId = periodId;
+        b.storeId = storeId;
+        b.productId = productId;
+        b.openingQty = Math.toIntExact(openingQty);
+        b.openingValue = openingValue;
+        b.inQty = Math.toIntExact(inQty);
+        b.inValue = inValue;
+        b.outQty = Math.toIntExact(outQty);
+        b.outValue = outValue;
+        b.closingQty = Math.toIntExact(openingQty + inQty - outQty);
+        b.closingValue = openingValue + inValue - outValue;
+        b.periodAvgUnitCost = periodAvgUnitCost;
+        return b;
+    }
 }

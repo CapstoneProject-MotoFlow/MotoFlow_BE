@@ -2,7 +2,9 @@ package fu.hl.g64.motorflow.inventory.repository;
 
 import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
 import fu.hl.g64.motorflow.inventory.entity.enums.InventoryPeriodStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
@@ -12,6 +14,27 @@ import java.util.Optional;
 public interface InventoryPeriodRepository extends JpaRepository<InventoryPeriod, Long> {
 
     Optional<InventoryPeriod> findByPeriodMonth(LocalDate periodMonth);
+
+    /**
+     * A period about to receive movements, share-locked: postings into one period run side by side, but closing it
+     * (which takes {@link #findForClosingById}) waits for them, and they see it CLOSED once it is (MSG85).
+     */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select p from InventoryPeriod p where p.periodMonth = :periodMonth")
+    Optional<InventoryPeriod> findForPostingByPeriodMonth(LocalDate periodMonth);
+
+    /** As {@link #findForPostingByPeriodMonth}, for a count adjustment naming its period (BR-83). */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select p from InventoryPeriod p where p.id = :id")
+    Optional<InventoryPeriod> findForPostingById(long id);
+
+    /** UC-100: the period being closed, locked against postings and a second close. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from InventoryPeriod p where p.id = :id")
+    Optional<InventoryPeriod> findForClosingById(long id);
+
+    /** UC-100: is there a period after this month? */
+    boolean existsByPeriodMonthAfter(LocalDate periodMonth);
 
     /** UC-103: the latest closed period that ended before the date. */
     Optional<InventoryPeriod> findFirstByStatusAndToDateBeforeOrderByToDateDesc(InventoryPeriodStatus status,

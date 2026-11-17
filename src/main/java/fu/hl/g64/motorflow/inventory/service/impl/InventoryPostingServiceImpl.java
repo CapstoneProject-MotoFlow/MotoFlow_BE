@@ -509,7 +509,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         if (periodId == null || occurredAt == null) {
             throw new IllegalArgumentException("periodId and occurredAt go together");
         }
-        InventoryPeriod period = periods.findById(periodId)
+        InventoryPeriod period = periods.findForPostingById(periodId)
                 .orElseThrow(() -> new IllegalArgumentException("unknown period " + periodId));
         if (!period.isOpen()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
