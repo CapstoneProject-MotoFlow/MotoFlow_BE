@@ -17,6 +17,10 @@ public interface InventoryPeriodRepository extends JpaRepository<InventoryPeriod
     Optional<InventoryPeriod> findFirstByStatusAndToDateBeforeOrderByToDateDesc(InventoryPeriodStatus status,
                                                                                LocalDate date);
 
+    /** BR-85: the latest closed period before the month, whose closing balances open the periods after it. */
+    Optional<InventoryPeriod> findFirstByStatusAndPeriodMonthBeforeOrderByPeriodMonthDesc(InventoryPeriodStatus status,
+                                                                                         LocalDate periodMonth);
+
     /**
      * Opens the calendar month as a period if it does not exist yet, chained to the latest earlier period.
      * Safe when two transactions do it at once (period_month is unique).
