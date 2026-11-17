@@ -79,6 +79,47 @@ public class PurchaseOrder {
         return order;
     }
 
+    /**
+     * PM 17/11: a draft saved by its creator. It holds no receiving task, sends no notification and is seen by its
+     * creator only; {@code createdAt} is when it was last saved until it is submitted.
+     */
+    public static PurchaseOrder draft(long supplierId, long storeId, LocalDate expectedArrival, String note,
+                                      long createdBy, LocalDateTime now) {
+        PurchaseOrder order = create(supplierId, storeId, expectedArrival, note, createdBy, now);
+        order.status = PurchaseOrderStatus.DRAFT;
+        return order;
+    }
+
+    public boolean isDraft() {
+        return status == PurchaseOrderStatus.DRAFT;
+    }
+
+    /** The whole content of a draft replaced; the lines change through {@link PurchaseOrderLine}. */
+    public void replaceDraft(long supplierId, long storeId, LocalDate expectedArrival, String note,
+                             LocalDateTime now) {
+        requireDraft();
+        this.supplierId = supplierId;
+        this.storeId = storeId;
+        this.expectedArrival = expectedArrival;
+        this.note = note;
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    /** "Tạo đơn" on a draft: it becomes a PO waiting for delivery with the same id, created now. */
+    public void submit(LocalDateTime now) {
+        requireDraft();
+        status = PurchaseOrderStatus.AWAITING_DELIVERY;
+        createdAt = now;
+        updatedAt = now;
+    }
+
+    private void requireDraft() {
+        if (status != PurchaseOrderStatus.DRAFT) {
+            throw new IllegalStateException("purchase order " + id + " is " + status + ", expected DRAFT");
+        }
+    }
+
     /** BR-55: the PO buys the shortage of this replenishment request. */
     public void linkReplenishment(Long replenishmentRequestId) {
         this.replenishmentRequestId = replenishmentRequestId;

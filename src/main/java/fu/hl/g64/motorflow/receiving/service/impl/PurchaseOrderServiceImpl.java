@@ -83,6 +83,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -144,7 +145,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Transactional(readOnly = true)
     @Override
     public PurchaseOrderDetail get(AuthenticatedUser user, long id) {
-        PurchaseOrder order = orders.findById(id).orElseThrow(PurchaseOrderServiceImpl::notFound);
+        PurchaseOrder order = orders.findById(id).filter(found -> !found.isDraft())
+                .orElseThrow(PurchaseOrderServiceImpl::notFound);
         if (!isOwner(user) && !Objects.equals(order.getStoreId(), user.storeId())) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
@@ -155,6 +157,24 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Transactional
     @Override
     public PurchaseOrderDetail create(AuthenticatedUser owner, PurchaseOrderRequest request) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        Checked checked = check(owner, request, now, true);
+        String note = text(request.note());
+        PurchaseOrder order = orders.save(PurchaseOrder.create(checked.supplier().getId(), checked.store().getId(),
+                request.expectedArrival(), note, owner.id(), now));
+        saveLines(order.getId(), request);
+        return placed(owner, order, request, checked, now);
+    }
+
+    /** What UC-40 steps 3-6 checked: the supplier and the receiving warehouse. */
+    private record Checked(Supplier supplier, Store store) {
+    }
+
+    /**
+     * UC-40 steps 3-6: MSG73/MSG129 supplier, MSG46 warehouse, the lines, the expected arrival, and when
+     * {@code placing} the replenishment request it buys for (a draft holds none).
+     */
+    private Checked check(AuthenticatedUser owner, PurchaseOrderRequest request, LocalDateTime now, boolean placing) {
         Supplier supplier = suppliers.findById(request.supplierId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG73"));
         if (supplier.getStatus() != SupplierStatus.ACTIVE) {
@@ -163,29 +183,110 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         Store store = stores.findById(request.storeId()).filter(s -> s.getStatus() == StoreStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG46"));
         checkLines(request.lines(), Set.of());
-        LocalDateTime now = LocalDateTime.now(clock);
         checkArrival(request.expectedArrival(), null, now.toLocalDate());
         if (request.replenishmentRequestId() != null) {
+            if (!placing) {
+                // A PO bought from a replenishment request is placed at once (screen 7.x); it has no draft.
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+            }
             Map<Long, Integer> quantities = new LinkedHashMap<>();
             request.lines().forEach(line -> quantities.put(line.productId(), line.quantity()));
             replenishments.prepareForPurchase(owner, request.replenishmentRequestId(), store.getId(), quantities,
                     request.includeUnallocated());
         }
+        return new Checked(supplier, store);
+    }
 
-        String note = text(request.note());
-        PurchaseOrder created = PurchaseOrder.create(supplier.getId(), store.getId(), request.expectedArrival(), note,
-                owner.id(), now);
-        created.linkReplenishment(request.replenishmentRequestId());
-        PurchaseOrder order = orders.save(created);
-        orderLines.saveAll(request.lines().stream().map(line -> PurchaseOrderLine.create(order.getId(),
+    private void saveLines(long orderId, PurchaseOrderRequest request) {
+        orderLines.saveAll(request.lines().stream().map(line -> PurchaseOrderLine.create(orderId,
                 line.productId(), line.quantity(), line.purchasePrice())).toList());
+    }
+
+    /** UC-40 steps 7-8 for a PO now placed: its history starts and the receiving warehouse is told. */
+    private PurchaseOrderDetail placed(AuthenticatedUser owner, PurchaseOrder order, PurchaseOrderRequest request,
+                                       Checked checked, LocalDateTime now) {
+        order.linkReplenishment(request.replenishmentRequestId());
         auditLog.save(AuditLog.record(PurchaseOrderHistory.ENTITY, order.getId(), PurchaseOrderHistory.CREATED,
-                owner.id(), null, null, PurchaseOrderHistory.snapshot(order.getExpectedArrival(), note,
+                owner.id(), null, null, PurchaseOrderHistory.snapshot(order.getExpectedArrival(), order.getNote(),
                         values(request.lines())), now));
-        notifications.notifyStoreManagers(store.getId(), "PURCHASE_ORDER_CREATED",
-                "Có đơn nhập hàng mới %s từ nhà cung cấp %s.".formatted(label(order), supplier.getSupplierName()),
-                REF_TYPE, order.getId());
+        notifications.notifyStoreManagers(checked.store().getId(), "PURCHASE_ORDER_CREATED",
+                "Có đơn nhập hàng mới %s từ nhà cung cấp %s.".formatted(label(order),
+                        checked.supplier().getSupplierName()), REF_TYPE, order.getId());
         return detail(owner, order);
+    }
+
+    // PM 17/11 D1: purchase order drafts
+    @Transactional(readOnly = true)
+    @Override
+    public PageResponse<PurchaseOrderSummary> drafts(AuthenticatedUser owner, String q, int page, int size) {
+        Specification<PurchaseOrder> mine = (root, query, cb) -> cb.and(
+                cb.equal(root.get("status"), PurchaseOrderStatus.DRAFT),
+                cb.equal(root.get("createdBy"), owner.id()));
+        Page<PurchaseOrder> found = orders.findAll(mine.and(matchingText(q)),
+                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
+                        Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
+        return PageResponse.of(found, summaries(owner, found.getContent(), LocalDate.now(clock)));
+    }
+
+    @Transactional
+    @Override
+    public PurchaseOrderDetail createDraft(AuthenticatedUser owner, PurchaseOrderRequest request) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        Checked checked = check(owner, request, now, false);
+        PurchaseOrder draft = orders.save(PurchaseOrder.draft(checked.supplier().getId(), checked.store().getId(),
+                request.expectedArrival(), text(request.note()), owner.id(), now));
+        saveLines(draft.getId(), request);
+        return detail(owner, draft);
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public PurchaseOrderDetail draft(AuthenticatedUser owner, long id) {
+        return detail(owner, ownDraft(owner, orders.findById(id)));
+    }
+
+    @Transactional
+    @Override
+    public PurchaseOrderDetail updateDraft(AuthenticatedUser owner, long id, PurchaseOrderRequest request) {
+        PurchaseOrder draft = ownDraft(owner, orders.findByIdForUpdate(id));
+        LocalDateTime now = LocalDateTime.now(clock);
+        Checked checked = check(owner, request, now, false);
+        replaceDraft(draft, request, checked, now);
+        return detail(owner, draft);
+    }
+
+    @Transactional
+    @Override
+    public PurchaseOrderDetail submitDraft(AuthenticatedUser owner, long id, PurchaseOrderRequest request) {
+        PurchaseOrder draft = ownDraft(owner, orders.findByIdForUpdate(id));
+        LocalDateTime now = LocalDateTime.now(clock);
+        // Checked exactly as a new PO; a refusal rolls everything back, so the draft keeps what it had.
+        Checked checked = check(owner, request, now, true);
+        replaceDraft(draft, request, checked, now);
+        draft.submit(now);
+        return placed(owner, draft, request, checked, now);
+    }
+
+    @Transactional
+    @Override
+    public void deleteDraft(AuthenticatedUser owner, long id) {
+        PurchaseOrder draft = ownDraft(owner, orders.findByIdForUpdate(id));
+        orderLines.deleteAll(orderLines.findByPurchaseOrderIdOrderByIdAsc(draft.getId()));
+        orders.delete(draft);
+    }
+
+    private void replaceDraft(PurchaseOrder draft, PurchaseOrderRequest request, Checked checked, LocalDateTime now) {
+        orderLines.deleteAll(orderLines.findByPurchaseOrderIdOrderByIdAsc(draft.getId()));
+        orderLines.flush();
+        draft.replaceDraft(checked.supplier().getId(), checked.store().getId(), request.expectedArrival(),
+                text(request.note()), now);
+        saveLines(draft.getId(), request);
+    }
+
+    /** N5: a draft is seen by its creator only; anyone else, or an id that is no draft, gets MSG131 (404). */
+    private static PurchaseOrder ownDraft(AuthenticatedUser owner, Optional<PurchaseOrder> found) {
+        return found.filter(order -> order.isDraft() && Objects.equals(order.getCreatedBy(), owner.id()))
+                .orElseThrow(PurchaseOrderServiceImpl::notFound);
     }
 
     // UC-42
@@ -260,7 +361,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
      * MSG130 once cancelled, MSG25 once a GRN has been recorded for it.
      */
     private PurchaseOrder lockChangeable(long id) {
-        PurchaseOrder order = orders.findByIdForUpdate(id).orElseThrow(PurchaseOrderServiceImpl::notFound);
+        PurchaseOrder order = orders.findByIdForUpdate(id).filter(found -> !found.isDraft())
+                .orElseThrow(PurchaseOrderServiceImpl::notFound);
         if (order.getStatus() == PurchaseOrderStatus.CANCELLED) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG130");
         }
@@ -406,7 +508,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Transactional(readOnly = true)
     @Override
     public PurchaseOrderReceivingView receivingView(AuthenticatedUser user, long id) {
-        PurchaseOrder order = orders.findById(id).orElseThrow(PurchaseOrderServiceImpl::notFound);
+        PurchaseOrder order = orders.findById(id).filter(found -> !found.isDraft())
+                .orElseThrow(PurchaseOrderServiceImpl::notFound);
         boolean allowed = user.role() == Role.BRANCH_MANAGER ? Objects.equals(order.getStoreId(), user.storeId())
                 : warehouseTasks.holds(user, TaskType.SUPPLIER_RECEIVING, id);
         if (!allowed) {
@@ -482,19 +585,27 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             if (to != null) {
                 where.add(cb.lessThan(root.get("createdAt"), to.plusDays(1).atStartOfDay()));
             }
-            if (StringUtils.hasText(q)) {
-                String needle = q.strip().toLowerCase(Locale.ROOT);
-                String like = "%" + needle + "%";
-                Subquery<Long> bySupplier = query.subquery(Long.class);
-                Root<Supplier> supplier = bySupplier.from(Supplier.class);
-                bySupplier.select(supplier.get("id")).where(cb.or(
-                        cb.like(cb.lower(supplier.get("supplierName")), like),
-                        cb.like(cb.lower(supplier.get("supplierCode")), like)));
-                Predicate supplierMatches = root.get("supplierId").in(bySupplier);
-                Long number = orderNumber(needle);
-                where.add(number == null ? supplierMatches : cb.or(cb.equal(root.get("id"), number), supplierMatches));
-            }
+            where.add(matchingText(q).toPredicate(root, query, cb));
             return cb.and(where.toArray(Predicate[]::new));
+        };
+    }
+
+    /** q: the PO number (12, #12, DNH-0012) or part of the supplier's name or code; everything when blank. */
+    private static Specification<PurchaseOrder> matchingText(String q) {
+        return (root, query, cb) -> {
+            if (!StringUtils.hasText(q)) {
+                return cb.conjunction();
+            }
+            String needle = q.strip().toLowerCase(Locale.ROOT);
+            String like = "%" + needle + "%";
+            Subquery<Long> bySupplier = query.subquery(Long.class);
+            Root<Supplier> supplier = bySupplier.from(Supplier.class);
+            bySupplier.select(supplier.get("id")).where(cb.or(
+                    cb.like(cb.lower(supplier.get("supplierName")), like),
+                    cb.like(cb.lower(supplier.get("supplierCode")), like)));
+            Predicate supplierMatches = root.get("supplierId").in(bySupplier);
+            Long number = orderNumber(needle);
+            return number == null ? supplierMatches : cb.or(cb.equal(root.get("id"), number), supplierMatches);
         };
     }
 

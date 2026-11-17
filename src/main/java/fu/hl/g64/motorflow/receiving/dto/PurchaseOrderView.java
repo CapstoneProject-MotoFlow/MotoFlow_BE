@@ -19,7 +19,8 @@ public enum PurchaseOrderView {
     AWAITING_RECEIVING_ASSIGNMENT(EnumSet.of(PurchaseOrderStatus.AWAITING_DELIVERY, PurchaseOrderStatus.RECEIVING)),
     FULLY_RECEIVED(EnumSet.of(PurchaseOrderStatus.FULLY_RECEIVED)),
     CANCELLED(EnumSet.of(PurchaseOrderStatus.CANCELLED)),
-    ALL(EnumSet.allOf(PurchaseOrderStatus.class));
+    /** Every PO; drafts are never listed here (PM 17/11, N4). */
+    ALL(EnumSet.complementOf(EnumSet.of(PurchaseOrderStatus.DRAFT)));
 
     private final Set<PurchaseOrderStatus> statuses;
 

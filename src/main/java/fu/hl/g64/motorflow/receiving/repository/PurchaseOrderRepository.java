@@ -14,7 +14,9 @@ import java.util.Optional;
 public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, Long>,
         JpaSpecificationExecutor<PurchaseOrder> {
 
-    Page<PurchaseOrder> findBySupplierId(Long supplierId, Pageable pageable);
+    /** The supplier page's POs; drafts are left out (PM 17/11, N4). */
+    Page<PurchaseOrder> findBySupplierIdAndStatusNot(Long supplierId,
+            fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus status, Pageable pageable);
 
     /**
      * The PO row, locked. Changing or cancelling a PO (UC-42) and recording its first GRN (UC-106) both lock it first,
