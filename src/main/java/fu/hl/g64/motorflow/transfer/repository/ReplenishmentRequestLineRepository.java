@@ -19,7 +19,10 @@ public interface ReplenishmentRequestLineRepository extends JpaRepository<Replen
         Product getProduct();
     }
 
-    /** Screen 7.1.2: active parts below threshold at the store that no unclosed request of the store already asks for. */
+    /**
+     * Screen 7.1.2: active parts below threshold at the store that no unclosed request of the store already asks for.
+     * A draft is not a request yet, so its parts are still suggested (PM 17/11 N4).
+     */
     @Query("""
             select b as balance, p as product
             from StockBalance b
@@ -34,7 +37,8 @@ public interface ReplenishmentRequestLineRepository extends JpaRepository<Replen
                   join ReplenishmentRequest r on r.id = l.replenishmentRequestId
                   where r.requestingStoreId = b.storeId
                     and l.productId = b.productId
-                    and r.status <> fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.CLOSED)
+                    and r.status <> fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.CLOSED
+                    and r.status <> fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.DRAFT)
             order by p.sku
             """)
     List<LowStockPart> findLowStockParts(@Param("storeId") long storeId);

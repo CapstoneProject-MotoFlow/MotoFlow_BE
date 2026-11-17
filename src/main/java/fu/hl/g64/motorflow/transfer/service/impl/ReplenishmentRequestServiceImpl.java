@@ -148,7 +148,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     @Transactional(readOnly = true)
     @Override
     public ReplenishmentDetailResponse detail(AuthenticatedUser user, long id) {
-        ReplenishmentRequest request = requests.findById(id)
+        ReplenishmentRequest request = requests.findSubmitted(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG95"));
         if (!storeScope.seesEveryStore(user) && !request.getRequestingStoreId().equals(user.storeId())) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");

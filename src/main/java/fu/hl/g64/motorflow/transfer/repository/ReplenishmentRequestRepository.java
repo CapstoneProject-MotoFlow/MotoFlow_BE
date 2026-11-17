@@ -17,11 +17,19 @@ import java.util.Optional;
 
 public interface ReplenishmentRequestRepository extends JpaRepository<ReplenishmentRequest, Long> {
 
+    /** The number of requests in a status; drafts have their own status, so they are never counted with another. */
     long countByStatus(ReplenishmentRequestStatus status);
 
-    /** UC-71: orders for one request and its purchase hand-over are planned one after the other. */
+    /** A submitted request: a draft is not one (PM 17/11). */
+    @Query("select r from ReplenishmentRequest r where r.id = :id and " + SUBMITTED)
+    Optional<ReplenishmentRequest> findSubmitted(@Param("id") long id);
+
+    /**
+     * UC-71: orders for one request and its purchase hand-over are planned one after the other. A draft is not a
+     * request yet, so it cannot be coordinated (PM 17/11).
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select r from ReplenishmentRequest r where r.id = :id")
+    @Query("select r from ReplenishmentRequest r where r.id = :id and " + SUBMITTED)
     Optional<ReplenishmentRequest> findByIdForUpdate(@Param("id") long id);
 
     /** UC-69: one request with the totals of its lines. */
@@ -44,8 +52,12 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
         String getSupplierName();
     }
 
-    String SEARCH = """
-            where (:status is null or r.status = :status)
+    /** Every status but DRAFT: what the creator has not submitted is in no list or count (PM 17/11 N4). */
+    String SUBMITTED = "r.status <> fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.DRAFT";
+
+    String SEARCH = "where " + SUBMITTED + """
+
+              and (:status is null or r.status = :status)
               and (:storeId is null or r.requestingStoreId = :storeId)
               and cast(r.createdAt as LocalDate) >= coalesce(:from, cast(r.createdAt as LocalDate))
               and cast(r.createdAt as LocalDate) <= coalesce(:to, cast(r.createdAt as LocalDate))
