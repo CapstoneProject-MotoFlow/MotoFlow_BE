@@ -196,7 +196,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG138");
         }
         // BR-21: the PO lock keeps a change or cancellation of the PO from passing this new GRN.
-        PurchaseOrder order = orders.findByIdForUpdate(purchaseOrderId)
+        PurchaseOrder order = orders.findByIdForUpdate(purchaseOrderId).filter(found -> !found.isDraft())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG131"));
         // Lecturer feedback 12/11: whoever holds the PO's receiving task records the GRN, a Branch Manager too.
         warehouseTasks.requireAssignee(user, TaskType.SUPPLIER_RECEIVING, order.getId());
