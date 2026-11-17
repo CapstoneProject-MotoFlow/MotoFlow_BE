@@ -76,7 +76,7 @@ class PurchaseOrderReplenishmentApiTest extends PurchaseOrderTestData {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG261"))
                 .andExpect(jsonPath("$.message")
-                        .value("Yêu cầu bổ sung #" + request + " đã có yêu cầu nhập hàng chưa hủy."));
+                        .value("Yêu cầu bổ sung #" + request + " đã có đơn nhập hàng chưa hủy."));
 
         cancel(ownerToken, first, "Nhà cung cấp hết hàng").andExpect(status().isOk());
         create(ownerToken, purchase(giaLam, request, true)).andExpect(status().isCreated());

@@ -48,7 +48,7 @@ class TransitLossAdjustmentApiTest extends TransferFlowTestData {
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
 
         // Only the destination reports it, only what is still in transit, and never a chosen lot.
-        report("bmcg", order, null, 1).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG265"));
+        report("bmcg", order, null, 1).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG279"));
         report("bmlb", order, null, 2).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG257"))
                 .andExpect(jsonPath("$.message").value("Số lượng của phụ tùng MA-PHANH vượt số còn có thể điều chỉnh: "

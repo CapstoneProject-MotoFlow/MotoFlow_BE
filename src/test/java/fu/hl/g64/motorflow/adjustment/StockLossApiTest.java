@@ -96,7 +96,7 @@ class StockLossApiTest extends AdjustmentTestData {
         act(ownerToken, id, "apply").andExpect(status().isOk());
         assertThat(movements(id)).hasSize(2);
         reject(ownerToken, id, "Không đủ bằng chứng").andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("MSG267"));
+                .andExpect(jsonPath("$.code").value("MSG281"));
     }
 
     @Test
@@ -135,7 +135,7 @@ class StockLossApiTest extends AdjustmentTestData {
         twoSources.put("transferOrderId", 1);
         twoSources.put("goodsReceiptNoteId", 1);
         submit(managerToken, twoSources).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG266"));
+                .andExpect(jsonPath("$.code").value("MSG280"));
         Map<String, Object> noReason = loss(null, line(oil, null, "AVAILABLE", 1));
         noReason.put("reason", " ");
         submit(managerToken, noReason).andExpect(status().isBadRequest())
@@ -170,7 +170,7 @@ class StockLossApiTest extends AdjustmentTestData {
                 .andExpect(jsonPath("$.history[1].reason").value("Ảnh không thấy hàng hỏng"));
         assertThat(notifications(manager, "ADJUSTMENT_REJECTED")).isEqualTo(1);
         act(ownerToken, rejected, "approve").andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("MSG267"))
+                .andExpect(jsonPath("$.code").value("MSG281"))
                 .andExpect(jsonPath("$.message").value("Đề nghị #" + rejected + " đang ở trạng thái REJECTED nên "
                         + "không thể thực hiện thao tác này."));
         assertThat(available(oil)).isEqualTo(12);

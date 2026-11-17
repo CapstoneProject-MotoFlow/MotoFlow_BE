@@ -23,6 +23,12 @@ public interface AttachmentService {
      */
     void attach(OwnerType ownerType, long ownerId, List<AttachmentUpload> files, long uploadedBy);
 
+    /**
+     * Same as {@link #attach(OwnerType, long, List, long)} and records why the file was attached.
+     * Transfer dispatch uses {@code DISPATCH}; an extra dispatch uses {@code EXTRA_DISPATCH}.
+     */
+    void attach(OwnerType ownerType, long ownerId, List<AttachmentUpload> files, long uploadedBy, String purpose);
+
     /** The files of one record, oldest first. */
     List<AttachmentResponse> list(OwnerType ownerType, long ownerId);
 

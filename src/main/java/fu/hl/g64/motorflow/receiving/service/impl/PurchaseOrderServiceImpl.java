@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.receiving.service.impl;
 
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
@@ -16,7 +17,9 @@ import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Progress;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Standing;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
+import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
+import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
@@ -126,7 +129,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         PurchaseOrderView view = search.view() == null ? PurchaseOrderView.OPEN : search.view();
         LocalDate from = search.createdFrom();
         LocalDate to = search.createdTo();
-        if (view != PurchaseOrderView.OPEN) {
+        if (view != PurchaseOrderView.OPEN && view != PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT) {
             to = to != null ? to : today;
             from = from != null ? from : to.minusDays(DEFAULT_DAYS - 1);
         }
@@ -179,7 +182,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 owner.id(), null, null, PurchaseOrderHistory.snapshot(order.getExpectedArrival(), note,
                         values(request.lines())), now));
         notifications.notifyStoreManagers(store.getId(), "PURCHASE_ORDER_CREATED",
-                "Có yêu cầu nhập hàng mới %s từ nhà cung cấp %s.".formatted(label(order), supplier.getSupplierName()),
+                "Có đơn nhập hàng mới %s từ nhà cung cấp %s.".formatted(label(order), supplier.getSupplierName()),
                 REF_TYPE, order.getId());
         return detail(owner, order);
     }
@@ -229,7 +232,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         auditLog.save(AuditLog.record(PurchaseOrderHistory.ENTITY, id, PurchaseOrderHistory.UPDATED, owner.id(),
                 reason, before, after, now));
         notifications.notifyStoreManagers(order.getStoreId(), "PURCHASE_ORDER_UPDATED",
-                "Yêu cầu nhập hàng %s đã được cập nhật. Lý do: %s".formatted(label(order), reason), REF_TYPE, id);
+                "Đơn nhập hàng %s đã được cập nhật. Lý do: %s".formatted(label(order), reason), REF_TYPE, id);
         return detail(owner, order);
     }
 
@@ -247,7 +250,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         auditLog.save(AuditLog.record(PurchaseOrderHistory.ENTITY, id, PurchaseOrderHistory.CANCELLED, owner.id(),
                 why, now));
         notifications.notifyStoreManagers(order.getStoreId(), "PURCHASE_ORDER_CANCELLED",
-                "Yêu cầu nhập hàng %s đã bị hủy. Lý do: %s".formatted(label(order), why), REF_TYPE, id);
+                "Đơn nhập hàng %s đã bị hủy. Lý do: %s".formatted(label(order), why), REF_TYPE, id);
         return detail(owner, order);
     }
 
@@ -429,7 +432,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                             c.found().getGoodsReceiptNoteId(), c.found().getProductId(), part.getSku(),
                             part.getPartName(), c.openReplacementQty());
                 }).toList();
-        return new PurchaseOrderReceivingView(id, label(order), order.getStatus(), supplier.getId(),
+        return new PurchaseOrderReceivingView(id, "#" + order.getId(), order.getStatus(), supplier.getId(),
                 supplier.getSupplierCode(), supplier.getSupplierName(), order.getStoreId(), storeName,
                 order.getExpectedArrival(), open.receipt(), open.replacement(), lineRows, caseRows);
     }
@@ -458,6 +461,14 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             where.add(root.get("status").in(view.statuses()));
+            if (view == PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT) {
+                Subquery<Long> held = query.subquery(Long.class);
+                Root<WarehouseTask> task = held.from(WarehouseTask.class);
+                held.select(task.get("id")).where(cb.equal(task.get("purchaseOrderId"), root.get("id")),
+                        cb.equal(task.get("taskType"), TaskType.SUPPLIER_RECEIVING),
+                        cb.equal(task.get("status"), WarehouseTaskStatus.ASSIGNED));
+                where.add(cb.not(cb.exists(held)));
+            }
             if (storeId != null) {
                 where.add(cb.equal(root.get("storeId"), storeId));
             }
@@ -486,9 +497,10 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         };
     }
 
-    /** "12" or "#12" read as PO number 12; anything else is no PO number. */
+    /** "12", "#12" or "DNH-0012" read as PO number 12; anything else is no PO number. */
     private static Long orderNumber(String needle) {
-        String digits = needle.startsWith("#") ? needle.substring(1).strip() : needle;
+        String digits = needle.startsWith("#") ? needle.substring(1).strip()
+                : needle.regionMatches(true, 0, "DNH-", 0, 4) ? needle.substring(4).strip() : needle;
         if (digits.isEmpty() || digits.length() > 18 || !digits.chars().allMatch(c -> c >= '0' && c <= '9')) {
             return null;
         }
@@ -500,9 +512,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         return order.isOpen() && order.getExpectedArrival() != null && order.getExpectedArrival().isBefore(today);
     }
 
-    /** How a PO is named in notifications and messages: its number. The table has no separate code. */
+    /** How a PO is named in notifications and messages, for example DNH-0012 (PM 15/11). */
     private static String label(PurchaseOrder order) {
-        return "#" + order.getId();
+        return PurchaseOrderCode.of(order.getId());
     }
 
     private static String text(String value) {

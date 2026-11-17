@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.operation.service.impl;
 
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.AccountStatus;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
@@ -129,8 +130,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             }
         });
         try {
-            tasks.saveAndFlush(WarehouseTask.assign(type, documentId, assignee.getId(), manager.id(),
-                    LocalDateTime.now(clock)));
+            tasks.saveAndFlush(WarehouseTask.assign(type, documentId, document.storeId(), assignee.getId(),
+                    manager.id(), LocalDateTime.now(clock)));
         } catch (DataIntegrityViolationException e) {
             // Another Branch Manager gave the document to someone between our read and our insert.
             throw new BusinessException(HttpStatus.CONFLICT, "MSG123");
@@ -195,9 +196,17 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                         : tasks.findHistory(type, documentId).stream().findFirst()
                         .filter(latest -> latest.getStatus() == WarehouseTaskStatus.DONE))
                 .orElseThrow(() -> new IllegalStateException("no " + type + " result to confirm for " + documentId));
-        // BR-26: whoever recorded the result, a Branch Manager who took the task included (MSG40), cannot confirm it.
         if (task.getAssignedTo() == confirmer.id()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, type == TaskType.INSPECTION ? "MSG32" : "MSG124");
+            if (type == TaskType.PICKING) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG124");
+            }
+            // K1, BR-26: a Branch Manager who took the task may confirm it; the Owner is told.
+            if (open.isPresent()) {
+                notifications.notifyOwners("TASK_SELF_CONFIRMED",
+                        "Branch Manager %s đã tự xác nhận kết quả %s do chính mình thực hiện."
+                                .formatted(confirmer.fullName(), describe(type, documentId)),
+                        refType(type), documentId);
+            }
         }
         if (open.isPresent()) {
             task.complete();
@@ -219,7 +228,7 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         receiving.finishReceiving();
         // The new receipt has no task yet; the Branch Manager who gave the receiving gave its inspection too. The
         // receiver knows, so nobody is notified.
-        tasks.saveAndFlush(WarehouseTask.assign(TaskType.INSPECTION, receiptId, receiver.id(),
+        tasks.saveAndFlush(WarehouseTask.assign(TaskType.INSPECTION, receiptId, receiving.getStoreId(), receiver.id(),
                 receiving.getAssignedBy(), LocalDateTime.now(clock)));
     }
 
@@ -329,16 +338,13 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
 
     /**
      * UC-86 step 4: an active Staff account of the document's store, or the Branch Manager themself (MSG40; they
-     * already passed {@link #requireManagedDocument}) when someone else can confirm the result (MSG177 otherwise).
+     * already passed {@link #requireManagedDocument}).
      */
     private UserAccount requireEligibleAssignee(AuthenticatedUser manager, TaskType type, long assigneeId,
                                                 long storeId) {
         UserAccount assignee = users.findById(assigneeId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG48"));
         if (assignee.getId() == manager.id()) {
-            if (!canTakeThemself(manager, type, storeId)) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG177");
-            }
             return assignee;
         }
         if (assignee.getRole() != Role.STAFF) {
@@ -348,17 +354,6 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG41");
         }
         return assignee;
-    }
-
-    /**
-     * BR-26 and the permission matrix: only a Branch Manager of the store confirms an inspection, a dispatch or a
-     * stock count, never the Owner in their place, so a Branch Manager takes such a task only while another active
-     * Branch Manager of the store can confirm it (review R-01). Owner may confirm a sales order, so picking is
-     * always open to them.
-     */
-    private boolean canTakeThemself(AuthenticatedUser manager, TaskType type, long storeId) {
-        return type == TaskType.PICKING || users.findByRoleAndStoreIdAndStatus(Role.BRANCH_MANAGER, storeId,
-                AccountStatus.ACTIVE).stream().anyMatch(other -> other.getId() != manager.id());
     }
 
     /** BR-32: the open task, if the user holds it and has not sent the result yet (MSG05 otherwise). */
@@ -377,7 +372,9 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                 .findFirst();
         String blocked = blockedCode(document, open);
         // MSG40 speaks to the Branch Manager who took the task, so only they get it.
-        String notice = open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
+        // Picking still cannot be confirmed by the person who took it (MSG124), so MSG40 would be untrue.
+        String notice = type != TaskType.PICKING && open.filter(task -> task.getAssignedTo() == manager.id()).isPresent()
+                ? "MSG40" : null;
 
         Collator byName = Collator.getInstance(VIETNAMESE);
         List<UserAccount> staff = users.findByRoleAndStoreIdAndStatus(Role.STAFF, document.storeId(),
@@ -391,10 +388,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         List<AssigneeOption> eligible = new ArrayList<>();
         staff.forEach(u -> eligible.add(new AssigneeOption(u.getId(), u.getUsername(), u.getFullName(), false,
                 openTasks.getOrDefault(u.getId(), 0L))));
-        if (canTakeThemself(manager, type, document.storeId())) {
-            eligible.add(new AssigneeOption(manager.id(), manager.username(), manager.fullName(), true,
-                    openTasks.getOrDefault(manager.id(), 0L)));
-        }
+        eligible.add(new AssigneeOption(manager.id(), manager.username(), manager.fullName(), true,
+                openTasks.getOrDefault(manager.id(), 0L)));
 
         Set<Long> people = new HashSet<>();
         history.forEach(task -> {
@@ -424,10 +419,10 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
             case INSPECTION -> "kiểm nhận hàng cho phiếu nhận hàng";
             case DISPATCH_PREPARATION -> "chuẩn bị hàng xuất cho phiếu chuyển kho";
             case COUNTING -> "đếm hàng cho phiếu kiểm kê";
-            case SUPPLIER_RECEIVING -> "nhận hàng và lập phiếu nhập cho PO";
+            case SUPPLIER_RECEIVING -> "nhận hàng và lập phiếu nhập cho đơn nhập hàng";
             case TRANSFER_RECEIVING -> "nhận hàng điều chuyển cho lệnh";
         };
-        return work + " #" + documentId;
+        return work + " " + (type == TaskType.SUPPLIER_RECEIVING ? PurchaseOrderCode.of(documentId) : "#" + documentId);
     }
 
     /** notification.ref_type of the document, so that opening the notification opens it. */

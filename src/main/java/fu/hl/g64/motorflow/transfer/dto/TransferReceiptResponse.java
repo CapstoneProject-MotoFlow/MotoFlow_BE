@@ -9,19 +9,22 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * A receipt of a transfer order, at the destination or back at the source. The delivery document fields,
- * {@code createdBy} and {@code documents} are set for a TRANSFER_IN receipt recorded with its delivery document.
+ * A receipt of a transfer order, at the destination or back at the source. Delivery document fields stay null for a
+ * transfer arrival (E02); {@code documents} lists any photos attached when the goods arrived.
  */
 public record TransferReceiptResponse(long id, long transferOrderId, ReceiptType receiptType,
                                       GoodsReceiptNoteStatus status, String deliveryDocumentNo,
                                       LocalDate deliveryDocumentDate, String delivererName, String vehiclePlateNo,
                                       LocalDateTime arrivedAt, Long createdBy, String createdByName,
-                                      Long recordedBy, LocalDateTime submittedAt, String recountReason,
+                                      Long recordedBy, LocalDateTime submittedAt, String inspectionNote, String recountReason,
                                       Long confirmedBy, LocalDateTime confirmedAt, List<Line> lines,
                                       List<AttachmentResponse> documents) {
 
-    /** {@code documentQty}: what the order still expected when the goods arrived; above it is excess (BR-68). */
+    /**
+     * {@code documentQty}: what the order still expected when the goods arrived; above it is excess (BR-68).
+     * {@code deliveredQty} = passed + wrong item + damaged.
+     */
     public record Line(long productId, String sku, String partName, String baseUnit, int documentQty,
-                       int deliveredQty, int passedQty, int damagedQty, int excessQty) {
+                       int deliveredQty, int passedQty, int wrongItemQty, int damagedQty, int excessQty) {
     }
 }

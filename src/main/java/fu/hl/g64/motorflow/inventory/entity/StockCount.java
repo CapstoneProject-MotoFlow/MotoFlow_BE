@@ -56,6 +56,9 @@ public class StockCount {
     @Column(name = "scope_note")
     private String scopeNote;
 
+    @Column(name = "part_category_id")
+    private Long partCategoryId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private StockCountStatus status;
@@ -95,8 +98,8 @@ public class StockCount {
 
     /** UC-91: a year-end or cycle count waiting for its counter; {@code inventoryPeriodId} is the period of the count date. */
     public static StockCount create(Long storeId, Long inventoryPeriodId, Long stockCountRequestId, CountType countType,
-                                    LocalDate countDate, ScopeType scopeType, String scopeNote, Long createdBy,
-                                    LocalDateTime now) {
+                                    LocalDate countDate, ScopeType scopeType, String scopeNote, Long partCategoryId,
+                                    Long createdBy, LocalDateTime now) {
         StockCount count = new StockCount();
         count.storeId = storeId;
         count.inventoryPeriodId = inventoryPeriodId;
@@ -105,6 +108,7 @@ public class StockCount {
         count.countDate = countDate;
         count.scopeType = scopeType;
         count.scopeNote = scopeNote;
+        count.partCategoryId = partCategoryId;
         count.status = StockCountStatus.DRAFT;
         count.createdBy = createdBy;
         count.createdAt = now;

@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.transfer.dto;
 
+import fu.hl.g64.motorflow.operation.dto.AttachmentUpload;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
@@ -12,7 +13,16 @@ import java.util.List;
 public record TransferDispatchRequest(
         @NotEmpty(message = "Vui lòng ghi số xuất cho mọi phụ tùng.")
         @Size(max = 200, message = "Tối đa 200 phụ tùng trong một phiếu chuyển kho.")
-        List<@NotNull @Valid Line> lines) {
+        List<@NotNull @Valid Line> lines,
+
+        @Size(max = 100, message = "Tên người giao tối đa 100 ký tự.")
+        String delivererName,
+
+        @Size(max = 20, message = "Biển số xe tối đa 20 ký tự.")
+        String vehiclePlateNo,
+
+        @Size(max = 10, message = "Tối đa 10 tệp.")
+        List<@NotNull @Valid AttachmentUpload> evidence) {
 
     public record Line(
             @NotNull(message = "Vui lòng chọn phụ tùng.")

@@ -74,6 +74,7 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
             JOIN receivable r ON r.id = a.receivable_id
             WHERE p.payment_type = 'DEBT_PAYMENT' AND p.status = 'VERIFIED'
               AND p.verified_at >= :from AND p.verified_at < :to
+              AND a.reversed_at IS NULL
               AND (CAST(:storeId AS BIGINT) IS NULL OR r.store_id = :storeId)
             GROUP BY r.store_id""", nativeQuery = true)
     List<Object[]> sumDebtCollectedByStore(Long storeId, LocalDateTime from, LocalDateTime to);

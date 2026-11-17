@@ -4,5 +4,6 @@ package fu.hl.g64.motorflow.inventory.entity.enums;
 public enum ScopeType {
     WHOLE,
     PRODUCTS,
+    CATEGORY,
     AREA
 }

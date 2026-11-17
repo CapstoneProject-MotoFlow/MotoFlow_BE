@@ -68,13 +68,16 @@ public class GoodsReceiptNoteLine {
 
     /**
      * UC-106 step 6: one line per part the delivery is expected to bring, at the purchase price Owner agreed on the
-     * PO (null for a part that has no PO price). Its quantities come with the inspection result (UC-43).
+     * PO (null for a part that has no PO price), with the quantity its delivery document lists. The other quantities
+     * come with the inspection result (UC-43).
      */
-    public static GoodsReceiptNoteLine expected(long goodsReceiptNoteId, long productId, Long unitPrice) {
+    public static GoodsReceiptNoteLine expected(long goodsReceiptNoteId, long productId, Long unitPrice,
+                                                int documentQty) {
         GoodsReceiptNoteLine line = new GoodsReceiptNoteLine();
         line.goodsReceiptNoteId = goodsReceiptNoteId;
         line.productId = productId;
         line.unitPrice = unitPrice;
+        line.documentQty = documentQty;
         line.excessDecision = ExcessDecision.NOT_APPLICABLE;
         return line;
     }

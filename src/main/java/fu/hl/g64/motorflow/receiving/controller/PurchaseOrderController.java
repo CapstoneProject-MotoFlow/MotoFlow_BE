@@ -35,7 +35,7 @@ import java.net.URI;
 import java.time.LocalDate;
 
 @Tag(name = "Purchase orders", description = "UC-39 to UC-42: Owner creates, changes and cancels purchase orders "
-        + "(yêu cầu nhập hàng); the Branch Manager of the receiving warehouse follows them")
+        + "(đơn nhập hàng, DNH-xxxx); the Branch Manager of the receiving warehouse follows them")
 @RestController
 @RequestMapping("/api/v1/purchase-orders")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
@@ -46,9 +46,11 @@ public class PurchaseOrderController {
     private final GoodsReceiptService goodsReceipts;
 
     @Operation(summary = "Purchase orders of every warehouse (Owner) or of the user's warehouse (UC-39)",
-            description = "q: PO number (with or without #) or supplier name or code. view: OPEN (default), "
-                    + "FULLY_RECEIVED, CANCELLED or ALL. createdFrom and createdTo (yyyy-MM-dd): creation days; "
-                    + "the views other than OPEN keep the last 30 days when none are given.")
+            description = "q: PO number (12, #12, DNH-0012 or dnh-12) or supplier name or code. view: OPEN "
+                    + "(default), AWAITING_RECEIVING_ASSIGNMENT (open POs with no receiving task held by someone, "
+                    + "for the Branch Manager's to-do box), FULLY_RECEIVED, CANCELLED or ALL. createdFrom and "
+                    + "createdTo (yyyy-MM-dd): creation days; FULLY_RECEIVED, CANCELLED and ALL keep the last "
+                    + "30 days when none are given.")
     @GetMapping
     public PageResponse<PurchaseOrderSummary> list(
             @AuthenticationPrincipal AuthenticatedUser user,

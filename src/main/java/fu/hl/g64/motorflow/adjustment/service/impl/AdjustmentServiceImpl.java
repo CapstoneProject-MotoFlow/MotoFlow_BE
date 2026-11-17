@@ -176,7 +176,7 @@ public class AdjustmentServiceImpl implements AdjustmentService {
     private StockLoss checkStockLoss(AuthenticatedUser user, StockLossRequest request) {
         Store store = storeFor(user, request.storeId());
         if (request.transferOrderId() != null && request.goodsReceiptNoteId() != null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG266");
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG280");
         }
         List<Change> changes = request.lines().stream()
                 .map(l -> new Change(l.productId(), l.lotId(), l.stockStatus(), -l.quantity())).toList();
@@ -200,7 +200,7 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         Long transferOrderId = transferOf(source);
         if (transferOrderId != null) {
             transferOrders.findById(transferOrderId).filter(o -> o.getDestStoreId().equals(storeId))
-                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG265"));
+                    .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG279"));
             changes.stream().filter(c -> c.status() != StockStatus.IN_TRANSIT || c.lotId() != null).findFirst()
                     .ifPresent(c -> {
                         throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG259", c.status());
@@ -538,7 +538,7 @@ public class AdjustmentServiceImpl implements AdjustmentService {
 
     private static void requireStatus(AdjustmentRequest request, AdjustmentRequestStatus expected) {
         if (request.getStatus() != expected) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG267", request.getId(), request.getStatus());
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG281", request.getId(), request.getStatus());
         }
     }
 

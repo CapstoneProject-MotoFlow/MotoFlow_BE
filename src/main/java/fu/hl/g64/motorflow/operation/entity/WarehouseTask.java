@@ -51,6 +51,9 @@ public class WarehouseTask {
     @Column(name = "purchase_order_id")
     private Long purchaseOrderId;
 
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
+
     @Column(name = "assigned_to", nullable = false)
     private Long assignedTo;
 
@@ -71,7 +74,7 @@ public class WarehouseTask {
      * UC-86: gives the task of one document to a Staff member, or to the Branch Manager who takes it themself;
      * the task type decides which document column is set.
      */
-    public static WarehouseTask assign(TaskType type, long documentId, long assigneeId, long assignedBy,
+    public static WarehouseTask assign(TaskType type, long documentId, long storeId, long assigneeId, long assignedBy,
                                        LocalDateTime now) {
         WarehouseTask task = new WarehouseTask();
         task.taskType = type;
@@ -82,6 +85,7 @@ public class WarehouseTask {
             case COUNTING -> task.stockCountId = documentId;
             case SUPPLIER_RECEIVING -> task.purchaseOrderId = documentId;
         }
+        task.storeId = storeId;
         task.assignedTo = assigneeId;
         task.assignedBy = assignedBy;
         task.assignedAt = now;
