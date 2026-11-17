@@ -21,8 +21,7 @@
         "ecr:UploadLayerPart"
       ],
       "Resource": [
-        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-backend",
-        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-frontend"
+        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-backend"
       ]
     }
   ]

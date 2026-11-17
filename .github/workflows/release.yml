@@ -72,10 +72,11 @@ jobs:
           echo "::error::No image for ${GITHUB_SHA::7}. Check that CI/CD on main passed for this commit."
           exit 1
 
-      - name: Deploy to the production server over SSM
+      - name: Deploy to the production Lightsail instance
         env:
           IMAGE: ${{ steps.image.outputs.image }}
-        run: bash .github/scripts/ssm-deploy.sh production backend "$IMAGE"
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+        run: bash .github/scripts/lightsail-deploy.sh production backend "$IMAGE"
 
       - name: Smoke test
         env:
