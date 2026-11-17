@@ -327,6 +327,27 @@ class DocumentApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void aPaymentOfSeveralDebtsListsEachDebtThenItsSale() throws Exception {
+        long creditSale = id("INSERT INTO receivable (origin_type, customer_id, store_id, sales_order_id, "
+                + "original_amount, recognized_by, recognized_at) VALUES ('CREDIT_SALE', ?, ?, ?, 300000, ?, "
+                + "'2026-10-02 08:00') RETURNING id", customer, otherStore, openOrder, owner.getId());
+        long settled = id("INSERT INTO receivable (origin_type, customer_id, store_id, original_amount, recognized_by, "
+                + "recognized_at, settled_at) VALUES ('OPENING_BALANCE', ?, ?, 100000, ?, '2026-10-01 08:00', "
+                + "'2026-10-16 10:00') RETURNING id", customer, otherStore, owner.getId());
+        jdbc.update("INSERT INTO payment_allocation (payment_id, receivable_id, allocated_amount) VALUES (?, ?, 50000), "
+                + "(?, ?, 100000)", debtPayment, creditSale, debtPayment, settled);
+
+        detail(otherManagerToken, "PAYMENT", debtPayment).andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.allocations[*].receivableId").value(contains((int) debt,
+                        (int) creditSale, (int) settled)))
+                .andExpect(jsonPath("$.sources[*].recordType").value(contains("RECEIVABLE", "RECEIVABLE",
+                        "SALES_ORDER", "RECEIVABLE")))
+                .andExpect(jsonPath("$.sources[*].id").value(contains((int) debt, (int) creditSale, (int) openOrder,
+                        (int) settled)))
+                .andExpect(jsonPath("$.sources[*].status").value(contains("OPEN", "OPEN", "AWAITING_PICKING", "SETTLED")));
+    }
+
+    @Test
     void anAdjustmentOpensWithTheDocumentItCorrects() throws Exception {
         detail(managerToken, "ADJUSTMENT", adjustment).andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.adjustmentType").value("DOCUMENT_CORRECTION"))

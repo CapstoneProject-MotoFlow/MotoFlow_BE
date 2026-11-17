@@ -44,6 +44,8 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -276,20 +278,33 @@ public class DocumentServiceImpl implements DocumentService {
 
     private DocumentDetail paymentDetail(DocumentRow row) {
         PaymentContent payment = payment(row.id());
-        List<Link> sources = new ArrayList<>();
+        // The linked orders and debts are read in one query each, then listed in the same order as before: the
+        // payment's own order, then each allocation's debt and that debt's order.
+        Set<Long> orderIds = new HashSet<>();
+        Set<Long> receivableIds = new HashSet<>();
         if (payment.salesOrderId() != null) {
-            documents.row("SELECT id, status FROM sales_order WHERE id = :id", Map.of("id", payment.salesOrderId()))
-                    .ifPresent(order -> sources.add(link("SALES_ORDER", order, null)));
+            orderIds.add(payment.salesOrderId());
         }
         for (PaymentContent.Allocation allocation : payment.allocations()) {
-            documents.row("""
-                    SELECT id, CASE WHEN settled_at IS NULL THEN 'OPEN' ELSE 'SETTLED' END AS status
-                      FROM receivable WHERE id = :id""", Map.of("id", allocation.receivableId()))
-                    .ifPresent(debt -> sources.add(link("RECEIVABLE", debt, null)));
+            receivableIds.add(allocation.receivableId());
             if (allocation.salesOrderId() != null) {
-                documents.row("SELECT id, status FROM sales_order WHERE id = :id",
-                        Map.of("id", allocation.salesOrderId()))
-                        .ifPresent(order -> sources.add(link("SALES_ORDER", order, null)));
+                orderIds.add(allocation.salesOrderId());
+            }
+        }
+        Map<Long, Map<String, Object>> orders = byId(orderIds, "SELECT id, status FROM sales_order WHERE id IN (:ids)");
+        Map<Long, Map<String, Object>> debts = byId(receivableIds, """
+                SELECT id, CASE WHEN settled_at IS NULL THEN 'OPEN' ELSE 'SETTLED' END AS status
+                  FROM receivable WHERE id IN (:ids)""");
+        List<Link> sources = new ArrayList<>();
+        if (payment.salesOrderId() != null && orders.containsKey(payment.salesOrderId())) {
+            sources.add(link("SALES_ORDER", orders.get(payment.salesOrderId()), null));
+        }
+        for (PaymentContent.Allocation allocation : payment.allocations()) {
+            if (debts.containsKey(allocation.receivableId())) {
+                sources.add(link("RECEIVABLE", debts.get(allocation.receivableId()), null));
+            }
+            if (allocation.salesOrderId() != null && orders.containsKey(allocation.salesOrderId())) {
+                sources.add(link("SALES_ORDER", orders.get(allocation.salesOrderId()), null));
             }
         }
         // Recording and verifying are on the payment itself; the audit log adds what came later.
@@ -303,6 +318,15 @@ public class DocumentServiceImpl implements DocumentService {
         documents.history("PAYMENT", row.id(), List.of("DEBT_PAYMENT_RECORDED")).forEach(entry ->
                 history.add(historyEntry(entry)));
         return new DocumentDetail(row, payment, sources, List.of(), adjustments("payment_id", row.id()), history);
+    }
+
+    /** The rows of {@code sql} (which takes {@code :ids}) by their id; none when {@code ids} is empty. */
+    private Map<Long, Map<String, Object>> byId(Set<Long> ids, String sql) {
+        Map<Long, Map<String, Object>> found = new HashMap<>();
+        if (!ids.isEmpty()) {
+            documents.rows(sql, Map.of("ids", ids)).forEach(r -> found.put(((Number) r.get("id")).longValue(), r));
+        }
+        return found;
     }
 
     private DocumentDetail adjustmentDetail(DocumentRow row) {
