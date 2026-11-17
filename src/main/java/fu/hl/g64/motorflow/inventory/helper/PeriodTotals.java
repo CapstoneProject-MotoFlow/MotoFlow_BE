@@ -1,14 +1,18 @@
 package fu.hl.g64.motorflow.inventory.helper;
 
 import fu.hl.g64.motorflow.inventory.entity.InventoryPeriod;
+import fu.hl.g64.motorflow.inventory.entity.PeriodStockBalance;
 import fu.hl.g64.motorflow.inventory.entity.enums.InventoryPeriodStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.repository.InventoryPeriodRepository;
 import fu.hl.g64.motorflow.inventory.repository.PeriodLedgerQuery;
 import fu.hl.g64.motorflow.inventory.repository.PeriodLedgerQuery.Row;
+import fu.hl.g64.motorflow.inventory.repository.PeriodStockBalanceRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Collections;
@@ -31,6 +35,7 @@ public class PeriodTotals {
 
     private final InventoryPeriodRepository periods;
     private final PeriodLedgerQuery ledger;
+    private final PeriodStockBalanceRepository stored;
 
     /** A quantity and its value at moving weighted average cost. */
     public record Amount(long qty, long value) {
@@ -52,13 +57,26 @@ public class PeriodTotals {
     /** One part in one warehouse; {@code byType} splits in and out by movement type (UC-88). */
     public record Line(long storeId, long productId, Amount opening, Amount in, Amount out, Amount closing,
                        Amount inTransit, Map<MovementType, Flow> byType) {
+
+        /** BR-85: (opening value + value in) / (opening quantity + quantity in); null when that quantity is 0. */
+        public BigDecimal periodAvgUnitCost() {
+            long qty = opening.qty() + in.qty();
+            return qty == 0 ? null : BigDecimal.valueOf(opening.value() + in.value())
+                    .divide(BigDecimal.valueOf(qty), 4, RoundingMode.HALF_UP);
+        }
     }
 
     /**
      * Every warehouse and part with an opening balance or a movement in the period, by warehouse then part id.
-     * {@code storeIds} null means every warehouse.
+     * {@code storeIds} null means every warehouse. A closed period gives the balances stored when it was closed
+     * (without the split by movement type); an open one is worked out from the ledger now.
      */
     public List<Line> of(InventoryPeriod period, Collection<Long> storeIds) {
+        return period.isOpen() ? fromLedger(period, storeIds) : fromStored(period, storeIds);
+    }
+
+    /** Worked out from the ledger, whatever the period's status: what closing a period stores (UC-100). */
+    public List<Line> fromLedger(InventoryPeriod period, Collection<Long> storeIds) {
         InventoryPeriod base = periods.findFirstByStatusAndPeriodMonthBeforeOrderByPeriodMonthDesc(
                 InventoryPeriodStatus.CLOSED, period.getPeriodMonth()).orElse(null);
         Map<Key, Builder> lines = new TreeMap<>(Comparator.comparingLong(Key::storeId).thenComparingLong(Key::productId));
@@ -76,6 +94,22 @@ public class PeriodTotals {
                 .map(e -> e.getValue().build(e.getKey()))
                 .filter(l -> !l.opening().equals(Amount.ZERO) || !l.byType().isEmpty()
                         || !l.inTransit().equals(Amount.ZERO))
+                .toList();
+    }
+
+    private List<Line> fromStored(InventoryPeriod period, Collection<Long> storeIds) {
+        Map<Key, Amount> transit = new TreeMap<>(Comparator.comparingLong(Key::storeId).thenComparingLong(Key::productId));
+        for (Row r : ledger.inTransit(period.getPeriodMonth(), storeIds)) {
+            transit.put(new Key(r.storeId(), r.productId()), new Amount(r.inQty(), r.inValue()));
+        }
+        return stored.findByInventoryPeriodId(period.getId()).stream()
+                .filter(b -> storeIds == null || storeIds.contains(b.getStoreId()))
+                .sorted(Comparator.comparingLong(PeriodStockBalance::getStoreId)
+                        .thenComparingLong(PeriodStockBalance::getProductId))
+                .map(b -> new Line(b.getStoreId(), b.getProductId(),
+                        new Amount(b.getOpeningQty(), b.getOpeningValue()), new Amount(b.getInQty(), b.getInValue()),
+                        new Amount(b.getOutQty(), b.getOutValue()), new Amount(b.getClosingQty(), b.getClosingValue()),
+                        transit.getOrDefault(new Key(b.getStoreId(), b.getProductId()), Amount.ZERO), Map.of()))
                 .toList();
     }
 
