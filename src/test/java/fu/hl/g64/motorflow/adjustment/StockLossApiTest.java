@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.adjustment;
 
+import fu.hl.g64.motorflow.support.QueryCounter;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -17,6 +19,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** UC-83 report stock loss or damage, UC-82 list, UC-84 approve, reject, apply again, withdraw. */
 class StockLossApiTest extends AdjustmentTestData {
+
+    @Autowired
+    private QueryCounter queries;
 
     @Test
     void aReportedLossChangesNoStockUntilOwnerApprovesItThenItIsPostedOnceAtTheAverageCost() throws Exception {
@@ -248,6 +253,23 @@ class StockLossApiTest extends AdjustmentTestData {
         act(ownerToken, id, "apply").andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
         assertThat(lotQty(oilLot1)).isEqualTo(1);
         assertThat(LocalDate.now(clock)).isEqualTo(LocalDate.of(2026, 10, 13));
+    }
+
+    @Test
+    void theDetailReadsTheStockOfEveryLineTogether() throws Exception {
+        long one = submitted(managerToken, loss(null, line(oil, oilLot1, "AVAILABLE", 1)));
+        long three = submitted(manager2Token, loss(null, line(oil, oilLot1, "AVAILABLE", 1),
+                line(oil, oilLot2, "AVAILABLE", 2), line(filter, null, "AVAILABLE", 3)));
+
+        queries.reset();
+        detail(managerToken, one).andExpect(status().isOk());
+        long forOne = queries.prepared();
+
+        queries.reset();
+        detail(manager2Token, three).andExpect(status().isOk())
+                .andExpect(jsonPath("$.stockLines[*].currentQty", contains(5, 7, 9)))
+                .andExpect(jsonPath("$.stockLines[*].afterQty", contains(4, 5, 6)));
+        assertThat(queries.prepared()).isEqualTo(forOne);
     }
 
     /** "type,quantity,value" of the movements the request posted. */

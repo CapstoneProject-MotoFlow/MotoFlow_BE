@@ -63,6 +63,9 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
     List<Object[]> sumExpiryByStoreAndProduct(Collection<Long> storeIds, Collection<Long> productIds,
                                               LocalDate today, LocalDate warnUntil);
 
+    /** The balances of the listed lots in one warehouse, every status. */
+    List<LotBalance> findByStoreIdAndLotIdIn(Long storeId, Collection<Long> lotIds);
+
     /** UC-98: a lot's balances in one warehouse, by status. */
     List<LotBalance> findByLotIdAndStoreIdOrderByStockStatusAsc(Long lotId, Long storeId);
 
