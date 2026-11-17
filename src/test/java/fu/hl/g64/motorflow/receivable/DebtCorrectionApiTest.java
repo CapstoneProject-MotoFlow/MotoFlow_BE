@@ -95,6 +95,8 @@ class DebtCorrectionApiTest extends ApiTestUsers {
                         + "1.500.000 đ."));
         send(post(CORRECTIONS + "/preview"), managerToken, amount("DEBT_PAYMENT", payment, 1_200_000))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG282"));
+        send(post(CORRECTIONS), managerToken, amount("DEBT_PAYMENT", payment, 0))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG291"));
         send(post(CORRECTIONS + "/preview"), otherManagerToken, amount("DEBT_PAYMENT", payment, 1_000_000))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG287"));
 

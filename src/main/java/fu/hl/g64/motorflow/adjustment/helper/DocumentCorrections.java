@@ -414,6 +414,9 @@ public class DocumentCorrections {
         }
         long current = paymentAmounts(List.of(payment.getId())).get(payment.getId());
         long corrected = amount(request, current);
+        if (corrected <= 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG291");
+        }
         long capacity = debts.stream().mapToLong(Debt::remaining).sum();
         if (corrected > capacity) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG288", money(capacity));
