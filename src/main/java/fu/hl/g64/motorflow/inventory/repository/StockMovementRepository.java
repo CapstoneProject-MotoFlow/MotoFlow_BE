@@ -65,4 +65,14 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
             where m.lotId = :lotId and m.storeId = :storeId and m.quantityChange > 0 and m.movementType in :types
               and (:stockCountId is null or m.stockCountId = :stockCountId)""")
     long sumIncoming(Long lotId, Long storeId, Long stockCountId, Collection<MovementType> types);
+
+    /** [adjustment request id, sum of the value its movements posted in VND] (negative for a write-off). */
+    @Query("""
+            select m.adjustmentRequestId, sum(m.value) from StockMovement m
+            where m.adjustmentRequestId in :requestIds
+            group by m.adjustmentRequestId""")
+    List<Object[]> sumValueByAdjustmentRequest(Collection<Long> requestIds);
+
+    /** The movements an applied adjustment posted, by part and lot. */
+    List<StockMovement> findByAdjustmentRequestIdOrderByProductIdAscIdAsc(Long adjustmentRequestId);
 }

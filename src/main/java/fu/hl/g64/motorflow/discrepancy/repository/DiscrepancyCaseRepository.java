@@ -41,6 +41,16 @@ public interface DiscrepancyCaseRepository extends JpaRepository<DiscrepancyCase
                   (select q.id from PurchaseOrder q where q.storeId = :storeId))""")
     long countOpenSupplierCasesAtStore(Long storeId);
 
+    /** Open cases of the parts on supplier deliveries received at the warehouse (their held goods, UC-83). */
+    @Query("""
+            select c from DiscrepancyCase c
+            where c.sourceType = fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType.SUPPLIER
+              and c.status = fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus.OPEN
+              and c.productId in :productIds
+              and c.goodsReceiptNoteId in (select r.id from GoodsReceiptNote r where r.purchaseOrderId in
+                  (select q.id from PurchaseOrder q where q.storeId = :storeId))""")
+    List<DiscrepancyCase> findOpenSupplierCasesAtStore(Long storeId, Collection<Long> productIds);
+
     /** Cases opened on the given deliveries (UC-41). */
     List<DiscrepancyCase> findByGoodsReceiptNoteIdInOrderByIdAsc(Collection<Long> goodsReceiptNoteIds);
 
