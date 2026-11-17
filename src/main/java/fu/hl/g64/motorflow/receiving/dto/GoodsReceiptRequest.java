@@ -3,7 +3,6 @@ package fu.hl.g64.motorflow.receiving.dto;
 import fu.hl.g64.motorflow.operation.dto.AttachmentUpload;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -18,16 +17,16 @@ import java.util.List;
  * {@code replacementForCaseIds} makes it a replacement delivery for those discrepancy cases of the PO (UC-106 Step
  * 1_Supplier replacement); without it the delivery brings the PO's outstanding lines. {@code documents} are the
  * photos of the delivery document (UC-106 step 3: at least one), already uploaded with an ATTACHMENT signature.
+ * {@code deliveryDocumentNo} and {@code deliveryDocumentDate} may be left out (PM 17/11, Q1-Q2): a number given is
+ * still unique within the PO (MSG28), blank counts as none; a date given may not be in the future (MSG138).
  * {@code documentLines} are the quantities printed on the delivery document, entered once here (PM 15/11, FE review
  * PR #43 R-01): one per part the delivery is expected to bring, a part left out is 0; at least one is needed
  * (MSG278). The inspection result keeps them.
  */
 public record GoodsReceiptRequest(
-        @NotBlank(message = "Vui lòng nhập số chứng từ giao hàng.")
         @Size(max = 50, message = "Số chứng từ tối đa 50 ký tự.")
         String deliveryDocumentNo,
 
-        @NotNull(message = "Vui lòng nhập ngày chứng từ.")
         LocalDate deliveryDocumentDate,
 
         LocalDateTime arrivedAt,
