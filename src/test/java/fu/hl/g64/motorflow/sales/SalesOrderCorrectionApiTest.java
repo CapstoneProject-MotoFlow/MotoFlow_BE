@@ -67,6 +67,11 @@ class SalesOrderCorrectionApiTest extends SalesOrderTestData {
         return id("SELECT id FROM sales_order_line WHERE sales_order_id = ? AND product_id = ?", order, product);
     }
 
+    private int storeAvailable(long product) {
+        return jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE store_id = ? AND product_id = ?",
+                Integer.class, store, product);
+    }
+
     private static Map<String, Object> correction(long order, Object... lineAndQty) {
         List<Map<String, Object>> lines = new ArrayList<>();
         for (int i = 0; i < lineAndQty.length; i += 2) {
@@ -156,19 +161,57 @@ class SalesOrderCorrectionApiTest extends SalesOrderTestData {
         long order = creditOrder();
         long oilLine = lineOf(order, oil);
         long padLine = lineOf(order, pad);
-        int oilBefore = jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE store_id = ? "
-                + "AND product_id = ?", Integer.class, store, oil);
 
         // Correcting both lines to nothing would leave the debt at -85,000 đ.
         send(managerToken, CORRECTIONS, correction(order, padLine, 0, oilLine, 0)).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG284"));
+        // Never more than the customer ordered (1 oil): buying more is a new sales order.
+        send(managerToken, CORRECTIONS, correction(order, oilLine, 2)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG292"));
 
-        long request = submitted(managerToken, correction(order, oilLine, 2));
+        approve(submitted(managerToken, correction(order, padLine, 1))).andExpect(status().isOk());
+        detail(managerToken, order).andExpect(jsonPath("$.money.receivable.remainingAmount").value(100_000));
+        int padBefore = storeAvailable(pad);
+
+        // The pad really was delivered after all: back to 2, and the debt goes up again.
+        long request = submitted(managerToken, correction(order, padLine, 2));
         approve(request).andExpect(status().isOk())
                 .andExpect(jsonPath("$.amountLines[0].receivableId").isNumber())
-                .andExpect(jsonPath("$.amountLines[*].after", contains(285_000)));
-        assertThat(jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE store_id = ? AND product_id = ?",
-                Integer.class, store, oil)).isEqualTo(oilBefore - 1);
-        detail(managerToken, order).andExpect(jsonPath("$.money.receivable.remainingAmount").value(285_000));
+                .andExpect(jsonPath("$.amountLines[*].after", contains(200_000)));
+        assertThat(storeAvailable(pad)).isEqualTo(padBefore - 1);
+        detail(managerToken, order).andExpect(jsonPath("$.money.receivable.remainingAmount").value(200_000));
+    }
+
+    @Test
+    void aSecondCorrectionOfTheSameLineStartsFromTheFirstOne() throws Exception {
+        long order = paidOrder();
+        long padLine = lineOf(order, pad);
+        int before = lotAvailable(padSoon);
+
+        approve(submitted(managerToken, correction(order, padLine, 1))).andExpect(status().isOk());
+        // R-01: the line now stands at 1, so asking for 1 again changes nothing.
+        send(managerToken, CORRECTIONS, correction(order, padLine, 1)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG282"));
+        // R-02: never more than the customer ordered (2).
+        send(managerToken, CORRECTIONS, correction(order, padLine, 3)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG292"));
+
+        send(managerToken, CORRECTIONS + "/preview", correction(order, padLine, 0)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.stockLines[0].quantityChange").value(1))
+                .andExpect(jsonPath("$.amountLines[0].before").value(185_000))
+                .andExpect(jsonPath("$.amountLines[0].after").value(85_000));
+        long second = submitted(managerToken, correction(order, padLine, 0));
+        mvc.perform(get("/api/v1/adjustment-requests/" + second).header(HttpHeaders.AUTHORIZATION, managerToken))
+                .andExpect(jsonPath("$.correction.before.lines[0].quantity").value(1))
+                .andExpect(jsonPath("$.correction.after.lines[0].quantity").value(0));
+        approve(second).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
+        assertThat(lotAvailable(padSoon)).isEqualTo(before + 2);
+        detail(managerToken, order).andExpect(jsonPath("$.money.netCollected").value(85_000));
+
+        // Back up to 2 takes both units out of the store's stock again.
+        int padInStore = storeAvailable(pad);
+        approve(submitted(managerToken, correction(order, padLine, 2))).andExpect(status().isOk());
+        assertThat(storeAvailable(pad)).isEqualTo(padInStore - 2);
+        detail(managerToken, order).andExpect(jsonPath("$.money.netCollected").value(285_000));
     }
 }

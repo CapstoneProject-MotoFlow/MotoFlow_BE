@@ -271,13 +271,23 @@ public class DocumentCorrections {
                 .collect(Collectors.toMap(SalesOrderLine::getId, Function.identity()));
         Map<Long, Integer> corrected = correctedLines(request, byId.keySet());
         Map<Long, Product> parts = parts(byId.values().stream().map(SalesOrderLine::getProductId).toList());
+        // What earlier applied corrections already put back (+) or took out (-), by part and by lot.
+        List<Object[]> earlier = movements.sumAppliedCorrections(order.getId(), null);
         List<Change> changes = new ArrayList<>();
         List<Map<String, Object>> before = new ArrayList<>();
         List<Map<String, Object>> after = new ArrayList<>();
         long money = 0;
+        int position = 0;
         for (Map.Entry<Long, Integer> e : corrected.entrySet()) {
+            position++;
             SalesOrderLine line = byId.get(e.getKey());
-            int delivered = line.getDeliveredQty() == null ? 0 : line.getDeliveredQty();
+            // R-02 (PM 17/11): never more than the customer ordered; buying more is a new sales order.
+            if (e.getValue() > line.getRequestedQty()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG292", position, line.getRequestedQty());
+            }
+            int delivered = (line.getDeliveredQty() == null ? 0 : line.getDeliveredQty())
+                    - (int) earlier.stream().filter(row -> line.getProductId().equals(row[0]))
+                    .mapToLong(row -> ((Number) row[2]).longValue()).sum();
             int diff = e.getValue() - delivered;
             if (diff == 0) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG282");
@@ -286,7 +296,7 @@ public class DocumentCorrections {
             if (diff > 0) {
                 changes.add(new Change(line.getProductId(), null, StockStatus.AVAILABLE, -diff));
             } else {
-                changes.addAll(backIntoSoldLots(order.getId(), line.getProductId(), -diff));
+                changes.addAll(backIntoSoldLots(order.getId(), line.getProductId(), -diff, earlier));
             }
             Product part = parts.get(line.getProductId());
             before.add(lineValue(line.getId(), part, delivered, line.getActualUnitPrice()));
@@ -302,16 +312,29 @@ public class DocumentCorrections {
     }
 
     /** Units that were not really delivered go back into the lots the sale took them from, latest first. */
-    private List<Change> backIntoSoldLots(long orderId, long productId, int quantity) {
+    private List<Change> backIntoSoldLots(long orderId, long productId, int quantity, List<Object[]> earlier) {
+        // Still out of each lot for this sale: what it issued less what earlier corrections put back (plus what they
+        // took out), latest issue first.
+        Map<Long, Integer> out = new LinkedHashMap<>();
+        for (StockMovement issue : movements.findSaleIssues(orderId, productId)) {
+            out.merge(issue.getLotId(), -issue.getQuantityChange(), Integer::sum);
+        }
+        for (Object[] row : earlier) {
+            if (Long.valueOf(productId).equals(row[0]) && row[1] != null) {
+                out.merge((Long) row[1], -((Number) row[2]).intValue(), Integer::sum);
+            }
+        }
         Map<Long, Integer> byLot = new LinkedHashMap<>();
         int left = quantity;
-        for (StockMovement issue : movements.findSaleIssues(orderId, productId)) {
+        for (Map.Entry<Long, Integer> lot : out.entrySet()) {
             if (left == 0) {
                 break;
             }
-            int take = Math.min(left, -issue.getQuantityChange());
-            byLot.merge(issue.getLotId(), take, Integer::sum);
-            left -= take;
+            int take = Math.min(left, Math.max(lot.getValue(), 0));
+            if (take > 0) {
+                byLot.merge(lot.getKey(), take, Integer::sum);
+                left -= take;
+            }
         }
         if (left > 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG286");
@@ -365,6 +388,13 @@ public class DocumentCorrections {
         Map<Long, Lot> lotByLine = lots.findByGoodsReceiptNoteLineIdIn(corrected.keySet()).stream()
                 .collect(Collectors.toMap(Lot::getGoodsReceiptNoteLineId, Function.identity()));
         Map<Long, Product> parts = parts(byId.values().stream().map(GoodsReceiptNoteLine::getProductId).toList());
+        // What earlier applied corrections of this delivery already changed, by lot.
+        Map<Long, Long> earlier = new HashMap<>();
+        for (Object[] row : movements.sumAppliedCorrections(null, receipt.getId())) {
+            if (row[1] != null) {
+                earlier.merge((Long) row[1], ((Number) row[2]).longValue(), Long::sum);
+            }
+        }
         List<Change> changes = new ArrayList<>();
         List<Map<String, Object>> before = new ArrayList<>();
         List<Map<String, Object>> after = new ArrayList<>();
@@ -372,15 +402,16 @@ public class DocumentCorrections {
         for (Map.Entry<Long, Integer> e : corrected.entrySet()) {
             position++;
             GoodsReceiptNoteLine line = byId.get(e.getKey());
-            int inStock = line.acceptedQty()
-                    + (line.getExcessDecision() == ExcessDecision.ACCEPTED ? line.getExcessQty() : 0);
-            int diff = e.getValue() - inStock;
-            if (diff == 0) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG282");
-            }
             Lot lot = lotByLine.get(line.getId());
             if (lot == null) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG290", position);
+            }
+            int inStock = line.acceptedQty()
+                    + (line.getExcessDecision() == ExcessDecision.ACCEPTED ? line.getExcessQty() : 0)
+                    + earlier.getOrDefault(lot.getId(), 0L).intValue();
+            int diff = e.getValue() - inStock;
+            if (diff == 0) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG282");
             }
             changes.add(new Change(line.getProductId(), lot.getId(), StockStatus.AVAILABLE, diff));
             Product part = parts.get(line.getProductId());

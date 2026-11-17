@@ -83,4 +83,17 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
               and m.movementType = fu.hl.g64.motorflow.inventory.entity.enums.MovementType.SALE_ISSUE
             order by m.id desc""")
     List<StockMovement> findSaleIssues(long salesOrderId, long productId);
+
+    /**
+     * [product id, lot id, sum of quantity change] the applied corrections (UC-81) of a sales order or a supplier
+     * delivery posted, so a later correction starts from the corrected figures (BR-65 keeps the document itself).
+     */
+    @Query("""
+            select m.productId, m.lotId, sum(m.quantityChange) from StockMovement m
+            join AdjustmentRequest q on q.id = m.adjustmentRequestId
+            where q.adjustmentType = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentType.DOCUMENT_CORRECTION
+              and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED
+              and (q.salesOrderId = :salesOrderId or q.goodsReceiptNoteId = :receiptId)
+            group by m.productId, m.lotId""")
+    List<Object[]> sumAppliedCorrections(Long salesOrderId, Long receiptId);
 }

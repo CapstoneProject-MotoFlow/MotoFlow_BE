@@ -73,7 +73,6 @@ public class AdjustmentController {
         return adjustments.submitCorrection(user, request);
     }
 
-
     @Operation(summary = "Adjustment requests of the user's store, or of every store for Owner (UC-82)",
             description = "status: one or more, e.g. status=REJECTED&status=WITHDRAWN. A Branch Manager also sees the "
                     + "transit losses they reported for another store as the coordinator.")

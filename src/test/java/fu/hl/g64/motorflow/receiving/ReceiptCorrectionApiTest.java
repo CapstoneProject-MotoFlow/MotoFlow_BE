@@ -53,4 +53,34 @@ class ReceiptCorrectionApiTest extends GoodsReceiptTestData {
         assertThat(stock(giaLam, pad, "AVAILABLE")).isEqualTo(before - 1);
         assertStockAgrees(giaLam, pad);
     }
+
+    @Test
+    void aSecondCorrectionOfTheSameLineStartsFromTheFirstOne() throws Exception {
+        long grn = receive("PX-010");
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 0),
+                counted(lineOf(grn, oil), 24, 24, 0, 0))).andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        int before = stock(giaLam, pad, "AVAILABLE");
+
+        approve(created(correct(managerToken, grn, lineOf(grn, pad), 9)));
+        // R-01: the line now stands at 9.
+        correct(managerToken, grn, lineOf(grn, pad), 9).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG282"));
+        approve(created(correct(managerToken, grn, lineOf(grn, pad), 8)
+                .andExpect(jsonPath("$.stockLines[0].quantityChange").value(-1))));
+        assertThat(stock(giaLam, pad, "AVAILABLE")).isEqualTo(before - 2);
+        assertStockAgrees(giaLam, pad);
+    }
+
+    private long created(ResultActions result) throws Exception {
+        String body = result.andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        return ((Number) JsonPath.read(body, "$.id")).longValue();
+    }
+
+    private void approve(long request) throws Exception {
+        mvc.perform(post("/api/v1/adjustment-requests/" + request + "/approve")
+                        .header(HttpHeaders.AUTHORIZATION, ownerToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
+    }
 }
