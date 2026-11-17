@@ -25,6 +25,7 @@ import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.entity.enums.SupplierStatus;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
+import fu.hl.g64.motorflow.receiving.dto.LastPurchasePrice;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.Discrepancy;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.Line;
@@ -652,5 +653,25 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         if (arrival != null && arrival.isBefore(today) && !arrival.equals(current)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG248");
         }
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public List<LastPurchasePrice> lastPrices(long supplierId, List<Long> productIds) {
+        List<Long> ids = productIds == null ? List.of() : productIds.stream().filter(Objects::nonNull).distinct()
+                .toList();
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        if (ids.size() > 200) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        return receiptLines.findLastPrices(supplierId, ids).stream().map(row -> new LastPurchasePrice(
+                ((Number) row[0]).longValue(), ((Number) row[1]).longValue(), toDateTime(row[2]),
+                ((Number) row[3]).longValue())).toList();
+    }
+
+    private static LocalDateTime toDateTime(Object value) {
+        return value instanceof java.sql.Timestamp t ? t.toLocalDateTime() : (LocalDateTime) value;
     }
 }

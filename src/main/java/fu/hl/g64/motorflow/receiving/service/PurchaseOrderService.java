@@ -72,4 +72,11 @@ public interface PurchaseOrderService {
 
     /** Deletes the draft and its lines for good. */
     void deleteDraft(AuthenticatedUser owner, long id);
+
+    /**
+     * PM 17/11 Q6 (UC-40, UC-42): the last confirmed purchase price of each part from this supplier only. A part never
+     * received from it has no row. At most 200 parts.
+     */
+    java.util.List<fu.hl.g64.motorflow.receiving.dto.LastPurchasePrice> lastPrices(long supplierId,
+                                                                               java.util.List<Long> productIds);
 }

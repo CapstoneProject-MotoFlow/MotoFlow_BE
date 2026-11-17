@@ -314,11 +314,6 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         createReceipt(managerToken, order, tomorrow)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG138"));
-        Map<String, Object> noDocument = deliveryNote("  ");
-        createReceipt(managerToken, order, noDocument)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG02"))
-                .andExpect(jsonPath("$.fieldErrors.deliveryDocumentNo").value("Vui lòng nhập số chứng từ giao hàng."));
         // UC-106 step 3: the photo of the delivery document comes with it.
         Map<String, Object> noPhoto = deliveryNote("PX-001");
         noPhoto.remove("documents");
@@ -340,13 +335,24 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         // A second truck of the same PO is a GRN of its own (BR-22).
         long second = receive("PX-002");
         assertThat(second).isNotEqualTo(first);
+        // PM 17/11 Q1-Q2: the number and the date may be left out, several times on one PO; blank is none.
+        Map<String, Object> blank = deliveryNote("  ");
+        blank.remove("deliveryDocumentDate");
+        createReceipt(managerToken, order, blank).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.deliveryDocumentNo").doesNotExist())
+                .andExpect(jsonPath("$.deliveryDocumentDate").doesNotExist());
+        Map<String, Object> none = deliveryNote(null);
+        none.remove("deliveryDocumentNo");
+        createReceipt(managerToken, order, none).andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note WHERE delivery_document_no IS NULL",
+                Long.class)).isEqualTo(2);
 
         long cancelled = created(order(honda, giaLam, TODAY, null, line(lamp, 2, 200_000)));
         cancel(ownerToken, cancelled, "NCC hết hàng").andExpect(status().isOk());
         createReceipt(managerToken, cancelled, deliveryNote("PX-009"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG29"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note", Long.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note", Long.class)).isEqualTo(4);
     }
 
     @Test
