@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class HeldGoodsWriteOffApiTest extends GoodsReceiptTestData {
 
-    private ResultActions writeOff(String token, long receipt, String status, int quantity) throws Exception {
+    private ResultActions writeOff(String token, Long receipt, String status, int quantity) throws Exception {
         Map<String, Object> line = new HashMap<>();
         line.put("productId", pad);
         line.put("stockStatus", status);
@@ -68,5 +68,25 @@ class HeldGoodsWriteOffApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.heldUndecidedQty").value(0))
                 .andExpect(jsonPath("$.status").value("CLOSED"))
                 .andExpect(jsonPath("$.events[*].type", contains("APPROVED_LOSS")));
+    }
+
+    @Test
+    void aLossFoundInTheWarehouseCannotTakeTheHeldGoodsOfAnOpenCase() throws Exception {
+        long grn = receive("PX-002");
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 2),
+                counted(lineOf(grn, oil), 24, 24, 0, 0))).andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        long found = caseOf(grn, pad);
+        assertThat(stock(giaLam, pad, "DAMAGED")).isEqualTo(2);
+
+        // Review 17/11 R-06: the two damaged pads are the case's while it waits for a decision.
+        writeOff(managerToken, null, "DAMAGED", 1).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG257"));
+        // Written off through their delivery instead, so the case records it.
+        handle(managerToken, grn, List.of(handling(found, 0, 0))).andExpect(status().isOk());
+        writeOff(managerToken, null, "DAMAGED", 1).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG257"));
+        writeOff(managerToken, grn, "DAMAGED", 2).andExpect(status().isCreated());
     }
 }

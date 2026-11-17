@@ -187,6 +187,11 @@ class StockLossApiTest extends AdjustmentTestData {
         submitted(manager2Token, loss(null, line(oil, oilLot1, "AVAILABLE", 5)));
         list(managerToken, "mine", "true").andExpect(jsonPath("$.totalItems").value(2));
         list(managerToken).andExpect(jsonPath("$.items[*].status", contains("PENDING", "WITHDRAWN", "REJECTED")));
+        // Review 17/11 R-08: one tab, several statuses.
+        list(managerToken, "status", "REJECTED", "status", "WITHDRAWN")
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].id", contains((int) withdrawn, (int) rejected)));
+        list(managerToken, "status", "PENDING").andExpect(jsonPath("$.items[*].status", contains("PENDING")));
     }
 
     @Test

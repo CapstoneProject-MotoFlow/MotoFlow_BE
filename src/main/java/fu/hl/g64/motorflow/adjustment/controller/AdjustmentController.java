@@ -29,6 +29,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Tag(name = "Adjustment requests", description = "FE-10: stock loss or damage (UC-83) and corrections of posted "
         + "documents (UC-81) reported by a Branch Manager or Owner, listed (UC-82) and decided by Owner (UC-84). "
@@ -56,11 +57,13 @@ public class AdjustmentController {
         return adjustments.submitStockLoss(user, request);
     }
 
-    @Operation(summary = "Adjustment requests of the user's store, or of every store for Owner (UC-82)")
+    @Operation(summary = "Adjustment requests of the user's store, or of every store for Owner (UC-82)",
+            description = "status: one or more, e.g. status=REJECTED&status=WITHDRAWN. A Branch Manager also sees the "
+                    + "transit losses they reported for another store as the coordinator.")
     @GetMapping
     public PageResponse<AdjustmentSummary> list(@AuthenticationPrincipal AuthenticatedUser user,
                                                 @RequestParam(required = false) AdjustmentType type,
-                                                @RequestParam(required = false) AdjustmentRequestStatus status,
+                                                @RequestParam(required = false) List<AdjustmentRequestStatus> status,
                                                 @RequestParam(required = false) Long storeId,
                                                 @RequestParam(required = false)
                                                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,

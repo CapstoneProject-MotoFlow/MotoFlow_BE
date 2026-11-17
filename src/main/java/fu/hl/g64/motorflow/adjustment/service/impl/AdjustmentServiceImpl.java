@@ -51,6 +51,7 @@ import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
 import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
+import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -71,6 +72,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -123,6 +125,7 @@ public class AdjustmentServiceImpl implements AdjustmentService {
     private final NotificationService notifications;
     private final AuditLogRepository auditLog;
     private final TransactionTemplate transactions;
+    private final StoreScope storeScope;
     private final Clock clock;
 
     // ---------------------------------------------------------------------------------------------- UC-83
@@ -174,7 +177,9 @@ public class AdjustmentServiceImpl implements AdjustmentService {
 
     /** UC-83 step 4. */
     private StockLoss checkStockLoss(AuthenticatedUser user, StockLossRequest request) {
-        Store store = storeFor(user, request.storeId());
+        Store store = request.transferOrderId() != null
+                ? storeForTransitLoss(user, request.storeId(), request.transferOrderId())
+                : storeFor(user, request.storeId());
         if (request.transferOrderId() != null && request.goodsReceiptNoteId() != null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG280");
         }
@@ -211,8 +216,34 @@ public class AdjustmentServiceImpl implements AdjustmentService {
             changes.stream().filter(c -> !WAREHOUSE_LOSS.contains(c.status())).findFirst().ifPresent(c -> {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG259", c.status());
             });
+            stock.requireAvailable(storeId, null, changes, exceptRequestId, heldForCases(storeId, changes));
+            return;
         }
         stock.requireAvailable(storeId, transferOrderId, changes, exceptRequestId);
+    }
+
+    /**
+     * Review 17/11 R-06: wrong or damaged goods a supplier discrepancy case still holds without a decision are the
+     * case's, not the warehouse's. A loss found in the warehouse leaves them alone; writing them off goes through
+     * the delivery (goodsReceiptNoteId), so the case records APPROVED_LOSS. Keyed "productId:status".
+     */
+    private Map<String, Long> heldForCases(long storeId, List<Change> changes) {
+        Set<Long> parts = changes.stream()
+                .filter(c -> c.status() == StockStatus.WRONG_ITEM || c.status() == StockStatus.DAMAGED)
+                .map(Change::productId).collect(Collectors.toSet());
+        Map<String, Long> held = new HashMap<>();
+        if (parts.isEmpty()) {
+            return held;
+        }
+        for (DiscrepancyCase found : discrepancies.findOpenSupplierCasesAtStore(storeId, parts)) {
+            int undecided = settlement.standing(found).heldUndecided();
+            long pending = stockLines.sumOpenHeldWriteOffs(found.getGoodsReceiptNoteId(), found.getProductId(), 0);
+            long wrong = Math.max(Math.min(undecided, found.getWrongItemQty()) - pending, 0);
+            long damaged = Math.max(Math.min(undecided, found.getDamagedQty()) - pending, 0);
+            held.merge(found.getProductId() + ":" + StockStatus.WRONG_ITEM, wrong, Long::sum);
+            held.merge(found.getProductId() + ":" + StockStatus.DAMAGED, damaged, Long::sum);
+        }
+        return held;
     }
 
     /** UC-46 Step 3_Goods cannot be returned: no more than the held goods of each case that wait for a decision. */
@@ -275,14 +306,17 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             where.add(cb.notEqual(root.get("status"), AdjustmentRequestStatus.DRAFT));
-            if (storeId != null) {
+            if (storeId != null && user.role() != Role.OWNER && search.storeId() == null) {
+                // A Branch Manager's own store, and the transit losses they reported for others (R-05).
+                where.add(cb.or(cb.equal(root.get("storeId"), storeId), cb.equal(root.get("requestedBy"), user.id())));
+            } else if (storeId != null) {
                 where.add(cb.equal(root.get("storeId"), storeId));
             }
             if (search.type() != null) {
                 where.add(cb.equal(root.get("adjustmentType"), search.type()));
             }
-            if (search.status() != null) {
-                where.add(cb.equal(root.get("status"), search.status()));
+            if (search.statuses() != null && !search.statuses().isEmpty()) {
+                where.add(root.get("status").in(search.statuses()));
             }
             if (search.from() != null) {
                 where.add(cb.greaterThanOrEqualTo(root.get("submittedAt"), search.from().atStartOfDay()));
@@ -526,10 +560,29 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         return stores.findById(id).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG52"));
     }
 
-    /** Owner sees every request; a Branch Manager those of their store (UC-82). */
+    /**
+     * UC-83 alternative flow, UC-76 (review 17/11 R-05): the coordinator, Owner or the Branch Manager of the central
+     * warehouse, reports goods lost in transit for the receiving store of the transfer. Anyone else works as in
+     * {@link #storeFor}. MSG279 when the order does not exist or the named store is not its destination.
+     */
+    Store storeForTransitLoss(AuthenticatedUser user, Long storeId, long transferOrderId) {
+        if (user.role() != Role.BRANCH_MANAGER || !storeScope.seesEveryStore(user)) {
+            return storeFor(user, storeId);
+        }
+        long destination = transferOrders.findById(transferOrderId)
+                .filter(o -> storeId == null || o.getDestStoreId().equals(storeId))
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG279")).getDestStoreId();
+        return stores.findById(destination).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG52"));
+    }
+
+    /**
+     * Owner sees every request; a Branch Manager those of their store, and those they made for another store as the
+     * transfer coordinator (UC-82, R-05).
+     */
     private static boolean visible(AuthenticatedUser user, AdjustmentRequest request) {
         return request.getStatus() != AdjustmentRequestStatus.DRAFT
-                && (user.role() == Role.OWNER || request.getStoreId().equals(user.storeId()));
+                && (user.role() == Role.OWNER || request.getStoreId().equals(user.storeId())
+                || Objects.equals(request.getRequestedBy(), user.id()));
     }
 
     private AdjustmentRequest lock(AuthenticatedUser user, long id) {

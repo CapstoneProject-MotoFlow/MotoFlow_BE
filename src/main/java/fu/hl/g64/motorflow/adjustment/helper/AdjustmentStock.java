@@ -70,6 +70,15 @@ public class AdjustmentStock {
      * when it is approved, 0 for a new one.
      */
     public void requireAvailable(long storeId, Long transferOrderId, List<Change> changes, long exceptRequestId) {
+        requireAvailable(storeId, transferOrderId, changes, exceptRequestId, Map.of());
+    }
+
+    /**
+     * As above, keeping {@code reserved} units out of reach, keyed "productId:status": held goods of open supplier
+     * discrepancy cases, which only a write-off linked to their delivery may take (UC-46, UC-83).
+     */
+    public void requireAvailable(long storeId, Long transferOrderId, List<Change> changes, long exceptRequestId,
+                                 Map<String, Long> reserved) {
         Map<Long, Product> parts = parts(changes.stream().map(Change::productId).toList());
         Map<String, Integer> byPartAndStatus = new LinkedHashMap<>();
         for (Change c : changes) {
@@ -100,7 +109,8 @@ public class AdjustmentStock {
                     ? transit(transferOrderId, storeId, productId)
                     - stockLines.sumOpenTransitWriteOffs(transferOrderId, productId, exceptRequestId)
                     : statusQuantity(storeId, productId, status)
-                    - stockLines.sumOpenDeductions(storeId, productId, status, null, exceptRequestId);
+                    - stockLines.sumOpenDeductions(storeId, productId, status, null, exceptRequestId)
+                    - reserved.getOrDefault(e.getKey(), 0L);
             if (e.getValue() > free) {
                 throw tooMuch(part, free);
             }

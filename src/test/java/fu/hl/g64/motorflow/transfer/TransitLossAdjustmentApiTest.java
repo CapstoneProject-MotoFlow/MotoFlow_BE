@@ -12,6 +12,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -47,7 +49,7 @@ class TransitLossAdjustmentApiTest extends TransferFlowTestData {
         confirm("bmlb", order, inspected(order, brake, 3, 0)).andExpect(status().isOk());
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
 
-        // Only the destination reports it, only what is still in transit, and never a chosen lot.
+        // Only the destination (or the coordinator) reports it, only what is still in transit, and never a chosen lot.
         report("bmcg", order, null, 1).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG279"));
         report("bmlb", order, null, 2).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG257"))
@@ -82,5 +84,54 @@ class TransitLossAdjustmentApiTest extends TransferFlowTestData {
         view("owner", "/" + order).andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
         mvc.perform(post(ORDERS + "/" + order + "/close").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
+    }
+
+    @Test
+    void theCentralWarehouseCoordinatorReportsATransitLossForTheReceivingStore() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 4);
+        confirm("bmlb", order, inspected(order, brake, 3, 0)).andExpect(status().isOk());
+
+        // Review 17/11 R-05: bmkt (central warehouse) reports it for Long Biên, the destination of the transfer.
+        String created = report("bmkt", order, null, 1).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.storeId").value(dest))
+                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andReturn().getResponse().getContentAsString();
+        long request = ((Number) JsonPath.read(created, "$.id")).longValue();
+
+        // The coordinator sees it in the list and opens it; the destination's manager too; the source's does not.
+        mvc.perform(get(REQUESTS).header(HttpHeaders.AUTHORIZATION, signIn("bmkt")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[*].id").value(contains((int) request)));
+        mvc.perform(get(REQUESTS + "/" + request).header(HttpHeaders.AUTHORIZATION, signIn("bmkt")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.actions.canWithdraw").value(true))
+                .andExpect(jsonPath("$.actions.canApprove").value(false));
+        mvc.perform(get(REQUESTS + "/" + request).header(HttpHeaders.AUTHORIZATION, signIn("bmlb")))
+                .andExpect(status().isOk());
+        mvc.perform(get(REQUESTS + "/" + request).header(HttpHeaders.AUTHORIZATION, signIn("bmcg")))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG253"));
+        // Approving stays Owner's.
+        mvc.perform(post(REQUESTS + "/" + request + "/approve").header(HttpHeaders.AUTHORIZATION, signIn("bmkt")))
+                .andExpect(status().isForbidden());
+
+        // UC-76: the coordinator links it, and Owner's approval settles it.
+        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("bmkt")).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("productId", brake, "decision", "LOSS", "quantity", 1,
+                                "adjustmentRequestId", request))))
+                .andExpect(status().isOk());
+        mvc.perform(post(REQUESTS + "/" + request + "/approve").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
+        assertThat(stock(dest, brake, "in_transit_qty")).isZero();
+        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
+
+        // The coordinator cannot name a store that is not the transfer's destination.
+        long other = dispatchedOrder(brake, 1);
+        Map<String, Object> line = Map.of("productId", brake, "stockStatus", "IN_TRANSIT", "quantity", 1);
+        mvc.perform(post(REQUESTS + "/stock-loss").header(HttpHeaders.AUTHORIZATION, signIn("bmkt"))
+                        .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("transferOrderId", other,
+                                "storeId", source, "reason", "Rơi", "lines", List.of(line),
+                                "attachments", List.of(Map.of("storageKey", "motoflow/attachments/" + UUID.randomUUID(),
+                                        "fileName", "a.jpg", "contentType", "image/jpeg", "fileSize", 1000))))))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG279"));
     }
 }
