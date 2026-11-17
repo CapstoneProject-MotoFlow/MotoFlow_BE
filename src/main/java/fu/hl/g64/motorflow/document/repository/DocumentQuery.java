@@ -33,7 +33,8 @@ public class DocumentQuery {
     }
 
     /** Where to look; null fields do not filter. {@code scopeStoreId}: a Branch Manager's store or Owner's filter. */
-    public record Filter(Set<DocumentType> types, Long id, LocalDate from, LocalDate to, Long scopeStoreId) {
+    public record Filter(Set<DocumentType> types, Long id, String partner, LocalDate from, LocalDate to,
+                         Long scopeStoreId) {
     }
 
     private static final String SALES = """
@@ -119,7 +120,7 @@ public class DocumentQuery {
 
     /** The document if it is posted, whatever its store. */
     public Optional<Found> findPosted(DocumentType type, long id, boolean owner) {
-        return find(new Filter(EnumSet.of(type), id, null, null, null), owner, 0, 1).stream().findFirst();
+        return find(new Filter(EnumSet.of(type), id, null, null, null, null), owner, 0, 1).stream().findFirst();
     }
 
     private static String union(Set<DocumentType> types, boolean owner) {
@@ -145,6 +146,12 @@ public class DocumentQuery {
         if (filter.id() != null) {
             where.append(" AND d.id = :id");
             params.addValue("id", filter.id());
+        }
+        if (filter.partner() != null) {
+            // Part of the customer or supplier name, any case; % and _ typed by the user are taken literally.
+            where.append(" AND d.partner_name ILIKE :partner ESCAPE '\\'");
+            params.addValue("partner", "%" + filter.partner().replace("\\", "\\\\").replace("%", "\\%")
+                    .replace("_", "\\_") + "%");
         }
         if (filter.from() != null) {
             where.append(" AND d.doc_date >= :from");

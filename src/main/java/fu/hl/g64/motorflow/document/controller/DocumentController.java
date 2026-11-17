@@ -35,11 +35,13 @@ public class DocumentController {
     private final DocumentService documents;
 
     @Operation(summary = "Search posted documents, newest first (UC-78)",
-            description = "number: \"#15\" or \"15\". from/to: document date, both days included. storeId: Owner only; "
+            description = "q: the document number (\"#15\" or \"15\") or part of the customer or supplier name. "
+                    + "number: the document number only (older callers). from/to: document date, both days included. storeId: Owner only; "
                     + "a Branch Manager asking for another store gets MSG05.")
     @GetMapping
     public PageResponse<DocumentRow> search(@AuthenticationPrincipal AuthenticatedUser user,
                                             @RequestParam(required = false) DocumentType type,
+                                            @RequestParam(required = false) String q,
                                             @RequestParam(required = false) String number,
                                             @RequestParam(required = false)
                                             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -48,7 +50,7 @@ public class DocumentController {
                                             @RequestParam(required = false) Long storeId,
                                             @RequestParam(defaultValue = "0") int page,
                                             @RequestParam(defaultValue = "20") int size) {
-        return documents.search(user, new DocumentSearch(type, number, from, to, storeId), page, size);
+        return documents.search(user, new DocumentSearch(type, q, number, from, to, storeId), page, size);
     }
 
     @Operation(summary = "A document with its source documents, related records, adjustments and history (UC-79)")

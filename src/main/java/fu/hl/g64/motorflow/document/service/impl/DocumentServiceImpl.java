@@ -71,6 +71,15 @@ public class DocumentServiceImpl implements DocumentService {
     @Override
     public PageResponse<DocumentRow> search(AuthenticatedUser user, DocumentSearch search, int page, int size) {
         Long id = null;
+        String partner = null;
+        if (search.q() != null && !search.q().isBlank()) {
+            Matcher number = NUMBER.matcher(search.q());
+            if (number.matches()) {
+                id = Long.parseLong(number.group(1));
+            } else {
+                partner = search.q().strip();
+            }
+        }
         if (search.number() != null && !search.number().isBlank()) {
             Matcher number = NUMBER.matcher(search.number());
             if (!number.matches()) {
@@ -84,7 +93,7 @@ public class DocumentServiceImpl implements DocumentService {
         Long scope = scopeOf(user, search.storeId());
         Set<DocumentType> types = search.type() == null ? EnumSet.noneOf(DocumentType.class)
                 : EnumSet.of(search.type());
-        Filter filter = new Filter(types, id, search.from(), search.to(), scope);
+        Filter filter = new Filter(types, id, partner, search.from(), search.to(), scope);
         int pageNo = Math.max(page, 0);
         int pageSize = Math.clamp(size, 1, 100);
         List<DocumentRow> rows = documents.find(filter, isOwner(user), pageNo * pageSize, pageSize).stream()
@@ -175,7 +184,9 @@ public class DocumentServiceImpl implements DocumentService {
             case GOODS_RECEIPT -> List.of(PrintForm.GOODS_RECEIPT_NOTE);
             case TRANSFER_ORDER -> List.of(PrintForm.STOCK_ISSUE_NOTE);
             case PAYMENT -> List.of(PrintForm.PAYMENT_RECEIPT);
-            case ADJUSTMENT -> List.of(PrintForm.ADJUSTMENT_NOTE);
+            // A rejected or withdrawn request never took effect: no adjustment note to print.
+            case ADJUSTMENT -> List.of("PENDING", "APPROVED", "APPLIED").contains(status)
+                    ? List.of(PrintForm.ADJUSTMENT_NOTE) : List.of();
         };
     }
 

@@ -173,6 +173,68 @@ class DocumentApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void searchesByNumberOrByPartOfTheCustomerOrSupplierName() throws Exception {
+        search(managerToken, "q", "#" + sale, "type", "SALES_ORDER").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) sale)));
+        search(managerToken, "q", " " + receipt + " ", "type", "GOODS_RECEIPT").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) receipt)));
+        // The customer's sale and payment of Gia Lâm; the debt payment is Long Biên's.
+        search(managerToken, "q", "tuấn").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) salePayment, (int) sale)));
+        search(otherManagerToken, "q", "Tuấn").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) debtPayment)));
+        search(ownerToken, "q", "honda").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].type").value(contains("GOODS_RECEIPT")))
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) receipt)));
+        // % and _ are letters, not wildcards.
+        search(ownerToken, "q", "%").andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(0));
+        search(ownerToken, "q", "Không có ai").andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(0));
+    }
+
+    @Test
+    void aConfirmedTransferReceiptBelongsToTheReceivingStore() throws Exception {
+        jdbc.update("UPDATE goods_receipt_note SET status = 'CONFIRMED', recorded_by = ?, submitted_at = "
+                + "'2026-10-16 09:00', confirmed_by = ?, confirmed_at = '2026-10-16 10:00' WHERE id = ?",
+                staff.getId(), manager.getId(), transferReceipt);
+
+        search(managerToken, "type", "GOODS_RECEIPT").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) transferReceipt, (int) receipt)))
+                .andExpect(jsonPath("$.items[0].printForms").value(contains("GOODS_RECEIPT_NOTE")));
+        search(otherManagerToken, "type", "GOODS_RECEIPT").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(0));
+        detail(managerToken, "GOODS_RECEIPT", transferReceipt).andExpect(status().isOk());
+        detail(otherManagerToken, "GOODS_RECEIPT", transferReceipt)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        print(managerToken, "GOODS_RECEIPT", transferReceipt, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.form").value("GOODS_RECEIPT_NOTE"));
+    }
+
+    @Test
+    void aDebtPaymentBelongsToTheStoreOfTheDebtsItPaid() throws Exception {
+        search(otherManagerToken, "type", "PAYMENT").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) debtPayment)));
+        search(managerToken, "type", "PAYMENT").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) salePayment)));
+        detail(thirdManagerToken, "PAYMENT", debtPayment)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        print(managerToken, "PAYMENT", debtPayment, null)
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+    }
+
+    @Test
+    void aRejectedOrWithdrawnAdjustmentHasNothingToPrint() throws Exception {
+        for (String state : new String[] {"REJECTED", "WITHDRAWN"}) {
+            jdbc.update("UPDATE adjustment_request SET status = ? WHERE id = ?", state, adjustment);
+            search(managerToken, "type", "ADJUSTMENT").andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[0].status").value(state))
+                    .andExpect(jsonPath("$.items[0].printForms").isEmpty());
+            print(managerToken, "ADJUSTMENT", adjustment, null)
+                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG252"));
+        }
+    }
+
+    @Test
     void refusesWrongFiltersAndOtherRoles() throws Exception {
         search(managerToken, "from", "2026-10-15", "to", "2026-10-14")
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG251"));
