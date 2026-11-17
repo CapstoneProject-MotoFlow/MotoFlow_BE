@@ -2,42 +2,32 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "FindServers",
+      "Sid": "FindLightsailServers",
       "Effect": "Allow",
-      "Action": "ec2:DescribeInstances",
+      "Action": [
+        "lightsail:GetInstances",
+        "lightsail:GetInstance",
+        "lightsail:GetInstanceAccessDetails"
+      ],
       "Resource": "*"
     },
     {
-      "Sid": "FindTheImageOfTheTaggedCommit",
+      "Sid": "ReadAndPullTheImage",
       "Effect": "Allow",
-      "Action": "ecr:DescribeImages",
+      "Action": [
+        "ecr:DescribeImages",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ],
       "Resource": [
-        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-backend",
-        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-frontend"
+        "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/motoflow-backend"
       ]
     },
     {
-      "Sid": "UseRunShellScript",
+      "Sid": "LogInToEcr",
       "Effect": "Allow",
-      "Action": "ssm:SendCommand",
-      "Resource": "arn:aws:ssm:ap-southeast-1::document/AWS-RunShellScript"
-    },
-    {
-      "Sid": "OnlyOnProductionServers",
-      "Effect": "Allow",
-      "Action": "ssm:SendCommand",
-      "Resource": "arn:aws:ec2:ap-southeast-1:<ACCOUNT_ID>:instance/*",
-      "Condition": {
-        "StringEquals": {
-          "ssm:resourceTag/App": "motoflow",
-          "ssm:resourceTag/Env": "production"
-        }
-      }
-    },
-    {
-      "Sid": "ReadCommandResults",
-      "Effect": "Allow",
-      "Action": "ssm:GetCommandInvocation",
+      "Action": "ecr:GetAuthorizationToken",
       "Resource": "*"
     }
   ]

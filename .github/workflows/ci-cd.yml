@@ -1,8 +1,8 @@
 # CI/CD for the MotoFlow backend. Full guide: docs/CICD.md
 #
 #   Pull request to main -> build-test (./mvnw verify: unit + integration tests)
-#   Push/merge to main   -> build-test -> build-push-image -> deploy-dev (+ smoke test)
-#   Tag v*               -> release.yml deploys the same image to production
+#   Push/merge to main   -> build-test -> build-push-image -> deploy-production (+ smoke test)
+#   Tag v*               -> release.yml deploys that same image to production again
 #
 # The CD jobs stay skipped until the repository variable AWS_ACCOUNT_ID is set,
 # so the CI part is useful before the AWS side exists.
@@ -112,13 +112,13 @@ jobs:
           echo "image=$REPO_URI@$DIGEST" >> "$GITHUB_OUTPUT"
           echo "Image: \`$REPO_URI@$DIGEST\` (tag \`$GITHUB_SHA\`)" >> "$GITHUB_STEP_SUMMARY"
 
-  deploy-dev:
-    name: deploy-dev
+  deploy-production:
+    name: deploy-production
     needs: build-push-image
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
-      group: deploy-dev-backend
+      group: deploy-production-backend
       cancel-in-progress: false # never stop a deployment halfway
     permissions:
       contents: read
@@ -128,16 +128,17 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/motoflow-gha-deploy-dev
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/motoflow-gha-deploy-prod
           aws-region: ${{ env.AWS_REGION }}
 
-      # Deploys by digest: dev and production run byte-for-byte the same image.
-      - name: Deploy to the dev server over SSM
+      # Deploys by digest: a release tag deploys this same image, without rebuilding it.
+      - name: Deploy to the production Lightsail instance
         env:
           IMAGE: ${{ needs.build-push-image.outputs.image }}
-        run: bash .github/scripts/ssm-deploy.sh dev backend "$IMAGE"
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+        run: bash .github/scripts/lightsail-deploy.sh production backend "$IMAGE"
 
       - name: Smoke test
         env:
-          BASE_URL: ${{ vars.DEV_BASE_URL }}
+          BASE_URL: ${{ vars.PROD_BASE_URL }}
         run: bash .github/scripts/smoke-test.sh "$BASE_URL"
