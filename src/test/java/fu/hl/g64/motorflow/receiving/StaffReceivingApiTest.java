@@ -2,7 +2,9 @@ package fu.hl.g64.motorflow.receiving;
 
 import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
+import fu.hl.g64.motorflow.support.QueryCounter;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
@@ -13,6 +15,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.nullValue;
@@ -24,6 +27,36 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** Lecturer feedback 12/11: a Staff member given the receiving of a PO records its GRN and then inspects it. */
 class StaffReceivingApiTest extends GoodsReceiptTestData {
+
+    @Autowired
+    private QueryCounter queries;
+
+    private ResultActions receivingList(String token) throws Exception {
+        return mvc.perform(get("/api/v1/warehouse-tasks/assigned-to-me").param("taskType", "SUPPLIER_RECEIVING")
+                .header(HttpHeaders.AUTHORIZATION, token));
+    }
+
+    /** No N+1: the list runs as many queries for three purchase orders as for one. */
+    @Test
+    void theReceivingListLoadsEveryOrderTogether() throws Exception {
+        holdReceiving("SUPPLIER_RECEIVING", order, staff.getId(), manager.getId());
+        queries.reset();
+        receivingList(staffToken).andExpect(status().isOk()).andExpect(jsonPath("$", hasSize(1)));
+        long forOne = queries.prepared();
+
+        long yamahaOrder = created(order(yamaha, giaLam, TODAY, null, line(filter, 5, 50_000)));
+        long thirdOrder = created(order(honda, giaLam, TODAY, null, line(pad, 1, 120_000), line(oil, 1, 85_000),
+                line(lamp, 1, 30_000)));
+        holdReceiving("SUPPLIER_RECEIVING", yamahaOrder, staff.getId(), manager.getId());
+        holdReceiving("SUPPLIER_RECEIVING", thirdOrder, staff.getId(), manager.getId());
+        queries.reset();
+        receivingList(staffToken).andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].documentId", contains((int) order, (int) yamahaOrder, (int) thirdOrder)))
+                .andExpect(jsonPath("$[*].partnerName", contains("Honda Việt Nam", "Yamaha Motor", "Honda Việt Nam")))
+                .andExpect(jsonPath("$[*].lineCount", contains(2, 1, 3)))
+                .andExpect(jsonPath("$[*].assignedById", everyItem(is(manager.getId().intValue()))));
+        assertThat(queries.prepared()).isEqualTo(forOne);
+    }
 
     private ResultActions giveReceiving(String token, long purchaseOrder, UserAccount assignee) throws Exception {
         return mvc.perform(post("/api/v1/warehouse-tasks").header(HttpHeaders.AUTHORIZATION, token)
