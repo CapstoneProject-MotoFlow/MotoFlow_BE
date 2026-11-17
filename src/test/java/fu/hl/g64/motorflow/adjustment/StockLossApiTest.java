@@ -272,6 +272,31 @@ class StockLossApiTest extends AdjustmentTestData {
         assertThat(queries.prepared()).isEqualTo(forOne);
     }
 
+    @Test
+    void twoLotsOfOnePartAreCheckedEachAndTogether() throws Exception {
+        submitted(managerToken, loss(null, line(oil, oilLot1, "AVAILABLE", 4)));
+        // Lot 1 has 1 left, lot 2 has 7; the part has 12 - 4 = 8.
+        submitted(manager2Token, loss(null, line(oil, oilLot1, "AVAILABLE", 1), line(oil, oilLot2, "AVAILABLE", 7)));
+        submit(managerToken, loss(null, line(oil, oilLot2, "AVAILABLE", 1))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG257"))
+                .andExpect(jsonPath("$.message").value("Số lượng của phụ tùng NHOT-01 vượt số còn có thể điều chỉnh: "
+                        + "tối đa 0."));
+        submit(managerToken, loss(null, line(oil, null, "AVAILABLE", 1))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG257"));
+    }
+
+    @Test
+    void thePreviewChecksTheStockOfEveryLineTogether() throws Exception {
+        queries.reset();
+        preview(managerToken, loss(null, line(oil, oilLot1, "AVAILABLE", 1))).andExpect(status().isOk());
+        long forOne = queries.prepared();
+
+        queries.reset();
+        preview(managerToken, loss(null, line(oil, oilLot1, "AVAILABLE", 1), line(oil, oilLot2, "AVAILABLE", 2),
+                line(filter, null, "AVAILABLE", 3))).andExpect(status().isOk());
+        assertThat(queries.prepared()).isEqualTo(forOne);
+    }
+
     /** "type,quantity,value" of the movements the request posted. */
     private List<String> movements(long id) {
         return jdbc.queryForList("SELECT movement_type || ',' || quantity_change || ',' || value FROM stock_movement "
