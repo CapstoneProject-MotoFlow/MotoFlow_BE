@@ -112,6 +112,14 @@ public class DiscrepancySettlement {
         return new Standing(found, progress(List.of(found.getId())).get(found.getId()));
     }
 
+    /** {@link #standing} of every case at once, by case id: their events are read in one query. */
+    public Map<Long, Standing> standings(Collection<DiscrepancyCase> cases) {
+        Map<Long, Progress> byCase = progress(cases.stream().map(DiscrepancyCase::getId).toList());
+        Map<Long, Standing> standings = new HashMap<>();
+        cases.forEach(c -> standings.put(c.getId(), new Standing(c, byCase.get(c.getId()))));
+        return standings;
+    }
+
     /**
      * Closes the open case if every obligation is settled (UC-46 step 7, BR-27): ALL_SETTLED, or CLOSED_BY_AGREEMENT
      * with the reason of the latest waiver when part of the replacement was waived. The caller holds the case lock.

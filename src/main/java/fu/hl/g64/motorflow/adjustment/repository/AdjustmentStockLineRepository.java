@@ -52,10 +52,15 @@ public interface AdjustmentStockLineRepository extends JpaRepository<AdjustmentS
             group by l.productId""")
     List<Object[]> findOpenTransitWriteOffs(long transferOrderId, Collection<Long> productIds, long exceptRequestId);
 
-    /** Units of the part other open requests write off from the held goods of the supplier delivery. */
-    @Query("select coalesce(-sum(l.quantityChange), 0) from AdjustmentStockLine l "
+    /**
+     * [receiptId, productId, units] of the listed parts other open requests write off from the held goods of the
+     * listed supplier deliveries.
+     */
+    @Query("select q.goodsReceiptNoteId, l.productId, -sum(l.quantityChange) from AdjustmentStockLine l "
             + "join AdjustmentRequest q on q.id = l.adjustmentRequestId where " + OPEN + """
-              and q.id <> :exceptRequestId and q.goodsReceiptNoteId = :receiptId and l.productId = :productId
-              and l.quantityChange < 0""")
-    long sumOpenHeldWriteOffs(long receiptId, long productId, long exceptRequestId);
+              and q.id <> :exceptRequestId and q.goodsReceiptNoteId in :receiptIds and l.productId in :productIds
+              and l.quantityChange < 0
+            group by q.goodsReceiptNoteId, l.productId""")
+    List<Object[]> findOpenHeldWriteOffs(Collection<Long> receiptIds, Collection<Long> productIds,
+                                         long exceptRequestId);
 }
