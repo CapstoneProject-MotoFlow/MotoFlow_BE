@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.adjustment.dto.AdjustmentDetail;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentPreview;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSearch;
 import fu.hl.g64.motorflow.adjustment.dto.AdjustmentSummary;
+import fu.hl.g64.motorflow.adjustment.dto.CorrectionRequest;
 import fu.hl.g64.motorflow.adjustment.dto.RejectAdjustmentRequest;
 import fu.hl.g64.motorflow.adjustment.dto.StockLossRequest;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
@@ -20,6 +21,12 @@ public interface AdjustmentService {
 
     /** UC-83 steps 6-7: saves the request PENDING with its evidence and tells Owner. */
     AdjustmentDetail submitStockLoss(AuthenticatedUser user, StockLossRequest request);
+
+    /** UC-81 steps 2-5: the correction's effects on stock and debt; nothing is saved. */
+    AdjustmentPreview previewCorrection(AuthenticatedUser user, CorrectionRequest request);
+
+    /** UC-81 steps 6-7: saves the correction PENDING, linked to the original, which stays as it is. */
+    AdjustmentDetail submitCorrection(AuthenticatedUser user, CorrectionRequest request);
 
     /** UC-82: a Branch Manager's store, or every store for Owner; newest submission first. */
     PageResponse<AdjustmentSummary> list(AuthenticatedUser user, AdjustmentSearch search, int page, int size);
