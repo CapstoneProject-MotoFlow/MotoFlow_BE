@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests/drafts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "note": "Nháp cuối tuần",
+      "lines": [
+        { "productId": {{partId}}, "requestedQty": 3 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      pm.collectionVariables.set('draftToDeleteId', pm.response.json().id);
+    language: text/javascript
+order: 18000

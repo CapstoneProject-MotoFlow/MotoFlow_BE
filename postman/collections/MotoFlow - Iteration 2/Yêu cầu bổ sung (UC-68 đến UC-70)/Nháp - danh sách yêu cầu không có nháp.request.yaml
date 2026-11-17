@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests?size=100"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const ids = pm.response.json().items.map(i => i.id);
+      pm.test('Không có nháp', () => pm.expect(ids).to.not.include(Number(pm.collectionVariables.get('draftId'))));
+    language: text/javascript
+order: 14000

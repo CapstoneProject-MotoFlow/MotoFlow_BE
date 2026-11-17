@@ -1071,6 +1071,297 @@
               }
             }
           ]
+        },
+        {
+          "name": "Nháp - BM lưu nháp",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/drafts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Nháp cuối tuần\",\n  \"lines\": [\n    { \"productId\": {{partId}}, \"requestedQty\": 3 }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('draftId', b.id);",
+                  "pm.test('Là nháp, có 1 dòng', () => {",
+                  "    pm.expect(b.status).to.eql('DRAFT');",
+                  "    pm.expect(b.lines.length).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nháp - BM xem danh sách nháp của mình",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/drafts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().items.map(i => i.id);",
+                  "pm.test('Có nháp vừa lưu', () => pm.expect(ids).to.include(Number(pm.collectionVariables.get('draftId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nháp - danh sách yêu cầu không có nháp",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests?size=100",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const ids = pm.response.json().items.map(i => i.id);",
+                  "pm.test('Không có nháp', () => pm.expect(ids).to.not.include(Number(pm.collectionVariables.get('draftId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nháp - người khác mở nháp bị MSG95",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/drafts/{{draftId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('MSG95', () => pm.expect(pm.response.json().code).to.eql('MSG95'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nháp - BM sửa nháp",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/drafts/{{draftId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Nháp đã sửa\",\n  \"lines\": [\n    { \"productId\": {{partId}}, \"requestedQty\": 4 },\n    { \"productId\": {{secondPartId}}, \"requestedQty\": 1 }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Thay toàn bộ nội dung', () => {",
+                  "    pm.expect(b.note).to.eql('Nháp đã sửa');",
+                  "    pm.expect(b.lines.length).to.eql(2);",
+                  "    pm.expect(b.status).to.eql('DRAFT');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nháp - BM gửi nháp thành yêu cầu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/drafts/{{draftId}}/submit",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Nháp đã sửa\",\n  \"lines\": [\n    { \"productId\": {{partId}}, \"requestedQty\": 4 },\n    { \"productId\": {{secondPartId}}, \"requestedQty\": 1 }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Giữ id, chờ điều phối', () => {",
+                  "    pm.expect(b.id).to.eql(Number(pm.collectionVariables.get('draftId')));",
+                  "    pm.expect(b.status).to.eql('AWAITING_COORDINATION');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nháp - BM lưu nháp để xóa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/drafts",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Nháp cuối tuần\",\n  \"lines\": [\n    { \"productId\": {{partId}}, \"requestedQty\": 3 }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('draftToDeleteId', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nháp - BM xóa nháp",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/replenishment-requests/drafts/{{draftToDeleteId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{branchBmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },

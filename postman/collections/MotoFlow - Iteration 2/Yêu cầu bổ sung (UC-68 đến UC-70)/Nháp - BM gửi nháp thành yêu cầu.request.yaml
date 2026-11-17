@@ -1,0 +1,30 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests/drafts/{{draftId}}/submit"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "note": "Nháp đã sửa",
+      "lines": [
+        { "productId": {{partId}}, "requestedQty": 4 },
+        { "productId": {{secondPartId}}, "requestedQty": 1 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Giữ id, chờ điều phối', () => {
+          pm.expect(b.id).to.eql(Number(pm.collectionVariables.get('draftId')));
+          pm.expect(b.status).to.eql('AWAITING_COORDINATION');
+      });
+    language: text/javascript
+order: 17000

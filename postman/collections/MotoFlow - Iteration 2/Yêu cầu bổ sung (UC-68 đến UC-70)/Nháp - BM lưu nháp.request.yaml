@@ -1,0 +1,30 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests/drafts"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "note": "Nháp cuối tuần",
+      "lines": [
+        { "productId": {{partId}}, "requestedQty": 3 }
+      ]
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 201', () => pm.response.to.have.status(201));
+      const b = pm.response.json();
+      pm.collectionVariables.set('draftId', b.id);
+      pm.test('Là nháp, có 1 dòng', () => {
+          pm.expect(b.status).to.eql('DRAFT');
+          pm.expect(b.lines.length).to.eql(1);
+      });
+    language: text/javascript
+order: 12000
