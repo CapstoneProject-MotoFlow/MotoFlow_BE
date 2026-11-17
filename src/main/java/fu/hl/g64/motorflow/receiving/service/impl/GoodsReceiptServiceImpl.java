@@ -191,7 +191,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     public GoodsReceiptDetail create(AuthenticatedUser user, long purchaseOrderId, GoodsReceiptRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime arrivedAt = request.arrivedAt() != null ? request.arrivedAt() : now;
-        if (request.deliveryDocumentDate().isAfter(now.toLocalDate()) || arrivedAt.isAfter(now)) {
+        if (request.deliveryDocumentDate() != null && request.deliveryDocumentDate().isAfter(now.toLocalDate())
+                || arrivedAt.isAfter(now)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG138");
         }
         // BR-21: the PO lock keeps a change or cancellation of the PO from passing this new GRN.
@@ -199,7 +200,9 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG131"));
         // Lecturer feedback 12/11: whoever holds the PO's receiving task records the GRN, a Branch Manager too.
         warehouseTasks.requireAssignee(user, TaskType.SUPPLIER_RECEIVING, order.getId());
-        String documentNo = request.deliveryDocumentNo().strip();
+        // PM 17/11 Q1: the number may be left out; blank is kept as none.
+        String documentNo = request.deliveryDocumentNo() == null || request.deliveryDocumentNo().isBlank() ? null
+                : request.deliveryDocumentNo().strip();
         Set<Long> caseIds = new LinkedHashSet<>(request.replacementForCaseIds() == null ? List.of()
                 : request.replacementForCaseIds());
         Map<Long, Long> priceByProduct = orderLines.findByPurchaseOrderIdOrderByIdAsc(order.getId()).stream()
@@ -242,7 +245,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             }
             expectedParts = List.copyOf(parts);
         }
-        if (receipts.existsByPurchaseOrderIdAndDeliveryDocumentNoIgnoreCase(order.getId(), documentNo)) {
+        if (documentNo != null
+                && receipts.existsByPurchaseOrderIdAndDeliveryDocumentNoIgnoreCase(order.getId(), documentNo)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG28");
         }
         Map<Long, Integer> documentQty = documentQuantities(request.documentLines(), expectedParts);
