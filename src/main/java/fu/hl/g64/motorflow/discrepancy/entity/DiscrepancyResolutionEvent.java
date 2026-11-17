@@ -100,6 +100,17 @@ public class DiscrepancyResolutionEvent {
     }
 
     /**
+     * UC-84 step 7: held goods of a supplier delivery that an applied STOCK_LOSS request {@code adjustmentRequestId}
+     * wrote off (UC-46 Step 3_Goods cannot be returned). Final when recorded, as the stock has left.
+     */
+    public static DiscrepancyResolutionEvent heldWriteOff(long caseId, int quantity, long adjustmentRequestId,
+                                                          String reason, long by, LocalDateTime now) {
+        DiscrepancyResolutionEvent event = done(caseId, ResolutionType.APPROVED_LOSS, quantity, reason, by, now);
+        event.adjustmentRequestId = adjustmentRequestId;
+        return event;
+    }
+
+    /**
      * UC-76 Step 3_Return to source: the coordinator decided that {@code quantity} goes back to the source. It stays
      * pending, with no GRN, until the return receipt that brings the goods is confirmed ({@link #settle}).
      */
