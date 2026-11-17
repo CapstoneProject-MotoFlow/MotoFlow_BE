@@ -126,7 +126,18 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public PageResponse<StockRowResponse> listStock(AuthenticatedUser user, StockSearch filter, int page, int size) {
+        Integer min = filter.minQty();
+        Integer max = filter.maxQty();
+        if ((min != null && min < 0) || (max != null && max < 0) || (min != null && max != null && min > max)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG263");
+        }
         Specification<StockBalance> spec = stockFilter(scopeStoreId(user, filter.storeId()), filter);
+        if (min != null) {
+            spec = spec.and((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("availableQty"), min));
+        }
+        if (max != null) {
+            spec = spec.and((root, query, cb) -> cb.lessThanOrEqualTo(root.get("availableQty"), max));
+        }
         Page<StockBalance> found = balances.findAll(spec, PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
                 Sort.by("storeId", "productId")));
         return PageResponse.of(found, rows(user, found.getContent()));
@@ -569,13 +580,14 @@ public class InventoryServiceImpl implements InventoryService {
 
     /** Unit cost and value are filled for the Owner only (BR-72). */
     private List<StockMovementResponse> movementRows(AuthenticatedUser user, List<StockMovement> content) {
-        Map<Long, String> skus = products.findAllById(content.stream().map(StockMovement::getProductId)
-                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Product::getSku));
+        Map<Long, Product> parts = products.findAllById(content.stream().map(StockMovement::getProductId)
+                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
         Map<Long, String> names = users.findAllById(content.stream().map(StockMovement::getPerformedBy)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
         boolean owner = user.role() == Role.OWNER;
         return content.stream().map(m -> new StockMovementResponse(m.getId(), m.getOccurredAt(),
-                m.getStoreId(), m.getProductId(), skus.get(m.getProductId()), m.getLotId(), m.getMovementType(),
+                m.getStoreId(), m.getProductId(), parts.get(m.getProductId()).getSku(),
+                parts.get(m.getProductId()).getPartName(), m.getLotId(), m.getMovementType(),
                 m.getStockStatus(), m.getQuantityChange(), m.source().type(), m.source().id(), m.getReason(),
                 m.getPerformedBy(), names.get(m.getPerformedBy()), owner ? m.getUnitCost() : null,
                 owner ? m.getValue() : null)).toList();

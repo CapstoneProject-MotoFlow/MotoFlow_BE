@@ -8,11 +8,11 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
- * UC-49: one stock movement with its lot and source document. {@code unitCost} and {@code value} are filled for the
+ * UC-49: one stock movement with its part, lot and source document. {@code unitCost} and {@code value} are filled for the
  * Owner only (BR-72).
  */
 public record StockMovementResponse(long id, LocalDateTime occurredAt, long storeId, long productId, String sku,
-                                    Long lotId, MovementType movementType, StockStatus stockStatus, int quantityChange,
-                                    SourceType sourceType, long sourceId, String reason, long performedBy,
-                                    String performedByName, BigDecimal unitCost, Long value) {
+                                    String partName, Long lotId, MovementType movementType, StockStatus stockStatus,
+                                    int quantityChange, SourceType sourceType, long sourceId, String reason,
+                                    long performedBy, String performedByName, BigDecimal unitCost, Long value) {
 }

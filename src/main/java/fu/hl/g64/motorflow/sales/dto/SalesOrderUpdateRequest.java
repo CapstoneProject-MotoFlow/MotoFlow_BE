@@ -14,7 +14,8 @@ import java.util.List;
 
 /**
  * UC-55: the whole new content of the order, as in {@link SalesOrderRequest} without the store. {@code version} is the
- * version the seller opened; if someone saved another one since, the change is refused (MSG165).
+ * version the seller opened; if someone saved another one since, the change is refused (MSG165). A change of
+ * {@code note} alone saves no new version and keeps the confirmation; leaving it out or blank clears the note.
  */
 public record SalesOrderUpdateRequest(
         @NotNull(message = "Vui lòng tải lại đơn bán.")
@@ -35,6 +36,9 @@ public record SalesOrderUpdateRequest(
         @DecimalMax(value = "100", inclusive = false, message = "Chiết khấu phải nhỏ hơn 100%.")
         @Digits(integer = 2, fraction = 2, message = "Chiết khấu có tối đa 2 chữ số thập phân.")
         BigDecimal discountRate,
+
+        @Size(max = 500, message = "Ghi chú tối đa 500 ký tự.")
+        String note,
 
         @NotEmpty(message = "Vui lòng chọn ít nhất một phụ tùng.")
         @Size(max = 200, message = "Tối đa 200 phụ tùng.")

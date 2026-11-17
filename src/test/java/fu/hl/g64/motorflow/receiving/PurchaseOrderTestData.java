@@ -230,12 +230,21 @@ abstract class PurchaseOrderTestData extends ApiTestUsers {
     }
 
     protected void inspection(long receipt, UserAccount assignee, String status, LocalDateTime assignedAt) {
-        jdbc.update("INSERT INTO warehouse_task (task_type, goods_receipt_note_id, assigned_to, assigned_by, assigned_at, "
-                + "status, result_submitted_at) VALUES ('INSPECTION', ?, ?, ?, ?, ?, ?)", receipt, assignee.getId(),
+        jdbc.update("INSERT INTO warehouse_task (task_type, goods_receipt_note_id, store_id, assigned_to, assigned_by, "
+                + "assigned_at, status, result_submitted_at) VALUES ('INSPECTION', ?, "
+                + "(SELECT CASE WHEN g.purchase_order_id IS NOT NULL THEN (SELECT p.store_id FROM purchase_order p "
+                + "WHERE p.id = g.purchase_order_id) ELSE (SELECT t.dest_store_id FROM transfer_order t "
+                + "WHERE t.id = g.transfer_order_id) END FROM goods_receipt_note g WHERE g.id = ?), "
+                + "?, ?, ?, ?, ?)", receipt, receipt, assignee.getId(),
                 manager.getId(), assignedAt, status, status.equals("ASSIGNED") ? null : assignedAt.plusMinutes(30));
     }
 
     protected long id(String sql, Object... args) {
         return jdbc.queryForObject(sql, Long.class, args);
+    }
+
+    /** How notifications name a PO, for example DNH-0012. */
+    protected static String dnh(long purchaseOrder) {
+        return "DNH-%04d".formatted(purchaseOrder);
     }
 }

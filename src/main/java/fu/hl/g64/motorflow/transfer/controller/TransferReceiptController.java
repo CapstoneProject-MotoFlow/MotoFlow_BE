@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.transfer.controller;
 
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.dto.RecountRequest;
+import fu.hl.g64.motorflow.transfer.dto.TransferReceiptRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResponse;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResultRequest;
 import fu.hl.g64.motorflow.transfer.service.TransferReceiptService;
@@ -30,13 +31,14 @@ public class TransferReceiptController {
 
     private final TransferReceiptService service;
 
-    @Operation(summary = "The destination Branch Manager records that the goods arrived. Each part expects what the "
-            + "order has not received, returned or written off yet. Assign the inspection with POST /warehouse-tasks")
+    @Operation(summary = "Whoever holds the TRANSFER_RECEIVING task records that the goods arrived with their delivery document. Each part expects what the "
+            + "order has not received, returned or written off yet. The inspection goes to the same person")
     @PostMapping
-    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    @PreAuthorize("hasAnyRole('BRANCH_MANAGER', 'STAFF')")
     public ResponseEntity<TransferReceiptResponse> arrive(@AuthenticationPrincipal AuthenticatedUser user,
-                                                          @PathVariable long orderId) {
-        TransferReceiptResponse created = service.arrive(user, orderId);
+                                                          @PathVariable long orderId,
+                                                          @Valid @RequestBody TransferReceiptRequest request) {
+        TransferReceiptResponse created = service.arrive(user, orderId, request);
         return ResponseEntity.created(URI.create("/api/v1/transfer-orders/" + orderId + "/receipts/" + created.id()))
                 .body(created);
     }

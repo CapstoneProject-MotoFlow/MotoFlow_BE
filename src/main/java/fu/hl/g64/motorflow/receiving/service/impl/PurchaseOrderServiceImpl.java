@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.receiving.service.impl;
 
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
@@ -16,7 +17,11 @@ import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Progress;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Standing;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
+import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
+import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
+import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
+import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.entity.enums.SupplierStatus;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
@@ -26,6 +31,7 @@ import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.Line;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.Receipt;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.ReceiptLine;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderLineRequest;
+import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderReceivingView;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderRequest;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderSearch;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderSummary;
@@ -39,6 +45,7 @@ import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
 import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderHistory;
 import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderHistory.LineValues;
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderReceiving;
 import fu.hl.g64.motorflow.receiving.helper.ReceivingLedger;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
@@ -102,6 +109,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     private final ReceivingLedger ledger;
     private final DiscrepancySettlement settlement;
     private final ReplenishmentRequestService replenishments;
+    private final WarehouseTaskService warehouseTasks;
+    private final PurchaseOrderReceiving purchaseOrderReceiving;
     private final Clock clock;
 
     // UC-39
@@ -120,7 +129,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         PurchaseOrderView view = search.view() == null ? PurchaseOrderView.OPEN : search.view();
         LocalDate from = search.createdFrom();
         LocalDate to = search.createdTo();
-        if (view != PurchaseOrderView.OPEN) {
+        if (view != PurchaseOrderView.OPEN && view != PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT) {
             to = to != null ? to : today;
             from = from != null ? from : to.minusDays(DEFAULT_DAYS - 1);
         }
@@ -173,7 +182,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 owner.id(), null, null, PurchaseOrderHistory.snapshot(order.getExpectedArrival(), note,
                         values(request.lines())), now));
         notifications.notifyStoreManagers(store.getId(), "PURCHASE_ORDER_CREATED",
-                "Có yêu cầu nhập hàng mới %s từ nhà cung cấp %s.".formatted(label(order), supplier.getSupplierName()),
+                "Có đơn nhập hàng mới %s từ nhà cung cấp %s.".formatted(label(order), supplier.getSupplierName()),
                 REF_TYPE, order.getId());
         return detail(owner, order);
     }
@@ -223,7 +232,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         auditLog.save(AuditLog.record(PurchaseOrderHistory.ENTITY, id, PurchaseOrderHistory.UPDATED, owner.id(),
                 reason, before, after, now));
         notifications.notifyStoreManagers(order.getStoreId(), "PURCHASE_ORDER_UPDATED",
-                "Yêu cầu nhập hàng %s đã được cập nhật. Lý do: %s".formatted(label(order), reason), REF_TYPE, id);
+                "Đơn nhập hàng %s đã được cập nhật. Lý do: %s".formatted(label(order), reason), REF_TYPE, id);
         return detail(owner, order);
     }
 
@@ -237,10 +246,11 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         // No PO is linked to a replenishment request yet (creating a PO from one comes with UC-69..71), so there is
         // no purchasing need to give back.
         order.cancel(owner.id(), why, now);
+        warehouseTasks.cancelForDocument(TaskType.SUPPLIER_RECEIVING, id);
         auditLog.save(AuditLog.record(PurchaseOrderHistory.ENTITY, id, PurchaseOrderHistory.CANCELLED, owner.id(),
                 why, now));
         notifications.notifyStoreManagers(order.getStoreId(), "PURCHASE_ORDER_CANCELLED",
-                "Yêu cầu nhập hàng %s đã bị hủy. Lý do: %s".formatted(label(order), why), REF_TYPE, id);
+                "Đơn nhập hàng %s đã bị hủy. Lý do: %s".formatted(label(order), why), REF_TYPE, id);
         return detail(owner, order);
     }
 
@@ -368,7 +378,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             return new Discrepancy(c.getId(), c.getGoodsReceiptNoteId(), c.getProductId(), part.getSku(),
                     part.getPartName(), c.getShortQty(), c.getWrongItemQty(), c.getDamagedQty(),
                     c.getRejectedExcessQty(), c.getReturnRequiredQty(), c.getReplacementRequiredQty(),
-                    done.outstandingReturn(), done.outstandingReplacement(), c.isOpen() ? done.openReplacement() : 0,
+                    done.outstandingReturn(), done.outstandingReplacement(),
+                    PurchaseOrderReceiving.openReplacement(c, progress.get(c.getId())),
                     c.getStatus(), c.getOpenedAt(), c.getClosedAt());
         }).toList();
         long openCases = cases.stream().filter(c -> c.getStatus() == DiscrepancyCaseStatus.OPEN).count();
@@ -376,8 +387,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 && deliveries.isEmpty();
         // UC-106: only the Branch Manager of the receiving store records deliveries.
         boolean receiving = user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
-        boolean canCreateReceipt = receiving && (order.getStatus() == PurchaseOrderStatus.AWAITING_DELIVERY
-                || order.getStatus() == PurchaseOrderStatus.RECEIVING) && standing.anyOutstanding();
+        boolean canCreateReceipt = receiving && PurchaseOrderReceiving.receiptOpen(order, standing);
         boolean canCreateReplacement = receiving && caseRows.stream().anyMatch(c -> c.openReplacementQty() > 0);
 
         return new PurchaseOrderDetail(id, order.getStatus(), supplier.getId(), supplier.getSupplierCode(),
@@ -389,6 +399,42 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 canCreateReceipt, canCreateReplacement, lineRows, receiptRows, caseRows,
                 steps.stream().map(step -> PurchaseOrderHistory.entry(step, names.get(step.getActorId()), parts, owner))
                         .toList());
+    }
+
+    // UC-106, screen 6.2.1: what the receiver needs, without prices (BR-72).
+    @Transactional(readOnly = true)
+    @Override
+    public PurchaseOrderReceivingView receivingView(AuthenticatedUser user, long id) {
+        PurchaseOrder order = orders.findById(id).orElseThrow(PurchaseOrderServiceImpl::notFound);
+        boolean allowed = user.role() == Role.BRANCH_MANAGER ? Objects.equals(order.getStoreId(), user.storeId())
+                : warehouseTasks.holds(user, TaskType.SUPPLIER_RECEIVING, id);
+        if (!allowed) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        PurchaseOrderReceiving.Openness open = purchaseOrderReceiving.of(order);
+        List<PurchaseOrderLine> lines = orderLines.findByPurchaseOrderIdOrderByIdAsc(id);
+        Set<Long> productIds = new HashSet<>();
+        lines.forEach(line -> productIds.add(line.getProductId()));
+        open.cases().forEach(c -> productIds.add(c.found().getProductId()));
+        Map<Long, Product> parts = byId(products.findAllById(productIds), Product::getId);
+        Supplier supplier = suppliers.findById(order.getSupplierId()).orElseThrow();
+        String storeName = stores.findById(order.getStoreId()).map(Store::getStoreName).orElse(null);
+        List<PurchaseOrderReceivingView.Line> lineRows = lines.stream().map(line -> {
+            Product part = parts.get(line.getProductId());
+            return new PurchaseOrderReceivingView.Line(line.getProductId(), part.getSku(), part.getPartName(),
+                    part.getBaseUnit(), line.getOrderedQty(),
+                    open.standing().parts().get(line.getProductId()).outstandingQty());
+        }).toList();
+        List<PurchaseOrderReceivingView.OpenCase> caseRows = open.cases().stream()
+                .filter(c -> c.openReplacementQty() > 0).map(c -> {
+                    Product part = parts.get(c.found().getProductId());
+                    return new PurchaseOrderReceivingView.OpenCase(c.found().getId(),
+                            c.found().getGoodsReceiptNoteId(), c.found().getProductId(), part.getSku(),
+                            part.getPartName(), c.openReplacementQty());
+                }).toList();
+        return new PurchaseOrderReceivingView(id, "#" + order.getId(), order.getStatus(), supplier.getId(),
+                supplier.getSupplierCode(), supplier.getSupplierName(), order.getStoreId(), storeName,
+                order.getExpectedArrival(), open.receipt(), open.replacement(), lineRows, caseRows);
     }
 
     /** Full names of everyone the detail mentions. */
@@ -415,6 +461,14 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             where.add(root.get("status").in(view.statuses()));
+            if (view == PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT) {
+                Subquery<Long> held = query.subquery(Long.class);
+                Root<WarehouseTask> task = held.from(WarehouseTask.class);
+                held.select(task.get("id")).where(cb.equal(task.get("purchaseOrderId"), root.get("id")),
+                        cb.equal(task.get("taskType"), TaskType.SUPPLIER_RECEIVING),
+                        cb.equal(task.get("status"), WarehouseTaskStatus.ASSIGNED));
+                where.add(cb.not(cb.exists(held)));
+            }
             if (storeId != null) {
                 where.add(cb.equal(root.get("storeId"), storeId));
             }
@@ -443,9 +497,10 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         };
     }
 
-    /** "12" or "#12" read as PO number 12; anything else is no PO number. */
+    /** "12", "#12" or "DNH-0012" read as PO number 12; anything else is no PO number. */
     private static Long orderNumber(String needle) {
-        String digits = needle.startsWith("#") ? needle.substring(1).strip() : needle;
+        String digits = needle.startsWith("#") ? needle.substring(1).strip()
+                : needle.regionMatches(true, 0, "DNH-", 0, 4) ? needle.substring(4).strip() : needle;
         if (digits.isEmpty() || digits.length() > 18 || !digits.chars().allMatch(c -> c >= '0' && c <= '9')) {
             return null;
         }
@@ -457,9 +512,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         return order.isOpen() && order.getExpectedArrival() != null && order.getExpectedArrival().isBefore(today);
     }
 
-    /** How a PO is named in notifications and messages: its number. The table has no separate code. */
+    /** How a PO is named in notifications and messages, for example DNH-0012 (PM 15/11). */
     private static String label(PurchaseOrder order) {
-        return "#" + order.getId();
+        return PurchaseOrderCode.of(order.getId());
     }
 
     private static String text(String value) {

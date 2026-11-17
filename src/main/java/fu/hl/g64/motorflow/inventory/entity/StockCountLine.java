@@ -39,6 +39,15 @@ public class StockCountLine {
     @Column(name = "book_qty", nullable = false)
     private int bookQty;
 
+    @Column(name = "book_damaged_qty", nullable = false)
+    private int bookDamagedQty;
+
+    @Column(name = "damaged_qty", nullable = false)
+    private int damagedQty;
+
+    @Column(name = "previous_damaged_qty")
+    private Integer previousDamagedQty;
+
     @Column(name = "counted_qty")
     private Integer countedQty;
 
@@ -73,27 +82,32 @@ public class StockCountLine {
         return line;
     }
 
-    /** UC-93: the book quantity when counting starts. */
-    public void takeBookQty(int bookQty) {
+    /** UC-93: book quantity (AVAILABLE + DAMAGED) and its damaged part when counting starts. */
+    public void takeBookQty(int bookQty, int bookDamagedQty) {
         this.bookQty = bookQty;
+        this.bookDamagedQty = bookDamagedQty;
     }
 
     /**
      * UC-93, BR-79: counting again after a recount request keeps the earlier book and counted quantities, takes a new
      * book quantity and clears the count.
      */
-    public void restartRecount(int newBookQty) {
+    public void restartRecount(int newBookQty, int newBookDamagedQty) {
         previousBookQty = bookQty;
         previousCountedQty = countedQty;
+        previousDamagedQty = countedQty == null ? null : damagedQty;
         bookQty = newBookQty;
+        bookDamagedQty = newBookDamagedQty;
         countedQty = null;
+        damagedQty = 0;
         countedBy = null;
         countedAt = null;
     }
 
-    /** UC-93: the counted quantity, or null to leave the line uncounted. */
-    public void record(Integer countedQty, Long countedBy, LocalDateTime now) {
+    /** UC-93: counted quantity (damaged goods included) and its damaged part; null counted leaves the line uncounted. */
+    public void record(Integer countedQty, int damagedQty, Long countedBy, LocalDateTime now) {
         this.countedQty = countedQty;
+        this.damagedQty = countedQty == null ? 0 : damagedQty;
         this.countedBy = countedQty == null ? null : countedBy;
         this.countedAt = countedQty == null ? null : now;
     }
@@ -121,5 +135,15 @@ public class StockCountLine {
     /** Counted minus book, or null while uncounted. */
     public Integer difference() {
         return countedQty == null ? null : countedQty - bookQty;
+    }
+
+    /** Damaged minus book damaged, or null while uncounted. */
+    public Integer damagedChange() {
+        return countedQty == null ? null : damagedQty - bookDamagedQty;
+    }
+
+    /** Needs Owner approval: a difference or a change in damaged quantity (BR-80). */
+    public boolean needsApproval() {
+        return isCounted() && (difference() != 0 || damagedChange() != 0);
     }
 }

@@ -11,4 +11,8 @@ public interface PaymentAllocationRepository extends JpaRepository<PaymentAlloca
     List<PaymentAllocation> findByPaymentIdIn(Collection<Long> paymentIds);
 
     List<PaymentAllocation> findByReceivableIdIn(Collection<Long> receivableIds);
+
+    List<PaymentAllocation> findByPaymentIdInAndReversedAtIsNull(Collection<Long> paymentIds);
+
+    List<PaymentAllocation> findByReceivableIdInAndReversedAtIsNull(Collection<Long> receivableIds);
 }

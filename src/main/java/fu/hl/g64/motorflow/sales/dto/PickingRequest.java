@@ -22,7 +22,10 @@ public record PickingRequest(
         @Size(max = 200, message = "Tối đa 200 phụ tùng.")
         List<@NotNull @Valid Line> lines) {
 
-    /** One part: what was actually taken, and why less than needed if so (UC-57 "Short or unsuitable goods"). */
+    /**
+     * One part: what was actually taken, and the picker's note: why less than needed if so (UC-57 "Short or unsuitable
+     * goods"), or any remark on a line picked in full. The note is kept on every line.
+     */
     public record Line(
             @NotNull(message = "Vui lòng chọn phụ tùng.")
             Long productId,
@@ -32,7 +35,7 @@ public record PickingRequest(
             @Max(value = 100_000, message = "Số đã lấy tối đa 100.000.")
             Integer pickedQty,
 
-            @Size(max = 255, message = "Lý do tối đa 255 ký tự.")
+            @Size(max = 255, message = "Ghi chú tối đa 255 ký tự.")
             String shortReason) {
     }
 }

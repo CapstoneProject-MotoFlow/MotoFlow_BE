@@ -18,8 +18,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -123,12 +125,24 @@ abstract class TransferFlowTestData extends ApiTestUsers {
 
     /** UC-74: [productId, dispatchedQty, ...]. */
     protected ResultActions dispatch(String manager, long order, long... lines) throws Exception {
+        return dispatch(manager, order, Map.of(), lines);
+    }
+
+    protected ResultActions dispatch(String manager, long order, Map<String, Object> handover, long... lines)
+            throws Exception {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (int i = 0; i < lines.length; i += 2) {
             rows.add(Map.of("productId", lines[i], "dispatchedQty", lines[i + 1]));
         }
+        Map<String, Object> body = new LinkedHashMap<>(handover);
+        body.put("lines", rows);
         return mvc.perform(post(ORDERS + "/" + order + "/dispatch").header(HttpHeaders.AUTHORIZATION, signIn(manager))
-                .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("lines", rows))));
+                .contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    protected static Map<String, Object> uploaded(String fileName) {
+        return Map.of("storageKey", "motoflow/attachments/" + UUID.randomUUID(), "fileName", fileName,
+                "contentType", "image/jpeg", "fileSize", 100_000);
     }
 
     /** Created, prepared by source Staff and dispatched by the source Branch Manager: [productId, quantity, ...]. */
@@ -140,13 +154,41 @@ abstract class TransferFlowTestData extends ApiTestUsers {
         return order;
     }
 
+    /** Optional arrival time and photos when transfer goods reach the destination (E02). */
+    protected Map<String, Object> arrivalNote() {
+        return new java.util.LinkedHashMap<>();
+    }
+
+    protected Map<String, Object> arrivalNoteWithPhoto() {
+        Map<String, Object> body = arrivalNote();
+        body.put("photos", List.of(Map.of("storageKey", "motoflow/attachments/" + java.util.UUID.randomUUID(),
+                "fileName", "hang-chuyen.jpg", "contentType", "image/jpeg", "fileSize", 100_000)));
+        return body;
+    }
+
+    /** UC-106 as is: the caller must already hold the transfer's receiving task. */
+    protected ResultActions arriveAs(String username, long order, Map<String, Object> body) throws Exception {
+        return mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn(username))
+                .contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    /** {@code username} is given the transfer's receiving task by the destination Branch Manager (test fixture). */
+    protected void holdReceiving(String username, long order) {
+        holdReceiving("TRANSFER_RECEIVING", order, userId(username), destManager.getId());
+    }
+
+    protected long userId(String username) {
+        return jdbc.queryForObject("SELECT id FROM user_account WHERE username = ?", Long.class, username);
+    }
+
     protected ResultActions arrive(long order) throws Exception {
-        return mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn("bmlb")));
+        holdReceiving("bmlb", order);
+        return arriveAs("bmlb", order, arrivalNote());
     }
 
     protected long arrive(String manager, long order) throws Exception {
-        mvc.perform(post(ORDERS + "/" + order + "/receipts").header(HttpHeaders.AUTHORIZATION, signIn(manager)))
-                .andExpect(status().isCreated());
+        holdReceiving(manager, order);
+        arriveAs(manager, order, arrivalNote()).andExpect(status().isCreated());
         return jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
     }
 
@@ -163,9 +205,33 @@ abstract class TransferFlowTestData extends ApiTestUsers {
         for (int i = 0; i < lines.length; i += 3) {
             rows.add(Map.of("productId", lines[i], "passedQty", lines[i + 1], "damagedQty", lines[i + 2]));
         }
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("lines", rows);
+        String note = inspectionNoteIfNeeded(receipt, rows);
+        if (note != null) {
+            body.put("inspectionNote", note);
+        }
         return mvc.perform(put(ORDERS + "/" + order + "/receipts/" + receipt + "/result")
                 .header(HttpHeaders.AUTHORIZATION, signIn(recorder)).contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("lines", rows))));
+                .content(json(body)));
+    }
+
+    private String inspectionNoteIfNeeded(long receipt, List<Map<String, Object>> rows) {
+        for (Map<String, Object> row : rows) {
+            long productId = ((Number) row.get("productId")).longValue();
+            int passed = ((Number) row.get("passedQty")).intValue();
+            int damaged = ((Number) row.get("damagedQty")).intValue();
+            Integer documentQty = jdbc.queryForObject("SELECT document_qty FROM goods_receipt_note_line "
+                    + "WHERE goods_receipt_note_id = ? AND product_id = ?", Integer.class, receipt, productId);
+            if (documentQty == null) {
+                continue;
+            }
+            int delivered = passed + damaged;
+            if (damaged > 0 || delivered != documentQty) {
+                return "Ghi chú kiểm nhận (fixture).";
+            }
+        }
+        return null;
     }
 
     protected ResultActions confirm(String manager, long order, long receipt) throws Exception {

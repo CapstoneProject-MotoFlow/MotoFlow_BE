@@ -71,4 +71,6 @@ public interface GoodsReceiptNoteRepository extends JpaRepository<GoodsReceiptNo
 
     /** UC-106 step 5: a delivery document is recorded once per PO (MSG28), whatever the letter case. */
     boolean existsByPurchaseOrderIdAndDeliveryDocumentNoIgnoreCase(Long purchaseOrderId, String deliveryDocumentNo);
+
+    boolean existsByTransferOrderIdAndDeliveryDocumentNoIgnoreCase(Long transferOrderId, String deliveryDocumentNo);
 }

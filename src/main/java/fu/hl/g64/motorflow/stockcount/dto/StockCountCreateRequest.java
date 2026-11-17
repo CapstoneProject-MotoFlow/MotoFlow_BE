@@ -27,5 +27,7 @@ public record StockCountCreateRequest(
 
         List<@NotNull Long> productIds,
 
+        Long partCategoryId,
+
         Long stockCountRequestId) {
 }

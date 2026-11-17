@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.receiving.service.impl;
 
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
@@ -43,6 +44,7 @@ import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptSummary;
 import fu.hl.g64.motorflow.receiving.dto.InspectionResultRequest;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNoteLine;
+import fu.hl.g64.motorflow.receiving.helper.InspectionNoteRules;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrderLine;
 import fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision;
@@ -50,6 +52,7 @@ import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
 import fu.hl.g64.motorflow.receiving.helper.GoodsReceiptViews;
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderReceiving;
 import fu.hl.g64.motorflow.receiving.helper.ReceivingLedger;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
@@ -112,6 +115,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private final NotificationService notifications;
     private final AuditLogRepository auditLog;
     private final ReceivingLedger ledger;
+    private final PurchaseOrderReceiving purchaseOrderReceiving;
     private final DiscrepancySettlement settlement;
     private final GoodsReceiptViews views;
     private final Clock clock;
@@ -184,7 +188,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     // UC-106
     @Transactional
     @Override
-    public GoodsReceiptDetail create(AuthenticatedUser manager, long purchaseOrderId, GoodsReceiptRequest request) {
+    public GoodsReceiptDetail create(AuthenticatedUser user, long purchaseOrderId, GoodsReceiptRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime arrivedAt = request.arrivedAt() != null ? request.arrivedAt() : now;
         if (request.deliveryDocumentDate().isAfter(now.toLocalDate()) || arrivedAt.isAfter(now)) {
@@ -193,7 +197,8 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         // BR-21: the PO lock keeps a change or cancellation of the PO from passing this new GRN.
         PurchaseOrder order = orders.findByIdForUpdate(purchaseOrderId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG131"));
-        requireManager(manager, order);
+        // Lecturer feedback 12/11: whoever holds the PO's receiving task records the GRN, a Branch Manager too.
+        warehouseTasks.requireAssignee(user, TaskType.SUPPLIER_RECEIVING, order.getId());
         String documentNo = request.deliveryDocumentNo().strip();
         Set<Long> caseIds = new LinkedHashSet<>(request.replacementForCaseIds() == null ? List.of()
                 : request.replacementForCaseIds());
@@ -240,18 +245,20 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         if (receipts.existsByPurchaseOrderIdAndDeliveryDocumentNoIgnoreCase(order.getId(), documentNo)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG28");
         }
+        Map<Long, Integer> documentQty = documentQuantities(request.documentLines(), expectedParts);
 
         GoodsReceiptNote receipt = receipts.save(GoodsReceiptNote.supplierDelivery(order.getId(), documentNo,
                 request.deliveryDocumentDate(), text(request.delivererName()), text(request.vehiclePlateNo()),
                 arrivedAt));
         receiptLines.saveAll(expectedParts.stream().map(productId -> GoodsReceiptNoteLine.expected(receipt.getId(),
-                productId, priceByProduct.get(productId))).toList());
+                productId, priceByProduct.get(productId), documentQty.getOrDefault(productId, 0))).toList());
         events.saveAll(replacementByCase.entrySet().stream().map(e -> DiscrepancyResolutionEvent.pending(e.getKey(),
-                ResolutionType.REPLACEMENT_RECEIVED, e.getValue(), receipt.getId(), null, manager.id(), now)).toList());
+                ResolutionType.REPLACEMENT_RECEIVED, e.getValue(), receipt.getId(), null, user.id(), now)).toList());
         order.startReceiving(now);
-        attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId(), orEmpty(request.documents()), manager.id());
-        auditLog.save(AuditLog.record(AUDIT_ENTITY, receipt.getId(), CREATED, manager.id(), null, now));
-        return views.detail(manager, receipt, order);
+        attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId(), orEmpty(request.documents()), user.id());
+        auditLog.save(AuditLog.record(AUDIT_ENTITY, receipt.getId(), CREATED, user.id(), null, now));
+        warehouseTasks.handOverToInspection(user, TaskType.SUPPLIER_RECEIVING, order.getId(), receipt.getId());
+        return views.detail(user, receipt, order);
     }
 
     // UC-43
@@ -288,8 +295,9 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                     && in.expiryDate().isBefore(in.manufactureDate())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG137", n);
             }
-            anything |= in.documentQty() > 0 || in.deliveredQty() > 0;
+            anything |= in.deliveredQty() > 0;
         }
+        anything |= lines.stream().anyMatch(line -> line.getDocumentQty() > 0);
         if (!anything) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG140");
         }
@@ -298,18 +306,20 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             InspectionResultRequest.Line in = given.get(line.getId());
             if (in == null) {
                 // A part the delivery did not bring and its document did not list.
-                line.record(0, 0, 0, 0, null, null, null);
+                line.record(line.getDocumentQty(), 0, 0, 0, null, null, null);
             } else {
-                line.record(in.documentQty(), in.deliveredQty(), orZero(in.wrongItemQty()), orZero(in.damagedQty()),
+                // The delivery-document quantity stays as entered when the GRN was recorded (PM 15/11).
+                line.record(line.getDocumentQty(), in.deliveredQty(), orZero(in.wrongItemQty()), orZero(in.damagedQty()),
                         text(in.manufacturerLotNo()), in.manufactureDate(), in.expiryDate());
             }
         }
-        receipt.submitResult(user.id(), request.arrivedAt(), now);
+        InspectionNoteRules.requireWhenNeeded(lines, request.inspectionNote());
+        receipt.submitResult(user.id(), request.arrivedAt(), text(request.inspectionNote()), now);
         warehouseTasks.submitResult(user, TaskType.INSPECTION, id);
         attachments.attach(OwnerType.GOODS_RECEIPT_NOTE, id, orEmpty(request.evidence()), user.id());
         notifications.notifyStoreManagers(order.getStoreId(), "GOODS_RECEIPT_SUBMITTED",
-                "Phiếu nhận hàng %s của yêu cầu nhập hàng #%d đã có kết quả kiểm nhận và đang chờ xác nhận."
-                        .formatted(label(receipt), order.getId()), REF_TYPE, id);
+                "Phiếu nhận hàng %s của đơn nhập hàng %s đã có kết quả kiểm nhận và đang chờ xác nhận."
+                        .formatted(label(receipt), PurchaseOrderCode.of(order.getId())), REF_TYPE, id);
         return views.detail(user, receipt, order);
     }
 
@@ -325,10 +335,6 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         GoodsReceiptNote receipt = lockReceipt(id);
         if (receipt.getStatus() != GoodsReceiptNoteStatus.AWAITING_CONFIRMATION) {
             throw changed();
-        }
-        // BR-26: the confirmer did not record the result (the task check covers a Branch Manager who took it).
-        if (Objects.equals(receipt.getRecordedBy(), manager.id())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG32");
         }
         warehouseTasks.confirmResult(manager, TaskType.INSPECTION, id);
         LocalDateTime now = LocalDateTime.now(clock);
@@ -401,15 +407,18 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 && !ledger.of(order.getId()).anyOutstanding()) {
             order.completeReceiving(now);
         }
+        if (!purchaseOrderReceiving.of(order).any()) {
+            warehouseTasks.cancelForDocument(TaskType.SUPPLIER_RECEIVING, order.getId());
+        }
         if (anyExcess) {
             notifications.notifyOwners("EXCESS_AWAITING_DECISION",
-                    "Phiếu nhận hàng %s của yêu cầu nhập hàng #%d có hàng giao thừa đang chờ quyết định nhận hoặc không nhận."
-                            .formatted(label(receipt), order.getId()), REF_TYPE, id);
+                    "Phiếu nhận hàng %s của đơn nhập hàng %s có hàng giao thừa đang chờ quyết định nhận hoặc không nhận."
+                            .formatted(label(receipt), PurchaseOrderCode.of(order.getId())), REF_TYPE, id);
         }
         if (!opened.isEmpty()) {
             notifications.notifyOwners("SUPPLIER_DISCREPANCY_OPENED",
-                    "Phiếu nhận hàng %s của yêu cầu nhập hàng #%d có %d phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà cung cấp."
-                            .formatted(label(receipt), order.getId(), opened.size()), REF_TYPE, id);
+                    "Phiếu nhận hàng %s của đơn nhập hàng %s có %d phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà cung cấp."
+                            .formatted(label(receipt), PurchaseOrderCode.of(order.getId()), opened.size()), REF_TYPE, id);
         }
         return views.detail(manager, receipt, order);
     }
@@ -604,5 +613,26 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
 
     private static <T> Map<Long, T> byId(java.util.Collection<T> rows, Function<T, Long> id) {
         return rows.stream().collect(Collectors.toMap(id, Function.identity()));
+    }
+
+    /**
+     * UC-106 step 3 (PM 15/11): the delivery-document quantity of each expected part; a part left out is 0. Another
+     * part, or a part given twice, is refused (MSG277); at least one line is needed (MSG278).
+     */
+    private static Map<Long, Integer> documentQuantities(List<GoodsReceiptRequest.DocumentLine> lines,
+                                                         List<Long> expectedParts) {
+        if (lines == null || lines.isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG278");
+        }
+        Set<Long> expected = new HashSet<>(expectedParts);
+        Map<Long, Integer> quantities = new HashMap<>();
+        for (int i = 0; i < lines.size(); i++) {
+            GoodsReceiptRequest.DocumentLine line = lines.get(i);
+            if (!expected.contains(line.productId())
+                    || quantities.putIfAbsent(line.productId(), line.documentQty()) != null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG277", i + 1);
+            }
+        }
+        return quantities;
     }
 }

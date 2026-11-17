@@ -48,6 +48,12 @@ public class WarehouseTask {
     @Column(name = "stock_count_id")
     private Long stockCountId;
 
+    @Column(name = "purchase_order_id")
+    private Long purchaseOrderId;
+
+    @Column(name = "store_id", nullable = false)
+    private Long storeId;
+
     @Column(name = "assigned_to", nullable = false)
     private Long assignedTo;
 
@@ -68,16 +74,18 @@ public class WarehouseTask {
      * UC-86: gives the task of one document to a Staff member, or to the Branch Manager who takes it themself;
      * the task type decides which document column is set.
      */
-    public static WarehouseTask assign(TaskType type, long documentId, long assigneeId, long assignedBy,
+    public static WarehouseTask assign(TaskType type, long documentId, long storeId, long assigneeId, long assignedBy,
                                        LocalDateTime now) {
         WarehouseTask task = new WarehouseTask();
         task.taskType = type;
         switch (type) {
             case PICKING -> task.salesOrderId = documentId;
             case INSPECTION -> task.goodsReceiptNoteId = documentId;
-            case DISPATCH_PREPARATION -> task.transferOrderId = documentId;
+            case DISPATCH_PREPARATION, TRANSFER_RECEIVING -> task.transferOrderId = documentId;
             case COUNTING -> task.stockCountId = documentId;
+            case SUPPLIER_RECEIVING -> task.purchaseOrderId = documentId;
         }
+        task.storeId = storeId;
         task.assignedTo = assigneeId;
         task.assignedBy = assignedBy;
         task.assignedAt = now;
@@ -102,6 +110,15 @@ public class WarehouseTask {
         }
         status = WarehouseTaskStatus.ASSIGNED;
         resultSubmittedAt = null;
+    }
+
+    /** The assignee recorded the goods receipt note of a receiving task; its inspection is a task of its own. */
+    public void finishReceiving() {
+        if (!taskType.isReceiving()) {
+            throw new IllegalStateException("task " + id + " is a " + taskType + " task, not a receiving task");
+        }
+        requireStatus(WarehouseTaskStatus.ASSIGNED);
+        status = WarehouseTaskStatus.DONE;
     }
 
     /** The result was confirmed. */

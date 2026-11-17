@@ -17,6 +17,7 @@ import java.util.List;
  * Owner must choose it (MSG157), a Branch Manager sells at their own store and may leave it out. Without
  * {@code customerId} it is a walk-in sale, whose name and phone may be recorded. {@code discountRate} is one rate in
  * percent for the whole order and only for a wholesale order (BR-10, BR-12; MSG161 for a retail order).
+ * {@code note} is the seller's free-text note on the order; blank means none.
  */
 public record SalesOrderRequest(
         Long storeId,
@@ -36,6 +37,9 @@ public record SalesOrderRequest(
         @DecimalMax(value = "100", inclusive = false, message = "Chiết khấu phải nhỏ hơn 100%.")
         @Digits(integer = 2, fraction = 2, message = "Chiết khấu có tối đa 2 chữ số thập phân.")
         BigDecimal discountRate,
+
+        @Size(max = 500, message = "Ghi chú tối đa 500 ký tự.")
+        String note,
 
         @NotEmpty(message = "Vui lòng chọn ít nhất một phụ tùng.")
         @Size(max = 200, message = "Tối đa 200 phụ tùng.")

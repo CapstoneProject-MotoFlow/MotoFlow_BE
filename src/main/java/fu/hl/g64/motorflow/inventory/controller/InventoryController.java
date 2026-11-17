@@ -52,7 +52,8 @@ public class InventoryController {
     private final ExpiryWarningService expiryWarningService;
 
     @Operation(summary = "Stock by part and status with low-stock and near-expiry warnings; stock value for the Owner "
-            + "only (UC-47). Without storeId: own warehouse, or every warehouse for the Owner")
+            + "only (UC-47). Without storeId: own warehouse, or every warehouse for the Owner. minQty and maxQty keep "
+            + "the rows whose available quantity lies in that range, both ends included")
     @GetMapping("/stock")
     public PageResponse<StockRowResponse> listStock(@AuthenticationPrincipal AuthenticatedUser user,
                                                     @RequestParam(required = false) Long storeId,
@@ -64,10 +65,12 @@ public class InventoryController {
                                                     @RequestParam(defaultValue = "false") boolean expiryAlertOnly,
                                                     @RequestParam(defaultValue = "false") boolean includeZero,
                                                     @RequestParam(required = false) Long productId,
+                                                    @RequestParam(required = false) Integer minQty,
+                                                    @RequestParam(required = false) Integer maxQty,
                                                     @RequestParam(defaultValue = "0") int page,
                                                     @RequestParam(defaultValue = "20") int size) {
         return inventoryService.listStock(user, new StockSearch(storeId, q, categoryId, storageArea, lowStockOnly,
-                unavailableOnly, expiryAlertOnly, includeZero, productId), page, size);
+                unavailableOnly, expiryAlertOnly, includeZero, productId, minQty, maxQty), page, size);
     }
 
     @Operation(summary = "Stock per part across every warehouse, one row per part (UC-47, Owner). A part is listed "
@@ -85,7 +88,7 @@ public class InventoryController {
                                                                @RequestParam(defaultValue = "0") int page,
                                                                @RequestParam(defaultValue = "20") int size) {
         return inventoryService.stockByProduct(user, new StockSearch(null, q, categoryId, storageArea, lowStockOnly,
-                unavailableOnly, expiryAlertOnly, includeZero, null), page, size);
+                unavailableOnly, expiryAlertOnly, includeZero, null, null, null), page, size);
     }
 
     @Operation(summary = "Counts for the stock screen over the whole filter (UC-47). Without storeId: own warehouse, or "

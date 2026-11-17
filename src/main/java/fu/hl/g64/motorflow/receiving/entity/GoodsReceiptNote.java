@@ -78,6 +78,9 @@ public class GoodsReceiptNote {
     @Column(name = "excess_decided_at")
     private LocalDateTime excessDecidedAt;
 
+    @Column(name = "inspection_note", length = 500)
+    private String inspectionNote;
+
     /**
      * UC-106: a supplier delivery that arrived with its delivery document, waiting for a Staff member to inspect it.
      * Stock does not change until the Branch Manager confirms it (UC-44).
@@ -122,12 +125,13 @@ public class GoodsReceiptNote {
      * UC-43 step 7: the inspection result waits for the Branch Manager. {@code arrivedAt} corrects the arrival time
      * the Staff member saw (screen 6.2.2), or keeps it when null.
      */
-    public void submitResult(long recordedBy, LocalDateTime arrivedAt, LocalDateTime now) {
+    public void submitResult(long recordedBy, LocalDateTime arrivedAt, String inspectionNote, LocalDateTime now) {
         require(awaitsResult(), "AWAITING_INSPECTION or AWAITING_RECOUNT");
         if (arrivedAt != null) {
             this.arrivedAt = arrivedAt;
         }
         this.recordedBy = recordedBy;
+        this.inspectionNote = inspectionNote;
         submittedAt = now;
         status = GoodsReceiptNoteStatus.AWAITING_CONFIRMATION;
     }

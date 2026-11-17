@@ -147,6 +147,30 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
     List<TransitLot> findTransitLots(@Param("id") long id, @Param("storeId") long storeId,
                                      @Param("productId") long productId);
 
+    /** Every part still in transit for one order, in the same lot order as {@link #findTransitLots}. */
+    @Query("""
+            select m.productId as productId, m.lotId as lotId, sum(m.quantityChange) as quantity
+            from StockMovement m
+            join Lot l on l.id = m.lotId
+            where m.storeId = :storeId
+              and m.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+              and (m.transferOrderId = :id
+                   or m.goodsReceiptNoteId in (select g.id from GoodsReceiptNote g where g.transferOrderId = :id)
+                   or m.adjustmentRequestId in (select a.id from AdjustmentRequest a where a.transferOrderId = :id))
+            group by m.productId, m.lotId, l.expiryDate, l.receivedDate
+            having sum(m.quantityChange) > 0
+            order by m.productId asc, l.expiryDate asc nulls last, l.receivedDate asc, m.lotId asc
+            """)
+    List<TransitLotOfPart> findTransitLots(@Param("id") long id, @Param("storeId") long storeId);
+
+    interface TransitLotOfPart {
+        long getProductId();
+
+        long getLotId();
+
+        long getQuantity();
+    }
+
     /** BR-66: units of the part an adjustment writes off transit at the warehouse. */
     @Query("""
             select coalesce(-sum(l.quantityChange), 0) from AdjustmentStockLine l

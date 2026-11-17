@@ -70,4 +70,31 @@ public interface SalesOrderService {
      * the minimum margin (BR-88), MSG124 the seller picked the goods themself (BR-26).
      */
     SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request);
+
+    /**
+     * PM 13/11: the caller's own drafts, newest first ({@code q} as in {@link #list}; {@code storeId} filters for
+     * Owner only). A draft is not a sales order until submitted: no other list shows it.
+     */
+    PageResponse<SalesOrderSummary> drafts(AuthenticatedUser seller, Long storeId, String q, int page, int size);
+
+    /**
+     * Saves a draft: the checks of UC-53 (store, customer, discount format, parts with a retail price in effect)
+     * except the discount threshold (BR-16), which only the submission checks.
+     */
+    SalesOrderDetail createDraft(AuthenticatedUser seller, SalesOrderRequest request);
+
+    /** The caller's own draft; MSG156 for anyone else's draft or for an id that is not a draft. */
+    SalesOrderDetail draft(AuthenticatedUser seller, long id);
+
+    /** Replaces the whole content of the caller's own draft, checked as in {@link #createDraft}. */
+    SalesOrderDetail updateDraft(AuthenticatedUser seller, long id, SalesOrderRequest request);
+
+    /**
+     * "Tạo đơn": saves the content sent and turns the draft into a sales order waiting for picking, checked exactly
+     * as {@link #create} and created now, with the same id. On a refusal the draft keeps its previous content.
+     */
+    SalesOrderDetail submitDraft(AuthenticatedUser seller, long id, SalesOrderRequest request);
+
+    /** Deletes the caller's own draft and its lines for good. */
+    void deleteDraft(AuthenticatedUser seller, long id);
 }

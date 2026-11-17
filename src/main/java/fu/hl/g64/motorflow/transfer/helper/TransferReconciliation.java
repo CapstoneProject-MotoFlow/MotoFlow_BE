@@ -1,5 +1,9 @@
 package fu.hl.g64.motorflow.transfer.helper;
 
+import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
+import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
+import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
+import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrderLine;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
@@ -70,6 +74,32 @@ public class TransferReconciliation {
      * receipt, return decision or loss may still cover, so two of them never settle the same unit. An open return is
      * already counted with the open receipts, so only the part of a return decision above it is subtracted here.
      */
+    /**
+     * UC-106 at the destination: whether goods of the order can arrive now. {@code blockedCode} is MSG29 unless the
+     * order is in transit or reconciling, MSG211 while a receipt at the destination is not confirmed, MSG210 when
+     * nothing is left uncovered, else null; {@code uncovered} is what each part may still receive. The arrival and the
+     * receiving task (TRANSFER_RECEIVING) read the same rule from here.
+     */
+    public record Arrival(String blockedCode, Map<Long, Integer> uncovered) {
+    }
+
+    public Arrival arrival(TransferOrder order) {
+        if (order.getStatus() != TransferOrderStatus.IN_TRANSIT && order.getStatus() != TransferOrderStatus.RECONCILING) {
+            return new Arrival("MSG29", Map.of());
+        }
+        boolean open = orders.findReceipts(order.getId()).stream().anyMatch(receipt ->
+                receipt.getReceiptType() == ReceiptType.TRANSFER_IN
+                        && receipt.getStatus() != GoodsReceiptNoteStatus.CONFIRMED);
+        if (open) {
+            return new Arrival("MSG211", Map.of());
+        }
+        Map<Long, Integer> uncovered = uncovered(order.getId(), lines.findByTransferOrderIdOrderByProductId(order.getId()));
+        if (uncovered.values().stream().allMatch(quantity -> quantity == 0)) {
+            return new Arrival("MSG210", uncovered);
+        }
+        return new Arrival(null, uncovered);
+    }
+
     public Map<Long, Integer> uncovered(long transferOrderId, List<TransferOrderLine> orderLines) {
         Map<Long, Long> claimed = pendingClaims(transferOrderId);
         lines.openReceiptQty(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));

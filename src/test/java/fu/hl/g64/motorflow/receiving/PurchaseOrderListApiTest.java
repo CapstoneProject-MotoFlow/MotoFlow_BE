@@ -149,6 +149,10 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
         list(ownerToken, "q", "ncc-hd", "view", "ALL")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, cancelledOrder))));
+        list(ownerToken, "q", dnh(receivingOrder))
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
+        list(ownerToken, "q", "dnh-" + receivingOrder)
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
         list(ownerToken, "q", "#999999")
                 .andExpect(jsonPath("$.items", hasSize(0)));
     }
@@ -341,5 +345,22 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
 
     private void arrivingOn(long order, LocalDate arrival) {
         jdbc.update("UPDATE purchase_order SET expected_arrival = ? WHERE id = ?", arrival, order);
+    }
+
+    /** FE review PR #44 R-03: open POs whose receiving nobody holds, for the Branch Manager to assign (UC-86). */
+    @Test
+    void theAwaitingAssignmentViewLeavesOutPosWhoseReceivingSomeoneHolds() throws Exception {
+        holdReceiving("SUPPLIER_RECEIVING", newOrder, staff.getId(), manager.getId());
+        // A receiving that is over (its GRN was recorded) leaves the PO waiting for the next one.
+        holdReceiving("SUPPLIER_RECEIVING", receivingOrder, staff.getId(), manager.getId());
+        jdbc.update("UPDATE warehouse_task SET status = 'DONE' WHERE purchase_order_id = ?", receivingOrder);
+
+        list(ownerToken, "view", "AWAITING_RECEIVING_ASSIGNMENT").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, lateOrder))))
+                .andExpect(jsonPath("$.totalItems").value(2));
+        list(managerToken, "view", "AWAITING_RECEIVING_ASSIGNMENT")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))))
+                .andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.items[*].supplierName", contains("Honda Việt Nam")));
     }
 }

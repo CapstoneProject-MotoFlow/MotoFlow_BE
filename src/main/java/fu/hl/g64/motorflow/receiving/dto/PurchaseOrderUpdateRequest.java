@@ -20,7 +20,7 @@ public record PurchaseOrderUpdateRequest(
         String note,
 
         @NotEmpty(message = "Vui lòng thêm ít nhất một phụ tùng.")
-        @Size(max = 500, message = "Mỗi yêu cầu nhập hàng có tối đa 500 dòng.")
+        @Size(max = 500, message = "Mỗi đơn nhập hàng có tối đa 500 dòng.")
         List<@NotNull @Valid PurchaseOrderLineRequest> lines,
 
         @NotBlank(message = "Vui lòng nhập lý do thay đổi.")

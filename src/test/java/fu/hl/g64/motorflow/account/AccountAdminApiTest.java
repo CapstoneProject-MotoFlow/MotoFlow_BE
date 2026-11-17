@@ -601,9 +601,11 @@ class AccountAdminApiTest extends IntegrationTest {
         Long receiptId = jdbc.queryForObject("INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, "
                 + "delivery_document_no, arrived_at) VALUES ('SUPPLIER_DELIVERY', ?, 'PGH01', now()) RETURNING id",
                 Long.class, requestId);
-        return jdbc.queryForObject("INSERT INTO warehouse_task (task_type, goods_receipt_note_id, assigned_to, "
-                + "assigned_by, assigned_at) VALUES ('INSPECTION', ?, ?, ?, now()) RETURNING id",
-                Long.class, receiptId, assigneeId, managerId);
+        return jdbc.queryForObject("INSERT INTO warehouse_task (task_type, goods_receipt_note_id, store_id, assigned_to, "
+                + "assigned_by, assigned_at) VALUES ('INSPECTION', ?, "
+                + "(SELECT p.store_id FROM goods_receipt_note g JOIN purchase_order p ON p.id = g.purchase_order_id "
+                + "WHERE g.id = ?), ?, ?, now()) RETURNING id",
+                Long.class, receiptId, receiptId, assigneeId, managerId);
     }
 
     private String json(Map<String, Object> body) {

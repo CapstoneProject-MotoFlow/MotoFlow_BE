@@ -63,6 +63,7 @@ import java.text.NumberFormat;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -251,7 +252,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Transactional
     @Override
     public SalesOrderDetail cancel(AuthenticatedUser seller, long orderId, CancelSalesOrderRequest request) {
-        SalesOrder order = orders.findByIdForUpdate(orderId).orElseThrow(SalesOrderSettlementServiceImpl::notFound);
+        SalesOrder order = orders.findByIdForUpdate(orderId).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderSettlementServiceImpl::notFound);
         requireSeller(seller, order);
         if (order.getStatus() == SalesOrderStatus.CANCELLED) {
             // UC-56 Step 6_Order already completed or cancelled: show the cancellation without repeating it.
@@ -300,7 +302,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         String message = null;
         try {
             completed = Boolean.TRUE.equals(transactions.execute(status -> {
-                SalesOrder order = orders.findByIdForUpdate(orderId).orElseThrow(SalesOrderSettlementServiceImpl::notFound);
+                SalesOrder order = orders.findByIdForUpdate(orderId).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderSettlementServiceImpl::notFound);
                 if (order.getStatus() != SalesOrderStatus.CONFIRMED) {
                     return false;
                 }
@@ -353,17 +356,21 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
             throw new BusinessException(HttpStatus.CONFLICT, "MSG171", lacking);
         }
 
-        List<Map<String, Object>> issued = delivered.stream().map(line -> {
-            List<LotQuantity> lots = inventory.takeOut(new OutPosting(order.getStoreId(), line.getProductId(),
-                    StockStatus.AVAILABLE, line.getDeliveredQty(), null, MovementType.SALE_ISSUE,
-                    SourceRef.salesOrder(orderId), seller.id(), null));
+        List<List<LotQuantity>> taken = inventory.takeOutAll(delivered.stream()
+                .map(line -> new OutPosting(order.getStoreId(), line.getProductId(), StockStatus.AVAILABLE,
+                        line.getDeliveredQty(), null, MovementType.SALE_ISSUE, SourceRef.salesOrder(orderId),
+                        seller.id(), null))
+                .toList());
+        List<Map<String, Object>> issued = new ArrayList<>();
+        for (int i = 0; i < delivered.size(); i++) {
+            SalesOrderLine line = delivered.get(i);
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("product_id", line.getProductId());
             row.put("delivered_qty", line.getDeliveredQty());
-            row.put("lots", lots.stream().map(lot -> Map.of("lot_id", lot.lotId(), "quantity", lot.quantity()))
+            row.put("lots", taken.get(i).stream().map(lot -> Map.of("lot_id", lot.lotId(), "quantity", lot.quantity()))
                     .toList());
-            return row;
-        }).toList();
+            issued.add(row);
+        }
 
         Long receivableId = null;
         if (credit != null) {
@@ -425,7 +432,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
      * (MSG164). The seller is checked first, so another store learns nothing of the order's state.
      */
     private SalesOrder lockForSeller(AuthenticatedUser seller, long id) {
-        SalesOrder order = orders.findByIdForUpdate(id).orElseThrow(SalesOrderSettlementServiceImpl::notFound);
+        SalesOrder order = orders.findByIdForUpdate(id).filter(found -> !found.isDraft())
+                .orElseThrow(SalesOrderSettlementServiceImpl::notFound);
         requireSeller(seller, order);
         if (!order.isUnfinished()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG164");
