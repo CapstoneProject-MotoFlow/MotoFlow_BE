@@ -2,7 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "GitHubActionsOnReleaseTagsOfBothRepos",
+      "Sid": "GitHubActionsOnMainAndReleaseTags",
       "Effect": "Allow",
       "Principal": {
         "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
@@ -14,8 +14,8 @@
         },
         "StringLike": {
           "token.actions.githubusercontent.com:sub": [
-            "repo:CapstoneProject-MotoFlow/MotoFlow_BE:ref:refs/tags/v*",
-            "repo:CapstoneProject-MotoFlow/MotoFlow_FE:ref:refs/tags/v*"
+            "repo:CapstoneProject-MotoFlow@326311735/MotoFlow_BE@1360857735:ref:refs/heads/main",
+            "repo:CapstoneProject-MotoFlow@326311735/MotoFlow_BE@1360857735:ref:refs/tags/v*"
           ]
         }
       }
