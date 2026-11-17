@@ -1,48 +1,31 @@
 # CI/CD cho MotoFlow
 
-Tài liệu này dùng chung cho hai repo `MotoFlow_BE` và `MotoFlow_FE`. Phần AWS và server chỉ có ở đây; `MotoFlow_FE/docs/CICD.md` chỉ ghi những gì riêng của frontend.
+Backend lên Lightsail. Frontend do Cloudflare Pages xuất bản, GitHub chỉ chạy test. Xem `MotoFlow_FE/docs/CICD.md`.
 
-Toolchain: **GitHub Actions → Amazon ECR → EC2 (deploy qua SSM)**, xác thực bằng **OIDC** nên GitHub không lưu access key AWS nào.
+Toolchain backend: **GitHub Actions → Amazon ECR → Lightsail (SSH)**, xác thực bằng **OIDC**. Không lưu access key AWS trên GitHub.
 
 ---
 
 ## 1. Tổng quan
 
-### Pipeline (giống nhau ở hai repo)
-
 ```
-PR vào main ──► build-test                       BE: ./mvnw verify | FE: npm ci, lint, test, build
-Merge main  ──► build-test ──► build-push-image ──► deploy-dev ──► smoke test
-                               (ECR, tag = commit SHA)   (tự động)
-Tag v1.0.0  ──► release: tìm image đã build cho commit đó ──► deploy-production ──► smoke test
+PR vào main     ──► build-test
+Merge main      ──► build-test ──► build-push-image ──► deploy-production ──► smoke test
+Tag v1.0.0      ──► release: deploy đúng image của commit đó
 ```
 
-### Một server (mỗi môi trường một EC2)
+Máy local chạy profile `dev` (xem README). Pipeline không deploy một máy dev.
 
-```
-Internet ──► proxy (Caddy, cổng 80/443, tự lấy chứng chỉ HTTPS khi có domain)
-               ├── /api/*   ──► backend   (image từ MotoFlow_BE)  ──► db (PostgreSQL 17 container, hoặc RDS)
-               └── còn lại  ──► frontend  (image từ MotoFlow_FE: Caddy + dist/)
-```
+Trang và API ở hai host cùng domain gốc, ví dụ `app.example.com` (Pages) và `api.example.com` (Lightsail). Cookie refresh là `SameSite=Lax`.
 
-Frontend và backend chạy **cùng một domain**, nên trình duyệt không gặp CORS, và cookie refresh (`path=/api/v1/auth`) hoạt động bình thường.
-
-### Nguyên tắc
+Một máy Lightsail chạy Caddy, backend và PostgreSQL 17. Caddy chỉ chuyển vào backend.
 
 | Nguyên tắc | Thực hiện ở đâu |
 |---|---|
-| Build một lần, dev và prod dùng **cùng một image digest** | Image được build từ đúng file JAR / `dist/` đã qua test; `release.yml` không build lại mà tìm image theo commit SHA |
-| Không dùng tag `latest`, tag không ghi đè được | Tag = commit SHA, ECR bật *tag immutability*; deploy theo `@sha256:` |
-| Không access key dài hạn | OIDC + 3 IAM role quyền hẹp (`deploy/aws/`) |
-| Không mở SSH | Deploy qua SSM Run Command, vào máy bằng Session Manager |
-| Bản lỗi không làm sập site | `deploy-service` chờ health check (backend: `GET /actuator/health` phải trả `UP`, tức là app đã chạy và kết nối được DB); nếu bản mới không khỏe thì quay về image cũ và báo đỏ |
-| CI dùng được ngay, CD bật sau | Các job CD tự bỏ qua cho tới khi đặt biến `AWS_ACCOUNT_ID` |
-
-### Khác với ebook "From Code to Cloud"
-
-- **Production deploy bằng tag `v*`, không dùng Environment + Required reviewers.** Theo tài liệu GitHub, *required reviewers* không có cho repo private trên gói Free/Team. Người được đẩy tag `v*` (PM) chính là "cổng duyệt". Tag cũng khớp với các mốc *Software Package v1/v2/v3* trong Report 2.
-- **Hai repo dùng chung một server.** FE và BE deploy độc lập; trên server có khóa `flock` để hai pipeline không deploy chồng lên nhau.
-- **Dockerfile không có stage Maven/Node.** CI build và test trước, image chỉ chép kết quả vào, nên thứ đã test đúng là thứ được deploy.
+| Build một lần, tag phát hành dùng lại image đó | `release.yml` tìm image theo commit SHA, không build lại |
+| Tag image là commit SHA, không dùng `latest` | ECR bật tag immutability |
+| Không access key dài hạn | OIDC, hai IAM role trong `deploy/aws/` |
+| Bản lỗi không làm sập API | `deploy-service` đợi `/actuator/health` trả `UP`, không thì trả image cũ |
 
 ---
 
@@ -50,52 +33,48 @@ Frontend và backend chạy **cùng một domain**, nên trình duyệt không g
 
 | File | Vai trò |
 |---|---|
-| `.github/workflows/ci-cd.yml` | PR: build-test. Merge `main`: build-test → build-push-image → deploy-dev |
-| `.github/workflows/release.yml` | Tag `v*`: deploy production. Chạy tay trên tag cũ để rollback |
-| `.github/scripts/ssm-deploy.sh` | Tìm EC2 theo tag, gửi lệnh SSM, chờ và in kết quả. **Giống hệt** bản trong MotoFlow_FE |
-| `.github/scripts/smoke-test.sh` | BE: `POST /api/v1/auth/login` với user không tồn tại phải trả `401 MSG09` |
-| `.github/dependabot.yml` | PR cập nhật action, Maven, base image mỗi tuần |
-| `Dockerfile`, `.dockerignore` | Image runtime: `eclipse-temurin:21-jre` + JAR, chạy user không phải root |
-| `deploy/server/setup.sh` | Dựng server một lần: Docker, `compose.yaml`, Caddyfile, `bin/deploy-service`, `.env` với secret ngẫu nhiên |
-| `deploy/aws/*.json` | Trust policy và quyền cho 3 IAM role của GitHub Actions |
+| `.github/workflows/ci-cd.yml` | PR: build-test. Merge `main`: build image, deploy Lightsail, smoke test |
+| `.github/workflows/release.yml` | Tag `v*`: deploy production bằng image đã có |
+| `.github/scripts/lightsail-deploy.sh` | Tìm máy Lightsail theo tag, SSH, gọi `deploy-service` |
+| `.github/scripts/smoke-test.sh` | `POST /api/v1/auth/login` với user không tồn tại phải trả `401 MSG09` |
+| `deploy/server/setup.sh` | Dựng Docker, Caddy, PostgreSQL, `.env` trên máy |
+| `deploy/aws/*.json` | Trust policy và quyền của hai role |
 
 ---
 
 ## 3. Thiết lập một lần
 
-Làm theo đúng thứ tự. Region mặc định là **ap-southeast-1 (Singapore)**. Nếu đổi region, sửa ARN trong `deploy/aws/*.json` và đặt biến `AWS_REGION` ở GitHub.
+Region mặc định là **ap-southeast-1**. Lệnh `aws` chạy trong CloudShell.
 
-Các lệnh `aws ...` bên dưới chạy trong **AWS CloudShell** (biểu tượng `>_` trên thanh trên cùng của AWS Console), nên không cần cài AWS CLI trên máy.
-
-### 3.1 ECR: hai repository chứa image
+### 3.1 ECR
 
 ```bash
-for r in motoflow-backend motoflow-frontend; do
-  aws ecr create-repository --repository-name "$r" \
-    --image-tag-mutability IMMUTABLE \
-    --image-scanning-configuration scanOnPush=true
-done
+aws ecr create-repository --repository-name motoflow-backend \
+  --image-tag-mutability IMMUTABLE \
+  --image-scanning-configuration scanOnPush=true
 ```
 
-### 3.2 OIDC provider cho GitHub
+### 3.2 OIDC provider
 
 ```bash
 aws iam create-open-id-connect-provider \
   --url https://token.actions.githubusercontent.com \
-  --client-id-list sts.amazonaws.com
+  --client-id-list sts.amazonaws.com \
+  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1 1c58a3a8518e8759bf075b76b750d4f2df264fcd
 ```
 
-Nếu báo `EntityAlreadyExists` thì provider đã có sẵn, bỏ qua bước này.
+`EntityAlreadyExists` thì bỏ qua. Provider cần đủ hai thumbprint ở trên.
 
-### 3.3 Ba IAM role cho GitHub Actions
+### 3.3 Hai IAM role
 
-| Role | Dùng ở job | Trust policy | Quyền |
+| Role | Job | Trust | Quyền |
 |---|---|---|---|
-| `motoflow-gha-ecr-publisher` | build-push-image | `trust-main.json` (nhánh `main` của 2 repo) | `policy-ecr-publisher.json`: push image vào 2 repo ECR |
-| `motoflow-gha-deploy-dev` | deploy-dev | `trust-main.json` | `policy-deploy-dev.json`: SSM chỉ tới EC2 có tag `App=motoflow`, `Env=dev` |
-| `motoflow-gha-deploy-prod` | deploy-production | `trust-release.json` (chỉ tag `v*` của 2 repo) | `policy-deploy-prod.json`: như trên với `Env=production`, thêm đọc ECR |
+| `motoflow-gha-ecr-publisher` | build-push-image | `trust-main.json` | `policy-ecr-publisher.json` |
+| `motoflow-gha-deploy-prod` | deploy-production và release | `trust-release.json` | `policy-deploy-prod.json` |
 
-Trong CloudShell: **Actions → Upload file**, tải lên 5 file trong `deploy/aws/`, rồi chạy:
+`sub` trong trust có mã số repo vì GitHub bật subject cố định. Đổi tên repo thì lấy prefix mới từ API customization của repo và sửa file.
+
+Trong CloudShell, upload file trong `deploy/aws/`, rồi:
 
 ```bash
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
@@ -104,150 +83,49 @@ sed -i "s/<ACCOUNT_ID>/$ACCOUNT_ID/g" trust-*.json policy-*.json
 aws iam create-role --role-name motoflow-gha-ecr-publisher --assume-role-policy-document file://trust-main.json
 aws iam put-role-policy --role-name motoflow-gha-ecr-publisher --policy-name ecr-publisher --policy-document file://policy-ecr-publisher.json
 
-aws iam create-role --role-name motoflow-gha-deploy-dev --assume-role-policy-document file://trust-main.json
-aws iam put-role-policy --role-name motoflow-gha-deploy-dev --policy-name deploy-dev --policy-document file://policy-deploy-dev.json
-
 aws iam create-role --role-name motoflow-gha-deploy-prod --assume-role-policy-document file://trust-release.json
 aws iam put-role-policy --role-name motoflow-gha-deploy-prod --policy-name deploy-prod --policy-document file://policy-deploy-prod.json
 ```
 
-Trust policy so khớp trường `sub` của token GitHub **phân biệt chữ hoa, chữ thường**: `repo:CapstoneProject-MotoFlow/MotoFlow_BE:ref:refs/heads/main`. Nếu đổi tên org hoặc repo, phải sửa file JSON theo.
+### 3.4 Máy Lightsail
 
-### 3.4 Role cho EC2
+Ubuntu 24.04, gói 2 GB, Singapore. Gắn Static IP. Firewall mở TCP 22, 80 và 443.
 
-```bash
-aws iam create-role --role-name motoflow-ec2 --assume-role-policy-document '{
-  "Version": "2012-10-17",
-  "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]
-}'
-aws iam attach-role-policy --role-name motoflow-ec2 --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-aws iam attach-role-policy --role-name motoflow-ec2 --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-aws iam create-instance-profile --instance-profile-name motoflow-ec2
-aws iam add-role-to-instance-profile --instance-profile-name motoflow-ec2 --role-name motoflow-ec2
-```
+Tag của instance: `App` = `motoflow`, `Env` = `production`. Pipeline tìm theo hai tag này.
 
-### 3.5 Server dev
+Sửa đầu `deploy/server/setup.sh`: `SITE_ADDRESS` là `api.<domain>`, `CORS_ORIGIN` là `https://app.<domain>`, `LOCAL_DB="true"`. Script dùng `dnf`. Trên Ubuntu cài Docker trước, bỏ khối cài Docker, rồi chạy phần còn lại bằng root.
 
-1. **Mở `deploy/server/setup.sh`, sửa hai dòng đầu:**
-   - `SITE_ADDRESS`: domain của môi trường, ví dụ `dev.motoflow.example.com`. Nếu chưa có domain, để `":80"` để thử trước bằng HTTP.
-   - `LOCAL_DB`: để `"true"` để chạy PostgreSQL trong container. Chọn `"false"` nếu dùng RDS.
-2. **EC2 → Launch instance:**
-   - AMI: **Amazon Linux 2023, x86_64**. Không chọn ARM/Graviton (`t4g`), vì image được build cho x86_64.
-   - Instance type: **t3.small** (2 GB RAM). `t3.micro` (1 GB) quá chật cho Spring Boot + PostgreSQL.
-   - Key pair: *Proceed without a key pair*, vì vào máy bằng Session Manager.
-   - Security group: inbound **TCP 80, TCP 443** (thêm UDP 443 nếu muốn HTTP/3) từ `0.0.0.0/0`. **Không mở cổng 22.**
-   - Storage: 20 GB gp3.
-   - *Advanced details*: **IAM instance profile** = `motoflow-ec2`; **User data** = dán toàn bộ `setup.sh` đã sửa ở bước 1.
-   - **Tags: `App` = `motoflow`, `Env` = `dev`.** Pipeline tìm server theo đúng hai tag này.
-3. **Elastic IP:** EC2 → Elastic IPs → Allocate → Associate vào instance, để IP không đổi khi stop/start.
-4. **Domain (nên có):** tạo bản ghi DNS `A` cho `dev.<domain>` trỏ về Elastic IP. Caddy sẽ tự lấy chứng chỉ HTTPS ở request đầu tiên.
-5. **Kiểm tra:** Systems Manager → Fleet Manager thấy instance *Online*. EC2 → instance → *Connect* → *Session Manager*:
-   ```bash
-   sudo /opt/motoflow/bin/motoflow ps        # proxy và db đang chạy
-   sudo grep MOTOFLOW_ADMIN_PASSWORD /opt/motoflow/.env   # mật khẩu tạm của Admin đầu tiên
-   ```
+Máy dùng khóa mặc định của Lightsail thì pipeline tự lấy khóa SSH tạm. Khóa riêng thì đặt secret `LIGHTSAIL_SSH_KEY` trên repo, nội dung là file `.pem`.
 
-Không có domain thì giữ `SITE_ADDRESS=":80"`, khi đó `.env` tự đặt `REFRESH_COOKIE_SECURE=false`. Đăng nhập vẫn được, nhưng chỉ nên dùng để thử. Khi có domain, sửa `SITE_ADDRESS`, `MOTOFLOW_CORS_ORIGINS=https://<domain>` và `REFRESH_COOKIE_SECURE=true` trong `/opt/motoflow/.env`, rồi chạy `sudo /opt/motoflow/bin/motoflow up -d proxy backend`.
+### 3.5 Biến GitHub của repo backend
 
-**Tải tệp lên (Cloudinary):** ảnh phụ tùng, ảnh chứng từ giao hàng và bằng chứng trả nhà cung cấp đi thẳng từ trình duyệt lên Cloudinary bằng chữ ký backend cấp. Điền `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` (Cloudinary Console → Settings → API Keys) bằng `sudo vi /opt/motoflow/.env`, rồi chạy `sudo /opt/motoflow/bin/motoflow up -d backend`. Để trống thì mọi lần tải lên bị từ chối với MSG76. Server dựng trước khi có ba biến này: thêm ba dòng đó vào `.env` (script không ghi đè `.env`), chạy lại `setup.sh` như mục 5 để `compose.yaml` truyền chúng vào backend, rồi chạy lệnh trên.
-
-Chi phí ước tính cho một môi trường: t3.small + 20 GB gp3 + một IPv4 công khai, khoảng 25 USD/tháng nếu chạy liên tục. Kiểm tra lại bằng AWS Pricing Calculator. Tắt instance khi không dùng sẽ bớt tiền EC2, nhưng IPv4 vẫn bị tính phí.
-
-### 3.6 Server production (khi cần, ví dụ trước UAT tuần 12)
-
-Làm giống 3.5, chỉ khác tag **`Env` = `production`** và dùng domain riêng. Sau đó đặt `PROD_ENABLED=true` và `PROD_BASE_URL` ở GitHub (mục 3.7). Trước khi có server production, tag `v*` không deploy gì cả (job bị bỏ qua).
-
-### 3.7 GitHub (làm ở cả hai repo)
-
-**Settings → Secrets and variables → Actions → tab Variables → New repository variable.** Không cần secret nào.
-
-| Biến | Giá trị | Tác dụng |
-|---|---|---|
-| `AWS_ACCOUNT_ID` | 12 chữ số | Bật build-push-image và deploy-dev |
-| `DEV_BASE_URL` | `https://dev.<domain>` hoặc `http://<Elastic IP>` | URL cho smoke test sau deploy dev |
-| `AWS_REGION` | *(tùy chọn)* | Mặc định `ap-southeast-1` |
-| `PROD_ENABLED` | `true` | Bật `release.yml` khi đã có server production |
-| `PROD_BASE_URL` | `https://<domain production>` | URL cho smoke test production |
-
-**Bảo vệ nhánh `main`:** Settings → Rules → Rulesets → *New branch ruleset* → target `main`:
-- Require a pull request before merging.
-- Require status checks to pass: `build-test`.
-
-Có thể thêm một *tag ruleset* cho `v*` để chỉ PM được tạo tag release. Lưu ý: theo tài liệu GitHub, repo **private** trên gói **Free** không áp dụng được ruleset/branch protection. Nếu org đang ở gói Free, nhóm cần thống nhất quy tắc "không merge khi CI đỏ", hoặc nâng gói (xem các ưu đãi của GitHub Education), hoặc chuyển repo sang public.
+| Biến | Tác dụng |
+|---|---|
+| `AWS_ACCOUNT_ID` | Bật đẩy image và deploy |
+| `PROD_BASE_URL` | URL smoke test, ví dụ `https://api.<domain>` |
+| `PROD_ENABLED` | `true` thì tag `v*` mới deploy |
+| `AWS_REGION` | Tùy chọn, mặc định `ap-southeast-1` |
 
 ---
 
 ## 4. Dùng hằng ngày
 
-### Làm tính năng
+Merge vào `main` thì khoảng vài phút sau API trên Lightsail đổi image. Tag `v*` deploy lại đúng image của commit đó, không build lại.
 
-1. Tạo nhánh từ `main`, code, chạy `./mvnw test` ở máy.
-2. Mở PR vào `main`. `build-test` phải xanh, và có người review.
-3. Merge. Khoảng 5–10 phút sau, bản mới lên dev. Xem tiến trình ở tab **Actions**; phần *Summary* của run ghi image digest đã deploy.
+Rollback trên server: health check thất bại thì `deploy-service` trả image cũ. Muốn về bản cũ hơn: Actions → CI/CD → run cũ đã xanh → **Re-run failed jobs** trên `deploy-production`, hoặc Release với tag cũ.
 
-### Phát hành production (Software Package vN)
-
-```bash
-git switch main
-git pull
-git tag -a v1.0.0 -m "Software Package v1"
-git push origin v1.0.0
-```
-
-Làm ở **cả hai repo**: BE trước, FE sau. Nếu `main` vừa mới merge, `release.yml` sẽ chờ tối đa 20 phút để CI/CD trên `main` build xong image cho commit đó.
-
-### Rollback
-
-- **Tự động:** nếu bản mới không qua health check trên server, `deploy-service` đưa image cũ trở lại và job báo đỏ.
-- **Dev:** Actions → *CI/CD* → mở run cũ đã xanh → job `deploy-dev` → **Re-run this job**. Job sẽ deploy lại đúng image của run đó.
-- **Production:** Actions → *Release* → **Run workflow** → *Use workflow from* → tab **Tags** → chọn tag cũ (ví dụ `v1.0.0`) → Run.
-- **Database:** rollback chỉ đổi code. Migration Flyway đã chạy thì vẫn giữ nguyên. Vì vậy thay đổi schema phải theo **expand → migrate → contract**: thêm cột/bảng mới trước; chỉ xóa cột cũ ở một release sau, khi không còn bản nào cần quay về. Không bao giờ sửa file `V*.sql` đã chạy.
-
-### Đổi API giữa FE và BE
-
-Deploy BE trước. BE mới phải vẫn phục vụ được FE đang chạy (tương thích ngược). Chỉ bỏ API cũ khi FE đã chuyển sang API mới.
+Migration Flyway đã chạy thì còn sau rollback. Đổi schema theo expand, rồi mới xóa cột ở bản sau. Không sửa file `V*.sql` đã chạy.
 
 ---
 
-## 5. Vận hành server
+## 5. Khi pipeline đỏ
 
-Vào máy: EC2 → chọn instance → **Connect → Session Manager**.
-
-```bash
-sudo /opt/motoflow/bin/motoflow ps                          # trạng thái các container
-sudo /opt/motoflow/bin/motoflow logs -f --tail 200 backend  # log backend
-sudo cat /opt/motoflow/images.env                           # image đang chạy
-sudo vi /opt/motoflow/.env                                  # sửa cấu hình/secret (cả 3 biến CLOUDINARY_*)
-sudo /opt/motoflow/bin/motoflow up -d proxy backend         # áp dụng sau khi sửa .env
-sudo /opt/motoflow/bin/motoflow exec -T db pg_dump -U motoflow motoflow > /tmp/motoflow.sql   # sao lưu DB
-```
-
-**Sửa cấu hình server** (`compose.yaml`, Caddyfile, `deploy-service`): sửa `deploy/server/setup.sh` trong repo → merge → Systems Manager → **Run Command** → `AWS-RunShellScript` → dán nội dung `setup.sh` → chọn target theo tag `Env`. Script chạy lại được nhiều lần và không ghi đè `.env`.
-
----
-
-## 6. Khi pipeline đỏ
-
-| Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
-|---|---|---|
-| `build-test` đỏ ở bước test | Test fail | Tải artifact `test-reports` của run, xem file trong `surefire-reports` |
-| `build-push-image` bị *skipped* | Chưa đặt `AWS_ACCOUNT_ID` | Đặt biến (mục 3.7) |
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | Trust policy sai `sub`/account, hoặc chưa có OIDC provider | Kiểm tra mục 3.2–3.3, chú ý chữ hoa/thường của tên org/repo |
-| `No running EC2 instance tagged App=motoflow, Env=dev` | Sai tag hoặc instance đang tắt | Sửa tag / bật instance |
-| SSM kẹt `Pending` rồi `Undeliverable` | SSM agent offline: thiếu instance profile `motoflow-ec2` hoặc máy không ra Internet | Gắn role, kiểm tra Fleet Manager |
-| `AccessDenied ... ssm:SendCommand` | Tag instance không khớp policy | Tag phải đúng `App=motoflow` và `Env=dev`/`production` |
-| `backend did not become healthy` | `.env` sai, DB chưa sẵn sàng, migration lỗi | Đọc log in trong nhóm log của job; vào server xem `motoflow logs backend` và `curl -s http://127.0.0.1:8080/actuator/health` |
-| Smoke test `HTTP 000` | `DEV_BASE_URL` sai, security group chưa mở 80/443, DNS chưa trỏ | Kiểm tra lần lượt |
-| Smoke test `HTTP 502` | Backend chưa từng deploy, hoặc đang khởi động lại | Xem `motoflow ps` |
-| `403 Invalid CORS request` khi đăng nhập trên web | Origin không khớp | Kiểm tra `MOTOFLOW_CORS_ORIGINS` trong `.env` đúng `https://<domain>` |
-| Bị đăng xuất sau 15 phút | Cookie refresh có cờ `Secure` nhưng site chạy HTTP | Dùng domain + HTTPS |
-| Release: `No image for ...` | CI/CD trên `main` chưa xong hoặc bị đỏ ở commit đó | Đợi CI xanh rồi chạy lại Release |
-| Release: `... which is not on main` | Tag đặt trên commit ngoài `main` | Xóa tag, tag lại trên `main` |
-
----
-
-## 7. Việc nên làm tiếp
-
-1. **Sao lưu DB hằng ngày** (`pg_dump` → S3) nếu production/UAT dùng PostgreSQL container.
-2. **Bỏ giá trị mặc định không an toàn** trong `application.properties` (JWT secret mẫu, `admin/admin`). Server không bị ảnh hưởng vì `.env` luôn đặt các giá trị này, nhưng nên bỏ để tránh vô tình chạy production bằng giá trị mẫu.
-3. **SDS (Report 4)**: API thực tế dùng `/api/v1/...`, đúng với SDS.
+| Triệu chứng | Cách xử lý |
+|---|---|
+| `build-push-image` bị skipped | Chưa có `AWS_ACCOUNT_ID` |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | Trust policy chưa khớp `sub` có mã số repo, hoặc chưa có OIDC provider |
+| `No running Lightsail instance tagged App=motoflow` | Thiếu tag hoặc máy đang tắt |
+| `setup.sh has not been run` / không có `deploy-service` | Chạy `setup.sh` trên máy |
+| Smoke test `HTTP 000` | `PROD_BASE_URL` sai, hoặc cổng 80/443 chưa mở |
+| `403 Invalid CORS request` | `MOTOFLOW_CORS_ORIGINS` phải là origin của Pages |
+| Release: `No image for ...` | CI/CD trên `main` chưa xanh ở commit đó |
