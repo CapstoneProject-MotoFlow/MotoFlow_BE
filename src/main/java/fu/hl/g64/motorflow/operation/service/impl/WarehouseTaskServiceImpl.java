@@ -304,7 +304,9 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                     }));
             // Open while a delivery or a replacement delivery can still be recorded (UC-106, same rule as the PO
             // detail's canCreateReceipt / canCreateReplacement).
-            case SUPPLIER_RECEIVING -> purchaseOrders.findById(documentId).map(order -> new Document(
+            // A draft PO is not a PO yet (PM 17/11): nothing to receive.
+            case SUPPLIER_RECEIVING -> purchaseOrders.findById(documentId).filter(order -> !order.isDraft())
+                    .map(order -> new Document(
                     order.getStoreId(), purchaseOrderReceiving.of(order).any() ? Stage.OPEN : Stage.FINISHED));
             // Received at the destination; open while goods can arrive (same rule as the arrival itself).
             case TRANSFER_RECEIVING -> transferOrders.findById(documentId).map(order -> new Document(
