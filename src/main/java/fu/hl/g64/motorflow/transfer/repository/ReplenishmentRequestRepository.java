@@ -32,6 +32,12 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
     @Query("select r from ReplenishmentRequest r where r.id = :id and " + SUBMITTED)
     Optional<ReplenishmentRequest> findByIdForUpdate(@Param("id") long id);
 
+    /** PM 17/11: a draft, locked while its creator saves, submits or deletes it. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from ReplenishmentRequest r where r.id = :id and "
+            + "r.status = fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.DRAFT")
+    Optional<ReplenishmentRequest> findDraftForUpdate(@Param("id") long id);
+
     /** UC-69: one request with the totals of its lines. */
     interface RequestRow {
         ReplenishmentRequest getRequest();
@@ -84,6 +90,32 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
                             @Param("from") LocalDate from, @Param("to") LocalDate to,
                             @Param("hasQ") boolean hasQ, @Param("qId") Long qId, @Param("pattern") String pattern,
                             Pageable pageable);
+
+    /** PM 17/11: the caller's drafts, last saved first; q and storeId as in {@link #search}. */
+    @Query(value = """
+            select r as request, s.storeName as storeName, u.fullName as createdByName,
+                   (select count(l) from ReplenishmentRequestLine l
+                    where l.replenishmentRequestId = r.id) as lineCount,
+                   (select coalesce(sum(l.requestedQty), 0) from ReplenishmentRequestLine l
+                    where l.replenishmentRequestId = r.id) as totalRequestedQty
+            from ReplenishmentRequest r
+            join Store s on s.id = r.requestingStoreId
+            join UserAccount u on u.id = r.createdBy
+            """ + DRAFTS + """
+            order by r.createdAt desc, r.id desc
+            """,
+            countQuery = "select count(r) from ReplenishmentRequest r " + DRAFTS)
+    Page<RequestRow> findDrafts(@Param("createdBy") long createdBy, @Param("storeId") Long storeId,
+                                @Param("hasQ") boolean hasQ, @Param("qId") Long qId, @Param("pattern") String pattern,
+                                Pageable pageable);
+
+    String DRAFTS = """
+            where r.status = fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.DRAFT
+              and r.createdBy = :createdBy
+              and (:storeId is null or r.requestingStoreId = :storeId)
+              and (:hasQ = false or r.id = :qId
+                   or r.requestingStoreId in (select qs.id from Store qs where lower(qs.storeName) like :pattern escape '\\'))
+            """;
 
     @Query("""
             select p as purchaseOrder, s.supplierName as supplierName

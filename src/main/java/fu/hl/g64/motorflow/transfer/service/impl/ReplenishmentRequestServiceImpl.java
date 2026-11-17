@@ -83,10 +83,9 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         Store store = requestingStore(user, body.storeId());
         requestedParts.requireActive(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
         LocalDateTime now = LocalDateTime.now(clock);
-        ReplenishmentRequest request = requests.save(ReplenishmentRequest.create(store.getId(),
-                StringUtils.hasText(body.note()) ? body.note().strip() : null, user.id(), now));
-        lines.saveAll(body.lines().stream().map(line ->
-                ReplenishmentRequestLine.create(request.getId(), line.productId(), line.requestedQty())).toList());
+        ReplenishmentRequest request = requests.save(ReplenishmentRequest.create(store.getId(), note(body), user.id(),
+                now));
+        saveLines(request, body);
         notifyCoordinators(user, store, request, body.lines().size());
         return detail(request);
     }
@@ -109,12 +108,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         Page<ReplenishmentRequestRepository.RequestRow> found = requests.search(search.status(), storeId, search.from(),
                 search.to(), q.present(), q.id(), q.pattern(),
                 PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
-        return PageResponse.of(found, found.stream().map(row -> {
-            ReplenishmentRequest request = row.getRequest();
-            return new ReplenishmentRowResponse(request.getId(), request.getRequestingStoreId(), row.getStoreName(),
-                    request.getStatus(), row.getLineCount(), row.getTotalRequestedQty(), request.getCreatedBy(),
-                    row.getCreatedByName(), request.getCreatedAt(), request.getClosedAt());
-        }).toList());
+        return PageResponse.of(found, found.stream().map(ReplenishmentRequestServiceImpl::row).toList());
     }
 
     /**
@@ -266,6 +260,105 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         request.startCoordination();
         auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", request.getId(), "REPLENISHMENT_TO_PURCHASE_SET",
                 user.id(), null, null, Map.of("lines", changes), LocalDateTime.now(clock)));
+    }
+
+    // PM 17/11: drafts
+    @Transactional(readOnly = true)
+    @Override
+    public PageResponse<ReplenishmentRowResponse> drafts(AuthenticatedUser user, Long storeId, String q, int page,
+                                                         int size) {
+        TextQuery text = TextQuery.of(q);
+        Page<ReplenishmentRequestRepository.RequestRow> found = requests.findDrafts(user.id(),
+                user.role() == Role.OWNER ? storeId : null, text.present(), text.id(), text.pattern(),
+                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
+        return PageResponse.of(found, found.stream().map(ReplenishmentRequestServiceImpl::row).toList());
+    }
+
+    @Transactional
+    @Override
+    public ReplenishmentDetailResponse createDraft(AuthenticatedUser user, ReplenishmentCreateRequest body) {
+        Store store = requestingStore(user, body.storeId());
+        requestedParts.requireActive(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
+        ReplenishmentRequest request = requests.save(ReplenishmentRequest.createDraft(store.getId(), note(body),
+                user.id(), LocalDateTime.now(clock)));
+        saveLines(request, body);
+        return detail(request);
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public ReplenishmentDetailResponse draft(AuthenticatedUser user, long id) {
+        return detail(requests.findById(id).filter(found -> isOwnDraft(user, found)).orElseThrow(this::notFound));
+    }
+
+    @Transactional
+    @Override
+    public ReplenishmentDetailResponse updateDraft(AuthenticatedUser user, long id, ReplenishmentCreateRequest body) {
+        ReplenishmentRequest request = lockOwnDraft(user, id);
+        rewriteDraft(user, request, body, LocalDateTime.now(clock));
+        return detail(request);
+    }
+
+    @Transactional
+    @Override
+    public ReplenishmentDetailResponse submitDraft(AuthenticatedUser user, long id, ReplenishmentCreateRequest body) {
+        ReplenishmentRequest request = lockOwnDraft(user, id);
+        LocalDateTime now = LocalDateTime.now(clock);
+        // UC-68 as for a new request. A refusal rolls the whole transaction back, so the draft keeps what it had.
+        Store store = rewriteDraft(user, request, body, now);
+        request.submit(now);
+        notifyCoordinators(user, store, request, body.lines().size());
+        return detail(request);
+    }
+
+    @Transactional
+    @Override
+    public void deleteDraft(AuthenticatedUser user, long id) {
+        ReplenishmentRequest request = lockOwnDraft(user, id);
+        lines.deleteAll(lines.findByReplenishmentRequestIdOrderById(id));
+        lines.flush();
+        requests.delete(request);
+    }
+
+    /** Only its creator knows a draft exists: any other caller, and any id of a real request, gets MSG95. */
+    private static boolean isOwnDraft(AuthenticatedUser user, ReplenishmentRequest request) {
+        return request.isDraft() && request.getCreatedBy() == user.id();
+    }
+
+    private ReplenishmentRequest lockOwnDraft(AuthenticatedUser user, long id) {
+        return requests.findDraftForUpdate(id).filter(found -> isOwnDraft(user, found)).orElseThrow(this::notFound);
+    }
+
+    /** Replaces the draft's whole content, checked as UC-68. */
+    private Store rewriteDraft(AuthenticatedUser user, ReplenishmentRequest request, ReplenishmentCreateRequest body,
+                               LocalDateTime now) {
+        Store store = requestingStore(user, body.storeId());
+        requestedParts.requireActive(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
+        request.changeDraft(store.getId(), note(body), now);
+        lines.deleteAll(lines.findByReplenishmentRequestIdOrderById(request.getId()));
+        lines.flush();
+        saveLines(request, body);
+        return store;
+    }
+
+    private void saveLines(ReplenishmentRequest request, ReplenishmentCreateRequest body) {
+        lines.saveAll(body.lines().stream().map(line ->
+                ReplenishmentRequestLine.create(request.getId(), line.productId(), line.requestedQty())).toList());
+    }
+
+    private static String note(ReplenishmentCreateRequest body) {
+        return StringUtils.hasText(body.note()) ? body.note().strip() : null;
+    }
+
+    private BusinessException notFound() {
+        return new BusinessException(HttpStatus.NOT_FOUND, "MSG95");
+    }
+
+    private static ReplenishmentRowResponse row(ReplenishmentRequestRepository.RequestRow row) {
+        ReplenishmentRequest request = row.getRequest();
+        return new ReplenishmentRowResponse(request.getId(), request.getRequestingStoreId(), row.getStoreName(),
+                request.getStatus(), row.getLineCount(), row.getTotalRequestedQty(), request.getCreatedBy(),
+                row.getCreatedByName(), request.getCreatedAt(), request.getClosedAt());
     }
 
     /** UC-68: a Branch Manager's own store, or the store the Owner chose; only the Owner may stock a planned store. */
