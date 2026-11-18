@@ -2,9 +2,18 @@ package fu.hl.g64.motorflow.stockcount;
 
 import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
+import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
+import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
+import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -13,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,6 +35,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class OpeningBalanceApiTest extends StockCountTestData {
 
     private static final String COUNTS = "/api/v1/stock-counts";
+
+    @Autowired
+    private InventoryPostingService posting;
+    @Autowired
+    private TransactionTemplate tx;
 
     private String lbStaffToken;
 
@@ -157,6 +172,30 @@ class OpeningBalanceApiTest extends StockCountTestData {
         assign(cycle);
         putAs(lbStaffToken, COUNTS + "/" + cycle + "/opening-lines", Map.of("lines", List.of(line(pad, null, 1, 0))))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG235"));
+    }
+
+    @Test
+    void nothingMovesInAWarehouseWhileItsOpeningCountIsUnfinished() throws Exception {
+        long count = idOf(postAs(otherManagerToken, COUNTS, opening()).andExpect(status().isCreated()));
+
+        // A surplus lot stands for any posting: every one of them goes through the same check.
+        assertThatThrownBy(() -> tx.execute(s -> posting.receiveNewLot(surplusInto(otherStore, count))))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG301"));
+        assertThat(id("SELECT count(*) FROM stock_movement WHERE store_id = ?", otherStore)).isZero();
+
+        // Gia Lâm has no opening count, so it is not held up.
+        tx.execute(s -> posting.receiveNewLot(surplusInto(store, count)));
+
+        postAs(otherManagerToken, COUNTS + "/" + count + "/cancel", Map.of("reason", "Lập nhầm"))
+                .andExpect(status().isOk());
+        tx.execute(s -> posting.receiveNewLot(surplusInto(otherStore, count)));
+        assertThat(id("SELECT count(*) FROM stock_movement WHERE store_id = ?", otherStore)).isEqualTo(1);
+    }
+
+    private NewLotPosting surplusInto(long storeId, long count) {
+        return new NewLotPosting(storeId, pad, LotSourceType.COUNT_SURPLUS, null, null, TODAY, 10_000, null, null,
+                null, Map.of(StockStatus.AVAILABLE, 1), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(count),
+                owner.getId(), null, period, TODAY.atTime(23, 59, 59));
     }
 
     /** An opening count of Long Biên, given to its Staff and started. */
