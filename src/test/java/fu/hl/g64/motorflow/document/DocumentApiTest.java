@@ -154,6 +154,22 @@ class DocumentApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void ownerSeesTheValueOfAnAppliedAdjustmentAndABranchManagerDoesNot() throws Exception {
+        // Waiting for Owner: nothing posted yet.
+        search(ownerToken, "type", "ADJUSTMENT").andExpect(jsonPath("$.items[0].value").value(nullValue()));
+
+        // Applied: one pad of 60,000 đ left the stock.
+        jdbc.update("UPDATE adjustment_request SET status = 'APPLIED', decided_by = ?, decided_at = '2026-10-17 10:00', "
+                + "applied_at = '2026-10-17 10:00' WHERE id = ?", owner.getId(), adjustment);
+        jdbc.update("INSERT INTO stock_movement (store_id, product_id, inventory_period_id, stock_status, "
+                + "quantity_change, unit_cost, value, movement_type, adjustment_request_id, performed_by, occurred_at) "
+                + "VALUES (?, ?, (SELECT max(id) FROM inventory_period), 'AVAILABLE', -1, 60000, -60000, 'ADJUSTMENT', "
+                + "?, ?, '2026-10-17 10:00')", store, pad, adjustment, owner.getId());
+        search(ownerToken, "type", "ADJUSTMENT").andExpect(jsonPath("$.items[0].value").value(-60_000));
+        search(managerToken, "type", "ADJUSTMENT").andExpect(jsonPath("$.items[0].value").value(nullValue()));
+    }
+
+    @Test
     void filtersByTypeNumberAndDate() throws Exception {
         search(managerToken, "type", "PAYMENT").andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[*].id").value(contains((int) salePayment)));
