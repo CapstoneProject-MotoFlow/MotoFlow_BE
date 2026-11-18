@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory-periods/{{periodId}}/closing-preview"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có kết luận đóng được hay không', () => pm.expect(b.canClose).to.be.a('boolean'));
+      pm.test('Lý do trống khi đóng được, nếu không là một trong MSG294 đến MSG297', () => {
+          if (b.canClose) pm.expect(b.reason).to.eql(null);
+          else pm.expect(['MSG294', 'MSG295', 'MSG296', 'MSG297']).to.include(b.reason);
+      });
+      pm.test('Có danh sách chặn và cảnh báo', () => {
+          pm.expect(b.blockingCounts).to.be.an('array');
+          pm.expect(b.unconfirmedReceipts).to.be.an('array');
+          pm.expect(b.transfersInTransit).to.be.an('array');
+      });
+    language: text/javascript
+order: 4000

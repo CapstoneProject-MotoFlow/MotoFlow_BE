@@ -58,4 +58,8 @@ public interface StockCountRepository extends JpaRepository<StockCount, Long> {
                      and t.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED))""")
     Page<Object[]> search(Long storeId, CountType countType, StockCountStatus status, LocalDate from, LocalDate to,
                           Long counterId, Pageable pageable);
+
+    /** UC-96: whether the warehouse has an opening count of this kind still in one of these statuses. */
+    boolean existsByStoreIdAndCountTypeAndStatusIn(Long storeId, CountType countType,
+                                                   Collection<StockCountStatus> statuses);
 }

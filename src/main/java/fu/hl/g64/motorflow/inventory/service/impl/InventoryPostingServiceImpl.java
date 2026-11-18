@@ -27,6 +27,11 @@ import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockMovementRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import jakarta.persistence.EntityManager;
+import fu.hl.g64.motorflow.inventory.entity.enums.CountType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
+import fu.hl.g64.motorflow.inventory.repository.StockCountRepository;
+import fu.hl.g64.motorflow.store.entity.Store;
+import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -61,6 +66,9 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private static final Set<MovementType> NO_EXPIRED_LOTS =
             EnumSet.of(MovementType.SALE_ISSUE, MovementType.TRANSFER_DISPATCH, MovementType.TRANSFER_EXTRA_DISPATCH);
 
+    private static final Set<StockCountStatus> UNFINISHED_COUNTS = EnumSet.of(StockCountStatus.DRAFT,
+            StockCountStatus.COUNTING, StockCountStatus.AWAITING_APPROVAL);
+
     private final ProductRepository products;
     private final LotRepository lots;
     private final LotBalanceRepository lotBalances;
@@ -68,6 +76,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private final StockMovementRepository movements;
     private final InventoryPeriods inventoryPeriods;
     private final InventoryPeriodRepository periods;
+    private final StockCountRepository counts;
+    private final StoreRepository stores;
     private final Clock clock;
     private final EntityManager em;
 
@@ -480,10 +490,21 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         return picks;
     }
 
-    /** Writes the movement and moves lot_balance and stock_balance by the same quantity (BR-29). */
+    /**
+     * Writes the movement and moves lot_balance and stock_balance by the same quantity (BR-29). MSG301 while the
+     * warehouse has an unfinished opening count: anything posted before it is approved would be counted twice, and
+     * would then refuse the approval (MSG244, BR-86). The store row is read FOR SHARE first, so a count being created
+     * in that warehouse (which holds it FOR UPDATE) and this posting cannot both pass their checks.
+     */
     private void post(StockBalance balance, Lot lot, StockStatus status, int change, BigDecimal unitCost,
                       MovementType type, SourceRef source, String reason, Long by, InventoryPeriod period,
                       LocalDateTime now, LocalDateTime occurredAt) {
+        if (type != MovementType.OPENING_BALANCE) {
+            Store store = stores.findForShareById(balance.getStoreId()).orElseThrow();
+            if (counts.existsByStoreIdAndCountTypeAndStatusIn(store.getId(), CountType.OPENING, UNFINISHED_COUNTS)) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG301", store.getStoreName());
+            }
+        }
         LotBalance lotBalance = lotBalance(lot.getId(), balance.getStoreId(), status, now);
         lotBalance.change(change, now);
         balance.change(status, change, now);
@@ -503,17 +524,22 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         if (periodId == null && occurredAt == null) {
             return new PostingTime(inventoryPeriods.openFor(now.toLocalDate()), now);
         }
-        if (type != MovementType.COUNT_ADJUSTMENT) {
-            throw new IllegalArgumentException("only a count adjustment may name its period and time");
+        if (type != MovementType.COUNT_ADJUSTMENT && type != MovementType.OPENING_BALANCE) {
+            throw new IllegalArgumentException("only a count adjustment or opening balance names its period and time");
         }
         if (periodId == null || occurredAt == null) {
             throw new IllegalArgumentException("periodId and occurredAt go together");
         }
-        InventoryPeriod period = periods.findById(periodId)
+        InventoryPeriod period = periods.findForPostingById(periodId)
                 .orElseThrow(() -> new IllegalArgumentException("unknown period " + periodId));
         if (!period.isOpen()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
                     period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));
+        }
+        // A period's opening adds up the movements before its first day (PeriodTotals), so the time must fall in it.
+        LocalDate day = occurredAt.toLocalDate();
+        if (day.isBefore(period.getFromDate()) || day.isAfter(period.getToDate())) {
+            throw new IllegalArgumentException("occurredAt " + occurredAt + " is outside period " + periodId);
         }
         return new PostingTime(period, occurredAt);
     }

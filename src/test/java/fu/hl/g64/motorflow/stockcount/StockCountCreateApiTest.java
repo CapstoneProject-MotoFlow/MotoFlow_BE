@@ -192,10 +192,13 @@ class StockCountCreateApiTest extends StockCountTestData {
     }
 
     @Test
-    void anOpeningCountIsNotSupportedYetAndYearEndIs() throws Exception {
+    void anOpeningCountNeedsAWarehouseWhereNothingMovedAndYearEndIsAllowed() throws Exception {
+        // The seeded lots come with no movement; one is enough to rule an opening count out.
+        jdbc.update("INSERT INTO stock_movement (store_id, product_id, lot_id, stock_status, quantity_change, "
+                + "unit_cost, value, movement_type, stock_count_id, inventory_period_id, performed_by, occurred_at) "
+                + "SELECT store_id, product_id, id, 'AVAILABLE', 1, 1, 1, 'OPENING_BALANCE', stock_count_id, ?, ?, "
+                + "now() FROM lot WHERE store_id = ? LIMIT 1", period, owner.getId(), store);
         refused(create(managerToken, body("OPENING", TODAY, ScopeType.WHOLE, null, null, null, null)), 409, "MSG244");
-        // Checked before the role: an Owner gets the same answer.
-        refused(create(ownerToken, body("OPENING", TODAY, ScopeType.WHOLE, null, null, null, null)), 409, "MSG244");
         assertThat(countRows()).isZero();
 
         create(managerToken, body("YEAR_END", TODAY, ScopeType.WHOLE, null, null, null, null))

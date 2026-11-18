@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.inventory.repository;
 
 import fu.hl.g64.motorflow.inventory.entity.Lot;
+import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -49,4 +50,7 @@ public interface LotRepository extends JpaRepository<Lot, Long> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update Lot l set l.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED where l.id in :ids")
     int markExpired(Collection<Long> ids);
+
+    /** UC-96: whether a lot of this source exists for the part, e.g. an approved opening lot. */
+    boolean existsByProductIdAndSourceType(Long productId, LotSourceType sourceType);
 }

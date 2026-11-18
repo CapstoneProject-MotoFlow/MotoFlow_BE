@@ -493,8 +493,10 @@ class LotApiTest extends ApiTestUsers {
     }
 
     private long opening(long store, long product, LocalDate received) {
-        long count = jdbc.queryForObject("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, created_by) "
-                + "VALUES (?, 'OPENING', ?, 'WHOLE', ?) RETURNING id", Long.class, store, received, owner.getId());
+        // A finished opening count: while one is unfinished nothing may post into the warehouse (MSG301).
+        long count = jdbc.queryForObject("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, "
+                + "status, created_by) VALUES (?, 'OPENING', ?, 'WHOLE', 'COMPLETED', ?) RETURNING id", Long.class,
+                store, received, owner.getId());
         tx.execute(s -> posting.receiveNewLot(new NewLotPosting(store, product, LotSourceType.OPENING, null, null,
                 received, 80_000, null, null, null, Map.of(StockStatus.AVAILABLE, 3),
                 MovementType.OPENING_BALANCE, SourceRef.stockCount(count), owner.getId(), null)));

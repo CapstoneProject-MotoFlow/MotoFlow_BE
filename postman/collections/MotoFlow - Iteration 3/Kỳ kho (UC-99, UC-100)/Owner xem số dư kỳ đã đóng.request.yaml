@@ -1,0 +1,16 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory-periods/{{closedPeriodId}}/balances?size=5"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Kỳ đã đóng không phải tạm tính', () => pm.expect(b.provisional).to.eql(b.period.status === 'OPEN'));
+      pm.test('Có giá BQ kỳ', () => b.page.items.forEach(r => pm.expect(r).to.have.property('periodAvgUnitCost')));
+    language: text/javascript
+order: 3000

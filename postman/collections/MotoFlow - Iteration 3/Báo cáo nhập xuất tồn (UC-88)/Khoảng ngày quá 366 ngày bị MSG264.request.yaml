@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/reports/inventory-operations?from=2020-01-01&to={{today}}"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      pm.test('Mã lỗi MSG264', () => pm.expect(pm.response.json().code).to.eql('MSG264'));
+    language: text/javascript
+order: 6000

@@ -110,6 +110,14 @@ public class Product {
         updatedAt = now;
     }
 
+    /** UC-96, BR-74: the cost of this part's opening stock, one for every warehouse; checked by the caller. */
+    public void enterInitialUnitCost(long cost) {
+        if (cost <= 0) {
+            throw new IllegalArgumentException("initial unit cost must be positive");
+        }
+        initialUnitCost = cost;
+    }
+
     /**
      * Moving average after stock comes in (BR-74): {@code (heldQty x average + inQty x inUnitCost) / (heldQty + inQty)},
      * chain-wide. With no average yet the first one is the incoming unit cost (the initial unit cost for an opening lot).

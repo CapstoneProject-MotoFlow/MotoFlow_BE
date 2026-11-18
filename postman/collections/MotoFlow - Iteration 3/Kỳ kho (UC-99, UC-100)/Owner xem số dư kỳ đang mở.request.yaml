@@ -1,0 +1,20 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory-periods/{{periodId}}/balances?size=5"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Kỳ mở là số tạm tính', () => pm.expect(b.provisional).to.eql(b.period.status === 'OPEN'));
+      pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r => {
+          pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty);
+          pm.expect(r.closingValue).to.eql(r.openingValue + r.inValue - r.outValue);
+      }));
+      pm.test('Có tổng giá trị', () => pm.expect(b.totals).to.have.property('closingValue'));
+    language: text/javascript
+order: 2000

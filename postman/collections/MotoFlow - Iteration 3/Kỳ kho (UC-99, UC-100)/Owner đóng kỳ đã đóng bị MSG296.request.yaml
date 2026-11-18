@@ -1,0 +1,14 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory-periods/{{closedPeriodId}}/close"
+method: POST
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã lỗi MSG296', () => pm.expect(pm.response.json().code).to.eql('MSG296'));
+    language: text/javascript
+order: 6000

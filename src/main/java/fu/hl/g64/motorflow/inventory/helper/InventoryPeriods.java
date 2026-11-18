@@ -18,10 +18,13 @@ public class InventoryPeriods {
 
     private final InventoryPeriodRepository periods;
 
-    /** The open period of {@code date}'s month, opened if it does not exist yet; MSG85 if it is closed. */
+    /**
+     * The open period of {@code date}'s month, opened if it does not exist yet and share-locked until the end of the
+     * transaction, so that it cannot be closed under a posting (UC-100); MSG85 if it is closed.
+     */
     public InventoryPeriod openFor(LocalDate date) {
         openIfMissing(date);
-        InventoryPeriod period = findFor(date).orElseThrow();
+        InventoryPeriod period = periods.findForPostingByPeriodMonth(date.withDayOfMonth(1)).orElseThrow();
         if (!period.isOpen()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
                     period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));

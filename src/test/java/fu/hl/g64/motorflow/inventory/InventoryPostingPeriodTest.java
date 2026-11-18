@@ -121,13 +121,13 @@ class InventoryPostingPeriodTest extends IntegrationTest {
     }
 
     @Test
-    void onlyACountAdjustmentMayNameAPeriod() {
+    void onlyACountAdjustmentOrAnOpeningBalanceMayNameAPeriod() {
         assertThatThrownBy(() -> tx.executeWithoutResult(s -> posting.adjustLot(
                 adjust(-1, MovementType.ADJUSTMENT, september, END_OF_SEPTEMBER))))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> tx.execute(s -> posting.receiveNewLot(new NewLotPosting(store, product,
                 LotSourceType.OPENING, null, null, LocalDate.of(2026, 9, 30), 100_000, null, null, null,
-                Map.of(StockStatus.AVAILABLE, 1), MovementType.OPENING_BALANCE, SourceRef.stockCount(count), owner,
+                Map.of(StockStatus.AVAILABLE, 1), MovementType.RECEIPT_CONFIRMED, SourceRef.stockCount(count), owner,
                 null, september, END_OF_SEPTEMBER))))
                 .isInstanceOf(IllegalArgumentException.class);
 
@@ -141,6 +141,10 @@ class InventoryPostingPeriodTest extends IntegrationTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> tx.executeWithoutResult(s -> posting.adjustLot(
                 adjust(-1, MovementType.COUNT_ADJUSTMENT, null, END_OF_SEPTEMBER))))
+                .isInstanceOf(IllegalArgumentException.class);
+        // The time has to fall inside the period it names.
+        assertThatThrownBy(() -> tx.executeWithoutResult(s -> posting.adjustLot(
+                adjust(-1, MovementType.COUNT_ADJUSTMENT, september, END_OF_SEPTEMBER.plusSeconds(1)))))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

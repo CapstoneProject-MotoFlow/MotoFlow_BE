@@ -52,4 +52,14 @@ public class InventoryPeriod {
     public boolean isOpen() {
         return status == InventoryPeriodStatus.OPEN;
     }
+
+    /** UC-100: closed for good (BR-84); the caller has checked the order and the counts. */
+    public void close(Long by, LocalDateTime now) {
+        if (!isOpen()) {
+            throw new IllegalStateException("period " + id + " is already closed");
+        }
+        status = InventoryPeriodStatus.CLOSED;
+        closedBy = by;
+        closedAt = now;
+    }
 }
