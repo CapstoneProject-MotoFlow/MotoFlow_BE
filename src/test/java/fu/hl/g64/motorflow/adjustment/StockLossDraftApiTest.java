@@ -106,4 +106,49 @@ class StockLossDraftApiTest extends AdjustmentTestData {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM attachment WHERE owner_type = 'ADJUSTMENT_REQUEST' "
                 + "AND owner_id = ?", Long.class, draft)).isZero();
     }
+
+    @Test
+    void aDraftHeldByATransferLossKeepsItsStockAndCannotBeThrownAway() throws Exception {
+        // Review 18/11 R-01: UC-76 linked the draft to a transfer shortage of that quantity.
+        Map<String, Object> body = loss(null, line(oil, oilLot1, "AVAILABLE", 2));
+        List<Object> evidence = List.copyOf((List<?>) body.get("attachments"));
+        long draft = saved(managerToken, body);
+        long transfer = jdbc.queryForObject("INSERT INTO transfer_order (source_store_id, dest_store_id, status, "
+                + "created_by) VALUES (?, ?, 'IN_TRANSIT', ?) RETURNING id", Long.class, otherStore, store,
+                owner.getId());
+        long shortage = jdbc.queryForObject("INSERT INTO discrepancy_case (source_type, transfer_order_id, "
+                + "product_id, short_qty, opened_at) VALUES ('TRANSFER', ?, ?, 2, now()) RETURNING id", Long.class,
+                transfer, oil);
+        jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, resolution_type, quantity, "
+                + "adjustment_request_id, recorded_by, occurred_at) VALUES (?, 'APPROVED_LOSS', 2, ?, ?, now())",
+                shortage, draft, manager.getId());
+
+        Map<String, Object> more = loss(null, line(oil, oilLot1, "AVAILABLE", 5));
+        call(put(REQUESTS + "/" + draft), managerToken, more).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG303"));
+        Map<String, Object> otherLot = loss(null, line(oil, oilLot2, "AVAILABLE", 2));
+        call(put(REQUESTS + "/" + draft), managerToken, otherLot).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG303"));
+        call(delete(REQUESTS + "/" + draft), managerToken, null).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG302"));
+
+        // The reason and the evidence may still change.
+        Map<String, Object> same = loss(null, line(oil, oilLot1, "AVAILABLE", 2));
+        same.put("reason", "Thiếu 2 can khi nhận chuyển kho");
+        same.put("attachments", evidence);
+        call(put(REQUESTS + "/" + draft), managerToken, same).andExpect(status().isOk())
+                .andExpect(jsonPath("$.reason").value("Thiếu 2 can khi nhận chuyển kho"))
+                .andExpect(jsonPath("$.stockLines[*].lotId", contains((int) oilLot1)))
+                .andExpect(jsonPath("$.evidence.length()").value(1));
+    }
+
+    @Test
+    void theDraftsTabFiltersByWhenTheDraftWasLastSaved() throws Exception {
+        // Review 18/11 R-02: a draft has no submittedAt; the dates filter its "Lưu lúc".
+        long draft = saved(managerToken, loss(null, line(oil, oilLot1, "AVAILABLE", 1)));
+        list(managerToken, "status", "DRAFT", "mine", "true", "from", "2026-10-13", "to", "2026-10-13")
+                .andExpect(jsonPath("$.items[*].id", contains((int) draft)));
+        list(managerToken, "status", "DRAFT", "mine", "true", "from", "2026-10-14")
+                .andExpect(jsonPath("$.items", empty()));
+    }
 }

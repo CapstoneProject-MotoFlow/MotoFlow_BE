@@ -57,6 +57,7 @@ import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
+import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -182,10 +183,22 @@ public class AdjustmentServiceImpl implements AdjustmentService {
     public AdjustmentDetail updateDraft(AuthenticatedUser user, long id, StockLossRequest request) {
         AdjustmentRequest draft = ownDraft(user, id);
         StockLoss loss = checkStockLoss(user, request);
-        draft.replaceDraft(loss.store().getId(), loss.source(), request.reason().strip(), LocalDateTime.now(clock));
-        stockLines.deleteByAdjustmentRequestId(id);
-        stockLines.flush();
-        saveLines(draft, loss);
+        if (discrepancyEvents.existsByAdjustmentRequestId(id)) {
+            // A transfer loss (UC-76) holds this draft's quantity: only the reason and the evidence may change.
+            List<Change> held = AdjustmentStock.changesOf(stockLines.findByAdjustmentRequestIdOrderByIdAsc(id));
+            if (!Objects.equals(draft.getStoreId(), loss.store().getId())
+                    || !Objects.equals(draft.source(), loss.source()) || !sameChanges(held, loss.changes())) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG303", id);
+            }
+            draft.replaceDraft(draft.getStoreId(), draft.source(), request.reason().strip(),
+                    LocalDateTime.now(clock));
+        } else {
+            draft.replaceDraft(loss.store().getId(), loss.source(), request.reason().strip(),
+                    LocalDateTime.now(clock));
+            stockLines.deleteByAdjustmentRequestId(id);
+            stockLines.flush();
+            saveLines(draft, loss);
+        }
         attachments.replace(OwnerType.ADJUSTMENT_REQUEST, id, request.attachments(), user.id());
         return detail(user, draft);
     }
@@ -216,6 +229,12 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         stockLines.deleteByAdjustmentRequestId(id);
         attachments.detachAll(OwnerType.ADJUSTMENT_REQUEST, id);
         requests.delete(draft);
+    }
+
+    private static boolean sameChanges(List<Change> a, List<Change> b) {
+        Map<Change, Long> left = a.stream().collect(Collectors.groupingBy(c -> c, Collectors.counting()));
+        Map<Change, Long> right = b.stream().collect(Collectors.groupingBy(c -> c, Collectors.counting()));
+        return left.equals(right);
     }
 
     private void saveLines(AdjustmentRequest request, StockLoss loss) {
@@ -447,11 +466,14 @@ public class AdjustmentServiceImpl implements AdjustmentService {
             if (search.statuses() != null && !search.statuses().isEmpty()) {
                 where.add(root.get("status").in(search.statuses()));
             }
+            // Submitted on, or for a draft (no submittedAt yet) last saved on: the "Lưu lúc" of the Nháp tab.
+            Expression<LocalDateTime> on = cb.coalesce(root.<LocalDateTime>get("submittedAt"),
+                    root.<LocalDateTime>get("createdAt"));
             if (search.from() != null) {
-                where.add(cb.greaterThanOrEqualTo(root.get("submittedAt"), search.from().atStartOfDay()));
+                where.add(cb.greaterThanOrEqualTo(on, search.from().atStartOfDay()));
             }
             if (search.to() != null) {
-                where.add(cb.lessThan(root.get("submittedAt"), search.to().plusDays(1).atStartOfDay()));
+                where.add(cb.lessThan(on, search.to().plusDays(1).atStartOfDay()));
             }
             if (search.mine()) {
                 where.add(cb.equal(root.get("requestedBy"), user.id()));
