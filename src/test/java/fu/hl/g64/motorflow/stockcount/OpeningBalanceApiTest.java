@@ -9,6 +9,7 @@ import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
+import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,11 @@ import java.sql.Timestamp;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -40,6 +46,8 @@ class OpeningBalanceApiTest extends StockCountTestData {
     private InventoryPostingService posting;
     @Autowired
     private TransactionTemplate tx;
+    @Autowired
+    private StoreRepository stores;
 
     private String lbStaffToken;
 
@@ -72,8 +80,13 @@ class OpeningBalanceApiTest extends StockCountTestData {
                 .andExpect(jsonPath("$.complete").value(true))
                 .andExpect(jsonPath("$.totalValue").value(10 * 80_000 + 7 * 50_000))
                 .andExpect(jsonPath("$.parts[?(@.sku == 'LOC-01')].lots[*].quantity", contains(4, 3)));
+        // Nothing posts into the warehouse while the count waits for approval, so approving still works (R-01).
+        assertThatThrownBy(() -> tx.execute(s -> posting.receiveNewLot(surplusInto(otherStore, count))))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG301"));
         postAs(ownerToken, COUNTS + "/" + count + "/approve", null).andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("COMPLETED"));
+        postAs(ownerToken, COUNTS + "/" + count + "/approve", null).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG235"));
 
         // One OPENING lot per part and expiry date, posted at the end of the count day into its month.
         assertThat(jdbc.queryForList("SELECT expiry_date FROM lot WHERE stock_count_id = ? AND source_type = 'OPENING' "
@@ -157,6 +170,7 @@ class OpeningBalanceApiTest extends StockCountTestData {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG242"));
         putAs(otherManagerToken, url, Map.of("lines", List.of(line(pad, null, 2, 0))))
                 .andExpect(status().isForbidden());
+        putAs(staffToken, url, Map.of("lines", List.of(line(pad, null, 2, 0)))).andExpect(status().isForbidden());
 
         // Saving again replaces the lines.
         putAs(lbStaffToken, url, Map.of("lines", List.of(line(pad, null, 2, 0), line(oil, null, 1, 0))))
@@ -190,6 +204,46 @@ class OpeningBalanceApiTest extends StockCountTestData {
                 .andExpect(status().isOk());
         tx.execute(s -> posting.receiveNewLot(surplusInto(otherStore, count)));
         assertThat(id("SELECT count(*) FROM stock_movement WHERE store_id = ?", otherStore)).isEqualTo(1);
+    }
+
+    /**
+     * R-02: creating a count holds the store row FOR UPDATE and a posting reads it FOR SHARE, so a posting that runs
+     * while an opening count is being created waits for it and then sees it, instead of slipping in unseen.
+     */
+    @Test
+    void aPostingWaitsForAnOpeningCountBeingCreatedAndThenSeesIt() throws Exception {
+        // The surplus needs a committed count to point at; a cancelled one does not hold the warehouse.
+        long source = id("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, status, created_by, "
+                + "cancellation_reason) VALUES (?, 'OPENING', ?, 'WHOLE', 'CANCELLED', ?, 'x') RETURNING id",
+                otherStore, TODAY, otherManager.getId());
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch posted = new CountDownLatch(1);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> creating = pool.submit(() -> tx.execute(s -> {
+                stores.findForUpdateById(otherStore).orElseThrow();
+                jdbc.update("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, status, "
+                        + "created_by) VALUES (?, 'OPENING', ?, 'WHOLE', 'DRAFT', ?)", otherStore, TODAY,
+                        otherManager.getId());
+                locked.countDown();
+                try {
+                    // The posting must still be waiting on the store row when this commits.
+                    assertThat(posted.await(1, TimeUnit.SECONDS)).isFalse();
+                } catch (InterruptedException e) {
+                    throw new IllegalStateException(e);
+                }
+                return null;
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> tx.execute(s -> posting.receiveNewLot(surplusInto(otherStore, source))))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            e -> assertThat(e.getCode()).isEqualTo("MSG301"));
+            posted.countDown();
+            creating.get(10, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(id("SELECT count(*) FROM stock_movement WHERE store_id = ?", otherStore)).isZero();
     }
 
     private NewLotPosting surplusInto(long storeId, long count) {

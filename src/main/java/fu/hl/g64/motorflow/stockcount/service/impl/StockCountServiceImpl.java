@@ -131,6 +131,9 @@ public class StockCountServiceImpl implements StockCountService {
         }
         access.requireManagerOf(user, user.storeId());
         long storeId = user.storeId();
+        // FOR UPDATE: postings read this row FOR SHARE, so nothing moves in the warehouse until this count is saved
+        // (MSG244, MSG301), and a second count cannot be created alongside (MSG230).
+        stores.findForUpdateById(storeId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG05"));
         if (counts.existsByStoreIdAndStatusIn(storeId,
                 List.of(StockCountStatus.DRAFT, StockCountStatus.COUNTING, StockCountStatus.AWAITING_APPROVAL))) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG230");

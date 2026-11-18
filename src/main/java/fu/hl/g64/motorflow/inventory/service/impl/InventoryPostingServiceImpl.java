@@ -493,15 +493,17 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     /**
      * Writes the movement and moves lot_balance and stock_balance by the same quantity (BR-29). MSG301 while the
      * warehouse has an unfinished opening count: anything posted before it is approved would be counted twice, and
-     * would then refuse the approval (MSG244, BR-86).
+     * would then refuse the approval (MSG244, BR-86). The store row is read FOR SHARE first, so a count being created
+     * in that warehouse (which holds it FOR UPDATE) and this posting cannot both pass their checks.
      */
     private void post(StockBalance balance, Lot lot, StockStatus status, int change, BigDecimal unitCost,
                       MovementType type, SourceRef source, String reason, Long by, InventoryPeriod period,
                       LocalDateTime now, LocalDateTime occurredAt) {
-        if (type != MovementType.OPENING_BALANCE && counts.existsByStoreIdAndCountTypeAndStatusIn(
-                balance.getStoreId(), CountType.OPENING, UNFINISHED_COUNTS)) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG301", stores.findById(balance.getStoreId())
-                    .map(Store::getStoreName).orElse("#" + balance.getStoreId()));
+        if (type != MovementType.OPENING_BALANCE) {
+            Store store = stores.findForShareById(balance.getStoreId()).orElseThrow();
+            if (counts.existsByStoreIdAndCountTypeAndStatusIn(store.getId(), CountType.OPENING, UNFINISHED_COUNTS)) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG301", store.getStoreName());
+            }
         }
         LotBalance lotBalance = lotBalance(lot.getId(), balance.getStoreId(), status, now);
         lotBalance.change(change, now);
