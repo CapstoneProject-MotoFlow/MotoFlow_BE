@@ -20,9 +20,11 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -58,6 +60,36 @@ public class AdjustmentController {
         return adjustments.submitStockLoss(user, request);
     }
 
+    @Operation(summary = "Save a stock loss or damage write-off as a draft (SRS 11.2.2 \"Lưu nháp\")",
+            description = "Checked as the preview; evidence may wait. Only the requester sees it, nobody is told. "
+                    + "Listed with status=DRAFT.")
+    @PostMapping("/stock-loss/draft")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AdjustmentDetail saveStockLossDraft(@AuthenticationPrincipal AuthenticatedUser user,
+                                               @Valid @RequestBody StockLossRequest request) {
+        return adjustments.saveStockLossDraft(user, request);
+    }
+
+    @Operation(summary = "Save the caller's draft again: store, source, reason, lines and evidence are replaced")
+    @PutMapping("/{id}")
+    public AdjustmentDetail updateDraft(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id,
+                                        @Valid @RequestBody StockLossRequest request) {
+        return adjustments.updateDraft(user, id, request);
+    }
+
+    @Operation(summary = "Send the caller's draft to Owner (UC-83 steps 6-7): checked again, evidence required")
+    @PostMapping("/{id}/submit")
+    public AdjustmentDetail submitDraft(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id) {
+        return adjustments.submitDraft(user, id);
+    }
+
+    @Operation(summary = "Throw the caller's draft away")
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteDraft(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long id) {
+        adjustments.deleteDraft(user, id);
+    }
+
     @Operation(summary = "Preview the correction of a posted document; nothing is saved (UC-81 steps 2-5)")
     @PostMapping("/corrections/preview")
     public AdjustmentPreview previewCorrection(@AuthenticationPrincipal AuthenticatedUser user,
@@ -74,8 +106,9 @@ public class AdjustmentController {
     }
 
     @Operation(summary = "Adjustment requests of the user's store, or of every store for Owner (UC-82)",
-            description = "status: one or more, e.g. status=REJECTED&status=WITHDRAWN. A Branch Manager also sees the "
-                    + "transit losses they reported for another store as the coordinator.")
+            description = "status: one or more, e.g. status=REJECTED&status=WITHDRAWN; status=DRAFT lists the "
+                    + "caller's own drafts, last saved first. A Branch Manager also sees the transit losses they "
+                    + "reported for another store as the coordinator.")
     @GetMapping
     public PageResponse<AdjustmentSummary> list(@AuthenticationPrincipal AuthenticatedUser user,
                                                 @RequestParam(required = false) AdjustmentType type,

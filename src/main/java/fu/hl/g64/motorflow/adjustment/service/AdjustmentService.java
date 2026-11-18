@@ -28,6 +28,21 @@ public interface AdjustmentService {
     /** UC-81 steps 6-7: saves the correction PENDING, linked to the original, which stays as it is. */
     AdjustmentDetail submitCorrection(AuthenticatedUser user, CorrectionRequest request);
 
+    /**
+     * Review 17/11 R-07 (SRS 11.2.2 "Lưu nháp"): saves a stock loss as a draft after the checks of the preview;
+     * evidence is optional, nobody is told.
+     */
+    AdjustmentDetail saveStockLossDraft(AuthenticatedUser user, StockLossRequest request);
+
+    /** Replaces the whole of the caller's draft. MSG253 for anyone else's; MSG281 once it is no draft. */
+    AdjustmentDetail updateDraft(AuthenticatedUser user, long id, StockLossRequest request);
+
+    /** Sends the caller's draft to Owner exactly as {@link #submitStockLoss} would: checks again, MSG255, PENDING. */
+    AdjustmentDetail submitDraft(AuthenticatedUser user, long id);
+
+    /** Throws the caller's draft away with its lines and files. MSG302 when a transfer loss is linked to it. */
+    void deleteDraft(AuthenticatedUser user, long id);
+
     /** UC-82: a Branch Manager's store, or every store for Owner; newest submission first. */
     PageResponse<AdjustmentSummary> list(AuthenticatedUser user, AdjustmentSearch search, int page, int size);
 

@@ -85,6 +85,36 @@ public class AttachmentServiceImpl implements AttachmentService {
                 uploadedBy, now, purpose)).toList());
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void replace(OwnerType ownerType, long ownerId, List<AttachmentUpload> files, long uploadedBy) {
+        List<AttachmentUpload> wanted = files == null ? List.of() : files;
+        Set<String> keep = new HashSet<>();
+        wanted.forEach(file -> keep.add(file.storageKey().strip()));
+        List<Attachment> current = attachments.findByOwnerTypeAndOwnerIdInOrderByUploadedAtAscIdAsc(ownerType,
+                List.of(ownerId));
+        Set<String> held = new HashSet<>();
+        List<Attachment> dropped = new ArrayList<>();
+        for (Attachment a : current) {
+            if (keep.contains(a.getStorageKey())) {
+                held.add(a.getStorageKey());
+            } else {
+                dropped.add(a);
+            }
+        }
+        attachments.deleteAll(dropped);
+        attachments.flush();
+        attach(ownerType, ownerId, wanted.stream().filter(file -> !held.contains(file.storageKey().strip())).toList(),
+                uploadedBy);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void detachAll(OwnerType ownerType, long ownerId) {
+        attachments.deleteAll(attachments.findByOwnerTypeAndOwnerIdInOrderByUploadedAtAscIdAsc(ownerType,
+                List.of(ownerId)));
+    }
+
     @Transactional(readOnly = true)
     @Override
     public List<AttachmentResponse> list(OwnerType ownerType, long ownerId) {

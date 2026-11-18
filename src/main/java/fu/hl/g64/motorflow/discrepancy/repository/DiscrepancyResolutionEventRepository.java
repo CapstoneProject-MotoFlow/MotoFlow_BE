@@ -38,4 +38,7 @@ public interface DiscrepancyResolutionEventRepository extends JpaRepository<Disc
             where e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.REPLACEMENT_RECEIVED
               and e.goodsReceiptNoteId in :receiptIds""")
     List<Long> findReplacementReceiptIds(Collection<Long> receiptIds);
+
+    /** A transfer loss linked to the adjustment request (UC-76): the request cannot be thrown away. */
+    boolean existsByAdjustmentRequestId(Long adjustmentRequestId);
 }
