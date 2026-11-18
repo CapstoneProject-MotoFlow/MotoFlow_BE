@@ -25,6 +25,7 @@ import fu.hl.g64.motorflow.adjustment.helper.AdjustmentStock;
 import fu.hl.g64.motorflow.adjustment.helper.AdjustmentStock.Change;
 import fu.hl.g64.motorflow.adjustment.helper.DocumentCorrections;
 import fu.hl.g64.motorflow.adjustment.helper.DocumentCorrections.Plan;
+import fu.hl.g64.motorflow.adjustment.repository.AdjustmentAmountLineRepository;
 import fu.hl.g64.motorflow.adjustment.repository.AdjustmentRequestRepository;
 import fu.hl.g64.motorflow.adjustment.repository.AdjustmentStockLineRepository;
 import fu.hl.g64.motorflow.adjustment.service.AdjustmentService;
@@ -112,6 +113,7 @@ public class AdjustmentServiceImpl implements AdjustmentService {
 
     private final AdjustmentRequestRepository requests;
     private final AdjustmentStockLineRepository stockLines;
+    private final AdjustmentAmountLineRepository amountLines;
     private final AdjustmentStock stock;
     private final DocumentCorrections corrections;
     private final StoreRepository stores;
@@ -672,9 +674,18 @@ public class AdjustmentServiceImpl implements AdjustmentService {
                 .sum();
     }
 
+    /**
+     * What an applied request changed: the value of the stock it posted, or for one that posted no stock (a corrected
+     * payment or opening receivable) the money it changed. The same rule as the document search (UC-78, review 18/11
+     * R-04).
+     */
     private Map<Long, Long> postedValues(Collection<Long> ids) {
-        return movements.sumValueByAdjustmentRequest(ids).stream()
-                .collect(Collectors.toMap(row -> (Long) row[0], row -> ((Number) row[1]).longValue()));
+        Map<Long, Long> values = new HashMap<>();
+        amountLines.sumAmountByAdjustmentRequest(ids)
+                .forEach(row -> values.put((Long) row[0], ((Number) row[1]).longValue()));
+        movements.sumValueByAdjustmentRequest(ids)
+                .forEach(row -> values.put((Long) row[0], ((Number) row[1]).longValue()));
+        return values;
     }
 
     static AdjustmentSource source(Source source) {
