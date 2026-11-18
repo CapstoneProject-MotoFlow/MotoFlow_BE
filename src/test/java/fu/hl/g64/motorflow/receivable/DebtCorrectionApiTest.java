@@ -114,7 +114,8 @@ class DebtCorrectionApiTest extends ApiTestUsers {
         send(post("/api/v1/adjustment-requests/" + request + "/approve"), ownerToken)
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"))
                 .andExpect(jsonPath("$.correction.before.amount").value(1_200_000))
-                .andExpect(jsonPath("$.correction.after.amount").value(1_000_000));
+                .andExpect(jsonPath("$.correction.after.amount").value(1_000_000))
+                .andExpect(jsonPath("$.totalValue").value(-200_000));
         debts().andExpect(jsonPath("$.debt").value(500_000))
                 .andExpect(jsonPath("$.debts[*].id", contains((int) opening, (int) creditSale)))
                 .andExpect(jsonPath("$.debts[*].collectedAmount", contains(500_000, 500_000)))
@@ -147,7 +148,12 @@ class DebtCorrectionApiTest extends ApiTestUsers {
 
         long request = idOf(send(post(CORRECTIONS), managerToken, amount("OPENING_RECEIVABLE", opening, 600_000))
                 .andExpect(status().isCreated()));
-        send(post("/api/v1/adjustment-requests/" + request + "/approve"), ownerToken).andExpect(status().isOk());
+        send(post("/api/v1/adjustment-requests/" + request + "/approve"), ownerToken).andExpect(status().isOk())
+                // Review 18/11 R-04: the money it changed, as in the document search.
+                .andExpect(jsonPath("$.totalValue").value(100_000));
+        send(get("/api/v1/adjustment-requests").param("status", "APPLIED"), ownerToken)
+                .andExpect(jsonPath("$.items[0].id").value((int) request))
+                .andExpect(jsonPath("$.items[0].totalValue").value(100_000));
         debts().andExpect(jsonPath("$.debts[0].correctionAmount").value(100_000))
                 .andExpect(jsonPath("$.debts[0].remainingAmount").value(100_000))
                 .andExpect(jsonPath("$.debts[0].status").value("PARTIALLY_PAID"));
