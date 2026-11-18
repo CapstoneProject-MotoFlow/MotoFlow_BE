@@ -11,6 +11,9 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.catalog.service.VehicleModelService;
+import fu.hl.g64.motorflow.common.config.CacheConfig;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
@@ -33,6 +36,8 @@ public class VehicleModelServiceImpl implements VehicleModelService {
     private final AuditLogRepository auditLog;
     private final Clock clock;
 
+    @Cacheable(cacheNames = CacheConfig.VEHICLE_MODELS,
+            key = "(#q == null ? '' : #q.strip().toLowerCase()) + '|' + #vehicleType + '|' + #status")
     @Transactional(readOnly = true)
     @Override
     public List<VehicleModelResponse> list(String q, VehicleType vehicleType, VehicleModelStatus status) {
@@ -52,6 +57,7 @@ public class VehicleModelServiceImpl implements VehicleModelService {
         return VehicleModelResponse.from(find(id));
     }
 
+    @CacheEvict(cacheNames = CacheConfig.VEHICLE_MODELS, allEntries = true)
     @Transactional
     @Override
     public VehicleModelResponse create(AuthenticatedUser actor, VehicleModelRequest request) {
@@ -63,6 +69,7 @@ public class VehicleModelServiceImpl implements VehicleModelService {
         return VehicleModelResponse.from(model);
     }
 
+    @CacheEvict(cacheNames = CacheConfig.VEHICLE_MODELS, allEntries = true)
     @Transactional
     @Override
     public VehicleModelResponse update(AuthenticatedUser actor, long id, VehicleModelRequest request) {
@@ -76,6 +83,7 @@ public class VehicleModelServiceImpl implements VehicleModelService {
         return VehicleModelResponse.from(model);
     }
 
+    @CacheEvict(cacheNames = CacheConfig.VEHICLE_MODELS, allEntries = true)
     @Transactional
     @Override
     public void changeStatus(AuthenticatedUser actor, long id, VehicleModelStatus status) {

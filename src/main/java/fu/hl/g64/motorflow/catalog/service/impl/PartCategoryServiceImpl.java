@@ -12,6 +12,9 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
+import fu.hl.g64.motorflow.common.config.CacheConfig;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
@@ -41,6 +44,7 @@ public class PartCategoryServiceImpl implements PartCategoryService {
     private final AuditLogRepository auditLog;
     private final Clock clock;
 
+    @Cacheable(cacheNames = CacheConfig.CATEGORY_TREE, key = "#vehicleType == null ? 'ALL' : #vehicleType.name()")
     @Transactional(readOnly = true)
     @Override
     public List<PartCategoryResponse> tree(VehicleType vehicleType) {
@@ -59,6 +63,7 @@ public class PartCategoryServiceImpl implements PartCategoryService {
         return node(category, byParent(categories.findAll(Sort.by("categoryName"))));
     }
 
+    @CacheEvict(cacheNames = {CacheConfig.CATEGORY_TREE, CacheConfig.CATEGORY_DESCENDANTS}, allEntries = true)
     @Transactional
     @Override
     public PartCategoryResponse create(AuthenticatedUser actor, PartCategoryRequest request) {
@@ -75,6 +80,7 @@ public class PartCategoryServiceImpl implements PartCategoryService {
         return PartCategoryResponse.from(category, List.of());
     }
 
+    @CacheEvict(cacheNames = {CacheConfig.CATEGORY_TREE, CacheConfig.CATEGORY_DESCENDANTS}, allEntries = true)
     @Transactional
     @Override
     public PartCategoryResponse update(AuthenticatedUser actor, long id, PartCategoryRequest request) {
@@ -99,6 +105,7 @@ public class PartCategoryServiceImpl implements PartCategoryService {
         return node(category, childrenByParent);
     }
 
+    @CacheEvict(cacheNames = {CacheConfig.CATEGORY_TREE, CacheConfig.CATEGORY_DESCENDANTS}, allEntries = true)
     @Transactional
     @Override
     public void changeStatus(AuthenticatedUser actor, long id, PartCategoryStatus status) {
@@ -119,11 +126,12 @@ public class PartCategoryServiceImpl implements PartCategoryService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG55"));
     }
 
+    @Cacheable(cacheNames = CacheConfig.CATEGORY_DESCENDANTS, key = "#categoryId")
     @Override
     public List<Long> withDescendants(long categoryId) {
         List<Long> ids = new ArrayList<>(List.of(categoryId));
         descendants(categoryId, byParent(categories.findAll())).forEach(c -> ids.add(c.getId()));
-        return ids;
+        return List.copyOf(ids);
     }
 
     private void requireUsableParent(Long selfId, long parentId, VehicleType vehicleType) {
