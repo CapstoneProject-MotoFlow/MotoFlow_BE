@@ -1,0 +1,25 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/reports/inventory-operations?from={{weekAgo}}&to={{today}}&size=10"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Đúng khoảng ngày, không theo tháng', () => {
+          pm.expect(b.month).to.eql(null);
+          pm.expect(b.from).to.eql(pm.collectionVariables.get('weekAgo'));
+          pm.expect(b.to).to.eql(pm.collectionVariables.get('today'));
+      });
+      pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r =>
+          pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty)));
+      pm.test('Cộng các nguồn ra đúng cột nhập và xuất', () => b.page.items.forEach(r => {
+          pm.expect(r.bySource.reduce((s, x) => s + x.inQty, 0)).to.eql(r.inQty);
+          pm.expect(r.bySource.reduce((s, x) => s + x.outQty, 0)).to.eql(r.outQty);
+      }));
+    language: text/javascript
+order: 4000

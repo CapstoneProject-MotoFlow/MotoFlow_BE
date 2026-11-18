@@ -1,0 +1,839 @@
+{
+  "info": {
+    "name": "MotoFlow - Iteration 3",
+    "description": "Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.\n\n- Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026). Dữ liệu demo có kỳ tháng trước đã đóng và kỳ tháng này đang mở.\n- Cả collection chỉ đọc dữ liệu: không đóng kỳ nào, không tạo phiếu nào. Các request ghi đều là ca bị từ chối.\n- bm.kho là Branch Manager kho tổng; kho này đã có biến động nên phiếu kiểm kê đầu kỳ bị MSG244.\n- Ngày hôm nay, tháng này và 7 ngày gần đây tính theo giờ Việt Nam (UTC+7) trong script chạy trước request đầu tiên của thư mục báo cáo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Đăng nhập",
+      "item": [
+        {
+          "name": "Owner đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{ownerUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('ownerToken', b.accessToken);",
+                  "pm.test('Vai trò OWNER', () => pm.expect(b.user.role).to.eql('OWNER'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Branch Manager đăng nhập",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{bmUsername}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.collectionVariables.set('bmToken', b.accessToken);",
+                  "pm.collectionVariables.set('bmStoreId', b.user.storeId);",
+                  "// Any other id is refused with MSG05, whether or not that store exists.",
+                  "pm.collectionVariables.set('otherStoreId', b.user.storeId + 1);",
+                  "pm.test('Vai trò BRANCH_MANAGER', () => pm.expect(b.user.role).to.eql('BRANCH_MANAGER'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Kỳ kho (UC-99, UC-100)",
+      "item": [
+        {
+          "name": "Owner xem danh sách kỳ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có ít nhất 1 kỳ', () => pm.expect(b.length).to.be.above(0));",
+                  "pm.test('Mới nhất trước', () => {",
+                  "    const months = b.map(p => p.month);",
+                  "    pm.expect(months).to.eql([...months].sort().reverse());",
+                  "});",
+                  "pm.test('Chỉ 1 kỳ được đánh dấu đóng tiếp theo, và đó là kỳ mở', () => {",
+                  "    const next = b.filter(p => p.nextToClose);",
+                  "    pm.expect(next.length).to.be.at.most(1);",
+                  "    next.forEach(p => pm.expect(p.status).to.eql('OPEN'));",
+                  "});",
+                  "const next = b.find(p => p.nextToClose) || b[0];",
+                  "pm.collectionVariables.set('periodId', next.id);",
+                  "const closed = b.find(p => p.status === 'CLOSED');",
+                  "pm.collectionVariables.set('closedPeriodId', closed ? closed.id : next.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem số dư kỳ đang mở",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods/{{periodId}}/balances?size=5",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Kỳ mở là số tạm tính', () => pm.expect(b.provisional).to.eql(b.period.status === 'OPEN'));",
+                  "pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r => {",
+                  "    pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty);",
+                  "    pm.expect(r.closingValue).to.eql(r.openingValue + r.inValue - r.outValue);",
+                  "}));",
+                  "pm.test('Có tổng giá trị', () => pm.expect(b.totals).to.have.property('closingValue'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem số dư kỳ đã đóng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods/{{closedPeriodId}}/balances?size=5",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Kỳ đã đóng không phải tạm tính', () => pm.expect(b.provisional).to.eql(b.period.status === 'OPEN'));",
+                  "pm.test('Có giá BQ kỳ', () => b.page.items.forEach(r => pm.expect(r).to.have.property('periodAvgUnitCost')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem trước khi đóng kỳ",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods/{{periodId}}/closing-preview",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có kết luận đóng được hay không', () => pm.expect(b.canClose).to.be.a('boolean'));",
+                  "pm.test('Lý do trống khi đóng được, nếu không là một trong MSG294 đến MSG297', () => {",
+                  "    if (b.canClose) pm.expect(b.reason).to.eql(null);",
+                  "    else pm.expect(['MSG294', 'MSG295', 'MSG296', 'MSG297']).to.include(b.reason);",
+                  "});",
+                  "pm.test('Có danh sách chặn và cảnh báo', () => {",
+                  "    pm.expect(b.blockingCounts).to.be.an('array');",
+                  "    pm.expect(b.unconfirmedReceipts).to.be.an('array');",
+                  "    pm.expect(b.transfersInTransit).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner đóng kỳ tháng này bị MSG297",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods/{{periodId}}/close",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Demo data: last month is closed, so this month's period is next, but its month has not ended.",
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG297 hoặc MSG295', () => pm.expect(['MSG297', 'MSG295']).to.include(pm.response.json().code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner đóng kỳ đã đóng bị MSG296",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods/{{closedPeriodId}}/close",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG296', () => pm.expect(pm.response.json().code).to.eql('MSG296'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Đóng kỳ không tồn tại bị MSG293",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods/999999999/close",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG293', () => pm.expect(pm.response.json().code).to.eql('MSG293'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM không xem được kỳ kho",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory-periods",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Báo cáo nhập xuất tồn (UC-88)",
+      "item": [
+        {
+          "name": "Owner xem tháng này",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/reports/inventory-operations?month={{month}}&size=10",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Vietnam time (UTC+7); later requests of this folder reuse the variables.",
+                  "const vn = days => new Date(Date.now() + 7 * 3600 * 1000 + days * 86400 * 1000).toISOString().slice(0, 10);",
+                  "pm.collectionVariables.set('today', vn(0));",
+                  "pm.collectionVariables.set('weekAgo', vn(-6));",
+                  "pm.collectionVariables.set('month', vn(0).slice(0, 7));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Đúng tháng đã hỏi', () => pm.expect(b.month).to.eql(pm.collectionVariables.get('month')));",
+                  "pm.test('Owner thấy giá trị và tổng', () => {",
+                  "    pm.expect(b.withValues).to.eql(true);",
+                  "    pm.expect(b.totals.bySource).to.be.an('array');",
+                  "});",
+                  "pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r =>",
+                  "    pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty)));",
+                  "pm.test('Cộng các nguồn ra đúng cột nhập và xuất', () => b.page.items.forEach(r => {",
+                  "    pm.expect(r.bySource.reduce((s, x) => s + x.inQty, 0)).to.eql(r.inQty);",
+                  "    pm.expect(r.bySource.reduce((s, x) => s + x.outQty, 0)).to.eql(r.outQty);",
+                  "}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem kho mình, chỉ số lượng",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/reports/inventory-operations?month={{month}}&size=10",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Không có giá trị (BR-72)', () => {",
+                  "    pm.expect(b.withValues).to.eql(false);",
+                  "    pm.expect(b.totals).to.eql(null);",
+                  "    b.page.items.forEach(r => {",
+                  "        pm.expect(r.openingValue).to.eql(null);",
+                  "        pm.expect(r.closingValue).to.eql(null);",
+                  "    });",
+                  "});",
+                  "pm.test('Chỉ kho của BM', () => b.page.items.forEach(r =>",
+                  "    pm.expect(r.storeId).to.eql(Number(pm.collectionVariables.get('bmStoreId')))));",
+                  "pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r =>",
+                  "    pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty)));",
+                  "pm.test('Cộng các nguồn ra đúng cột nhập và xuất', () => b.page.items.forEach(r => {",
+                  "    pm.expect(r.bySource.reduce((s, x) => s + x.inQty, 0)).to.eql(r.inQty);",
+                  "    pm.expect(r.bySource.reduce((s, x) => s + x.outQty, 0)).to.eql(r.outQty);",
+                  "}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem kho khác bị MSG05",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/reports/inventory-operations?storeId={{otherStoreId}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('Mã lỗi MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem 7 ngày gần đây",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/reports/inventory-operations?from={{weekAgo}}&to={{today}}&size=10",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Đúng khoảng ngày, không theo tháng', () => {",
+                  "    pm.expect(b.month).to.eql(null);",
+                  "    pm.expect(b.from).to.eql(pm.collectionVariables.get('weekAgo'));",
+                  "    pm.expect(b.to).to.eql(pm.collectionVariables.get('today'));",
+                  "});",
+                  "pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r =>",
+                  "    pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty)));",
+                  "pm.test('Cộng các nguồn ra đúng cột nhập và xuất', () => b.page.items.forEach(r => {",
+                  "    pm.expect(r.bySource.reduce((s, x) => s + x.inQty, 0)).to.eql(r.inQty);",
+                  "    pm.expect(r.bySource.reduce((s, x) => s + x.outQty, 0)).to.eql(r.outQty);",
+                  "}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Gửi cả tháng và khoảng ngày bị MSG02",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/reports/inventory-operations?month={{month}}&from={{weekAgo}}&to={{today}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Khoảng ngày quá 366 ngày bị MSG264",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/reports/inventory-operations?from=2020-01-01&to={{today}}",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG264', () => pm.expect(pm.response.json().code).to.eql('MSG264'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Kiểm kê đầu kỳ (UC-96)",
+      "item": [
+        {
+          "name": "BM lập phiếu đầu kỳ cho kho đã có biến động bị MSG244",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"countType\": \"OPENING\",\n  \"countDate\": \"{{today}}\",\n  \"scopeType\": \"WHOLE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Mã lỗi MSG244', () => pm.expect(pm.response.json().code).to.eql('MSG244'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem giá vốn đầu kỳ của phiếu không tồn tại bị MSG245",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stock-counts/999999999/opening-costs",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Mã lỗi MSG245', () => pm.expect(pm.response.json().code).to.eql('MSG245'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Giá vốn ban đầu bằng 0 bị từ chối",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/999999999/opening-costs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"costs\": [\n    { \"productId\": 1, \"initialUnitCost\": 0 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mã lỗi MSG02', () => pm.expect(pm.response.json().code).to.eql('MSG02'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM không nhập được giá vốn ban đầu",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/999999999/opening-costs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"costs\": [\n    { \"productId\": 1, \"initialUnitCost\": 1000 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM không gửi được dòng đầu kỳ (chỉ Staff đếm)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/stock-counts/999999999/opening-lines",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lines\": [\n    { \"productId\": 1, \"expiryDate\": null, \"countedQty\": 1 }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "ownerUsername",
+      "value": "owner",
+      "type": "string"
+    },
+    {
+      "key": "bmUsername",
+      "value": "bm.kho",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Demo@2026",
+      "type": "string"
+    }
+  ]
+}

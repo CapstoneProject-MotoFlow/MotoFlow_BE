@@ -1,0 +1,13 @@
+$kind: collection
+description: |-
+  Chạy cả collection bằng Runner, đúng thứ tự từ trên xuống: các request sau dùng token và id request trước lưu vào biến collection.
+
+  - Cần dữ liệu demo: chạy scripts/seed/seed_demo_data.sql trên DB đã migrate (mọi tài khoản demo có mật khẩu Demo@2026). Dữ liệu demo có kỳ tháng trước đã đóng và kỳ tháng này đang mở.
+  - Cả collection chỉ đọc dữ liệu: không đóng kỳ nào, không tạo phiếu nào. Các request ghi đều là ca bị từ chối.
+  - bm.kho là Branch Manager kho tổng; kho này đã có biến động nên phiếu kiểm kê đầu kỳ bị MSG244.
+  - Ngày hôm nay, tháng này và 7 ngày gần đây tính theo giờ Việt Nam (UTC+7) trong script chạy trước request đầu tiên của thư mục báo cáo.
+variables:
+  baseUrl: http://localhost:8080
+  ownerUsername: owner
+  bmUsername: bm.kho
+  password: Demo@2026

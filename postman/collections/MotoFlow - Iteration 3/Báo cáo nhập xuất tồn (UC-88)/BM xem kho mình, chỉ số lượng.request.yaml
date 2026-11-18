@@ -1,0 +1,30 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/reports/inventory-operations?month={{month}}&size=10"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Không có giá trị (BR-72)', () => {
+          pm.expect(b.withValues).to.eql(false);
+          pm.expect(b.totals).to.eql(null);
+          b.page.items.forEach(r => {
+              pm.expect(r.openingValue).to.eql(null);
+              pm.expect(r.closingValue).to.eql(null);
+          });
+      });
+      pm.test('Chỉ kho của BM', () => b.page.items.forEach(r =>
+          pm.expect(r.storeId).to.eql(Number(pm.collectionVariables.get('bmStoreId')))));
+      pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r =>
+          pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty)));
+      pm.test('Cộng các nguồn ra đúng cột nhập và xuất', () => b.page.items.forEach(r => {
+          pm.expect(r.bySource.reduce((s, x) => s + x.inQty, 0)).to.eql(r.inQty);
+          pm.expect(r.bySource.reduce((s, x) => s + x.outQty, 0)).to.eql(r.outQty);
+      }));
+    language: text/javascript
+order: 2000

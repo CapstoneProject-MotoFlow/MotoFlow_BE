@@ -1,0 +1,28 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory-periods"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có ít nhất 1 kỳ', () => pm.expect(b.length).to.be.above(0));
+      pm.test('Mới nhất trước', () => {
+          const months = b.map(p => p.month);
+          pm.expect(months).to.eql([...months].sort().reverse());
+      });
+      pm.test('Chỉ 1 kỳ được đánh dấu đóng tiếp theo, và đó là kỳ mở', () => {
+          const next = b.filter(p => p.nextToClose);
+          pm.expect(next.length).to.be.at.most(1);
+          next.forEach(p => pm.expect(p.status).to.eql('OPEN'));
+      });
+      const next = b.find(p => p.nextToClose) || b[0];
+      pm.collectionVariables.set('periodId', next.id);
+      const closed = b.find(p => p.status === 'CLOSED');
+      pm.collectionVariables.set('closedPeriodId', closed ? closed.id : next.id);
+    language: text/javascript
+order: 1000

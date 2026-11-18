@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/inventory-periods/{{periodId}}/close"
+method: POST
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      // Demo data: last month is closed, so this month's period is next, but its month has not ended.
+      pm.test('HTTP 409', () => pm.response.to.have.status(409));
+      pm.test('Mã lỗi MSG297 hoặc MSG295', () => pm.expect(['MSG297', 'MSG295']).to.include(pm.response.json().code));
+    language: text/javascript
+order: 5000

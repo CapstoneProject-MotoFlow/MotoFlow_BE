@@ -1,0 +1,33 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/reports/inventory-operations?month={{month}}&size=10"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: beforeRequest
+    code: |-
+      // Vietnam time (UTC+7); later requests of this folder reuse the variables.
+      const vn = days => new Date(Date.now() + 7 * 3600 * 1000 + days * 86400 * 1000).toISOString().slice(0, 10);
+      pm.collectionVariables.set('today', vn(0));
+      pm.collectionVariables.set('weekAgo', vn(-6));
+      pm.collectionVariables.set('month', vn(0).slice(0, 7));
+    language: text/javascript
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Đúng tháng đã hỏi', () => pm.expect(b.month).to.eql(pm.collectionVariables.get('month')));
+      pm.test('Owner thấy giá trị và tổng', () => {
+          pm.expect(b.withValues).to.eql(true);
+          pm.expect(b.totals.bySource).to.be.an('array');
+      });
+      pm.test('Cuối kỳ = đầu kỳ + nhập − xuất', () => b.page.items.forEach(r =>
+          pm.expect(r.closingQty).to.eql(r.openingQty + r.inQty - r.outQty)));
+      pm.test('Cộng các nguồn ra đúng cột nhập và xuất', () => b.page.items.forEach(r => {
+          pm.expect(r.bySource.reduce((s, x) => s + x.inQty, 0)).to.eql(r.inQty);
+          pm.expect(r.bySource.reduce((s, x) => s + x.outQty, 0)).to.eql(r.outQty);
+      }));
+    language: text/javascript
+order: 1000
