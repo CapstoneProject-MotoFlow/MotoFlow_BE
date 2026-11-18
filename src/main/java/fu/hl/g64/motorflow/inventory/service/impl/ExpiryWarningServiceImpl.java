@@ -14,7 +14,9 @@ import fu.hl.g64.motorflow.pricing.entity.enums.PolicyType;
 import fu.hl.g64.motorflow.pricing.helper.PricingVersions;
 import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.common.config.CacheConfig;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -60,6 +62,7 @@ public class ExpiryWarningServiceImpl implements ExpiryWarningService {
     }
 
     // UC-104
+    @CacheEvict(cacheNames = CacheConfig.PRICING_RULES, allEntries = true)
     @Transactional
     @Override
     public ExpiryWarningResponse setExpiryWarning(AuthenticatedUser owner, ExpiryWarningRequest request) {

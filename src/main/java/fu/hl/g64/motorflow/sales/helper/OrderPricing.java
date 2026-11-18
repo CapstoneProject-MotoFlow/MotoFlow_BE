@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.sales.helper;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
 import fu.hl.g64.motorflow.pricing.entity.enums.PolicyType;
+import fu.hl.g64.motorflow.pricing.helper.PricingRules;
 import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,7 @@ public class OrderPricing {
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private final PricingPolicyRepository policies;
+    private final PricingRules rules;
 
     /** A quantity of a part at its reference price (BR-14) and actual unit price (BR-13). */
     public record Priced(int quantity, long referencePrice, long actualUnitPrice) {
@@ -126,7 +128,6 @@ public class OrderPricing {
 
     private BigDecimal inEffect(PolicyType type, LocalDateTime now) {
         // Newest first: the first version that has started is the one in effect.
-        return policies.findChainVersions(type).stream().filter(v -> !v.isPending(now)).findFirst()
-                .map(PricingPolicy::getRate).orElse(null);
+        return rules.rateInEffect(type, now);
     }
 }
