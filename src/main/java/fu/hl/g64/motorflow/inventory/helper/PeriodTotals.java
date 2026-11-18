@@ -77,17 +77,32 @@ public class PeriodTotals {
 
     /** Worked out from the ledger, whatever the period's status: what closing a period stores (UC-100). */
     public List<Line> fromLedger(InventoryPeriod period, Collection<Long> storeIds) {
+        return fromLedger(period.getPeriodMonth(), period.getId(), storeIds);
+    }
+
+    /**
+     * Worked out from the ledger for the month starting on {@code month}, split by movement type (UC-88). A month
+     * with no movement has no period row: it then shows the stock carried in from before, with nothing in or out.
+     */
+    public List<Line> forMonth(LocalDate month, Collection<Long> storeIds) {
+        return periods.findByPeriodMonth(month).map(p -> fromLedger(p, storeIds))
+                .orElseGet(() -> fromLedger(month, null, storeIds));
+    }
+
+    private List<Line> fromLedger(LocalDate month, Long periodId, Collection<Long> storeIds) {
         InventoryPeriod base = periods.findFirstByStatusAndPeriodMonthBeforeOrderByPeriodMonthDesc(
-                InventoryPeriodStatus.CLOSED, period.getPeriodMonth()).orElse(null);
+                InventoryPeriodStatus.CLOSED, month).orElse(null);
         Map<Key, Builder> lines = new TreeMap<>(Comparator.comparingLong(Key::storeId).thenComparingLong(Key::productId));
         for (Row r : ledger.opening(base == null ? null : base.getId(),
-                base == null ? BEFORE_ANY_PERIOD : base.getPeriodMonth(), period.getPeriodMonth(), storeIds)) {
+                base == null ? BEFORE_ANY_PERIOD : base.getPeriodMonth(), month, storeIds)) {
             line(lines, r).opening = new Amount(r.inQty(), r.inValue());
         }
-        for (Row r : ledger.flows(period.getId(), storeIds)) {
-            line(lines, r).add(MovementType.valueOf(r.movementType()), r);
+        if (periodId != null) {
+            for (Row r : ledger.flows(periodId, storeIds)) {
+                line(lines, r).add(MovementType.valueOf(r.movementType()), r);
+            }
         }
-        for (Row r : ledger.inTransit(period.getPeriodMonth(), storeIds)) {
+        for (Row r : ledger.inTransit(month, storeIds)) {
             line(lines, r).inTransit = new Amount(r.inQty(), r.inValue());
         }
         return lines.entrySet().stream()
