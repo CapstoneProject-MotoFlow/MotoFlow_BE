@@ -55,6 +55,42 @@ public class ReplenishmentRequest {
         return request;
     }
 
+    /**
+     * PM 17/11: a draft only its creator sees, not a request until {@link #submit}. Its created_at is when it was last
+     * saved.
+     */
+    public static ReplenishmentRequest createDraft(Long requestingStoreId, String note, Long createdBy,
+                                                   LocalDateTime now) {
+        ReplenishmentRequest request = create(requestingStoreId, note, createdBy, now);
+        request.status = ReplenishmentRequestStatus.DRAFT;
+        return request;
+    }
+
+    /** The creator rewrites the whole draft. */
+    public void changeDraft(Long requestingStoreId, String note, LocalDateTime now) {
+        requireDraft();
+        this.requestingStoreId = requestingStoreId;
+        this.note = note;
+        createdAt = now;
+    }
+
+    /** The draft becomes a request awaiting coordination, created now (UC-68). */
+    public void submit(LocalDateTime now) {
+        requireDraft();
+        status = ReplenishmentRequestStatus.AWAITING_COORDINATION;
+        createdAt = now;
+    }
+
+    public boolean isDraft() {
+        return status == ReplenishmentRequestStatus.DRAFT;
+    }
+
+    private void requireDraft() {
+        if (!isDraft()) {
+            throw new IllegalStateException("replenishment request " + id + " is not a draft");
+        }
+    }
+
     /** UC-71: the first transfer order or purchase hand-over starts the coordination. */
     public void startCoordination() {
         if (status == ReplenishmentRequestStatus.AWAITING_COORDINATION) {

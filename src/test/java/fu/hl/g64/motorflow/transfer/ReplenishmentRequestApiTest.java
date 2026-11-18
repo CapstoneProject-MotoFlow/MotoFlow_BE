@@ -20,6 +20,7 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.empty;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -193,6 +194,38 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
 
         jdbc.update("UPDATE replenishment_request SET status = 'CLOSED', closed_at = now()");
         suggestions("bm", null).andExpect(jsonPath("$[*].sku", contains("MA-PHANH")));
+    }
+
+    @Test
+    void aDraftIsNotARequestYet() throws Exception {
+        stock(branch, brake, 1, 5);
+        stock(central, brake, 10, null);
+        long submitted = created("bm", null, line(chain, 1));
+        long draft = created("bm", null, line(brake, 4));
+        jdbc.update("UPDATE replenishment_request SET status = 'DRAFT' WHERE id = ?", draft);
+
+        // PM 17/11 N4: no list, detail, count or suggestion sees it.
+        list("bm").andExpect(jsonPath("$.items[*].id", contains((int) submitted)));
+        list("owner").andExpect(jsonPath("$.items[*].id", contains((int) submitted)));
+        list("bmkt", "status", "DRAFT").andExpect(status().isOk()).andExpect(jsonPath("$.items", empty()));
+        list("bmkt", "q", "YBS-" + draft).andExpect(jsonPath("$.items", empty()));
+        detail("bm", draft).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG95"));
+        suggestions("bm", null).andExpect(jsonPath("$[*].sku", contains("MA-PHANH")));
+        mvc.perform(get("/api/v1/home").header(HttpHeaders.AUTHORIZATION, signIn("bmkt")))
+                .andExpect(jsonPath("$.shortcuts[?(@.key == 'REPLENISHMENTS_AWAITING_COORDINATION')].count",
+                        contains(1)));
+
+        // Nothing can be coordinated from it.
+        mvc.perform(put(REQUESTS + "/" + draft + "/to-purchase").header(HttpHeaders.AUTHORIZATION, signIn("owner"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("lines", List.of(Map.of("productId", brake, "toPurchaseQty", 1))))))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG95"));
+        mvc.perform(post("/api/v1/transfer-orders").header(HttpHeaders.AUTHORIZATION, signIn("owner"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("replenishmentRequestId", draft, "sourceStoreId", central,
+                                "destStoreId", branch, "lines", List.of(Map.of("productId", brake, "plannedQty", 1))))))
+                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG95"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM transfer_order", Long.class)).isZero();
     }
 
     @Test

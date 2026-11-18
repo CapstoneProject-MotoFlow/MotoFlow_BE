@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/replenishment-requests/drafts"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{branchBmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const ids = pm.response.json().items.map(i => i.id);
+      pm.test('Có nháp vừa lưu', () => pm.expect(ids).to.include(Number(pm.collectionVariables.get('draftId'))));
+    language: text/javascript
+order: 13000

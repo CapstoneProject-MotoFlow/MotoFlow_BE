@@ -17,12 +17,26 @@ import java.util.Optional;
 
 public interface ReplenishmentRequestRepository extends JpaRepository<ReplenishmentRequest, Long> {
 
+    /** The number of requests in a status; drafts have their own status, so they are never counted with another. */
     long countByStatus(ReplenishmentRequestStatus status);
 
-    /** UC-71: orders for one request and its purchase hand-over are planned one after the other. */
+    /** A submitted request: a draft is not one (PM 17/11). */
+    @Query("select r from ReplenishmentRequest r where r.id = :id and " + SUBMITTED)
+    Optional<ReplenishmentRequest> findSubmitted(@Param("id") long id);
+
+    /**
+     * UC-71: orders for one request and its purchase hand-over are planned one after the other. A draft is not a
+     * request yet, so it cannot be coordinated (PM 17/11).
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select r from ReplenishmentRequest r where r.id = :id")
+    @Query("select r from ReplenishmentRequest r where r.id = :id and " + SUBMITTED)
     Optional<ReplenishmentRequest> findByIdForUpdate(@Param("id") long id);
+
+    /** PM 17/11: a draft, locked while its creator saves, submits or deletes it. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from ReplenishmentRequest r where r.id = :id and "
+            + "r.status = fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.DRAFT")
+    Optional<ReplenishmentRequest> findDraftForUpdate(@Param("id") long id);
 
     /** UC-69: one request with the totals of its lines. */
     interface RequestRow {
@@ -44,8 +58,12 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
         String getSupplierName();
     }
 
-    String SEARCH = """
-            where (:status is null or r.status = :status)
+    /** Every status but DRAFT: what the creator has not submitted is in no list or count (PM 17/11 N4). */
+    String SUBMITTED = "r.status <> fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.DRAFT";
+
+    String SEARCH = "where " + SUBMITTED + """
+
+              and (:status is null or r.status = :status)
               and (:storeId is null or r.requestingStoreId = :storeId)
               and cast(r.createdAt as LocalDate) >= coalesce(:from, cast(r.createdAt as LocalDate))
               and cast(r.createdAt as LocalDate) <= coalesce(:to, cast(r.createdAt as LocalDate))
@@ -72,6 +90,32 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
                             @Param("from") LocalDate from, @Param("to") LocalDate to,
                             @Param("hasQ") boolean hasQ, @Param("qId") Long qId, @Param("pattern") String pattern,
                             Pageable pageable);
+
+    /** PM 17/11: the caller's drafts, last saved first; q and storeId as in {@link #search}. */
+    @Query(value = """
+            select r as request, s.storeName as storeName, u.fullName as createdByName,
+                   (select count(l) from ReplenishmentRequestLine l
+                    where l.replenishmentRequestId = r.id) as lineCount,
+                   (select coalesce(sum(l.requestedQty), 0) from ReplenishmentRequestLine l
+                    where l.replenishmentRequestId = r.id) as totalRequestedQty
+            from ReplenishmentRequest r
+            join Store s on s.id = r.requestingStoreId
+            join UserAccount u on u.id = r.createdBy
+            """ + DRAFTS + """
+            order by r.createdAt desc, r.id desc
+            """,
+            countQuery = "select count(r) from ReplenishmentRequest r " + DRAFTS)
+    Page<RequestRow> findDrafts(@Param("createdBy") long createdBy, @Param("storeId") Long storeId,
+                                @Param("hasQ") boolean hasQ, @Param("qId") Long qId, @Param("pattern") String pattern,
+                                Pageable pageable);
+
+    String DRAFTS = """
+            where r.status = fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus.DRAFT
+              and r.createdBy = :createdBy
+              and (:storeId is null or r.requestingStoreId = :storeId)
+              and (:hasQ = false or r.id = :qId
+                   or r.requestingStoreId in (select qs.id from Store qs where lower(qs.storeName) like :pattern escape '\\'))
+            """;
 
     @Query("""
             select p as purchaseOrder, s.supplierName as supplierName
