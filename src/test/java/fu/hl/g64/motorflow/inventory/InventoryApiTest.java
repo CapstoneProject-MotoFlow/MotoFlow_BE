@@ -190,6 +190,7 @@ class InventoryApiTest extends ApiTestUsers {
         stock("owner", "?expiryAlertOnly=true").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH", "XICH-428")));
 
         jdbc.update("DELETE FROM pricing_policy WHERE policy_type = 'EXPIRY_WARNING'");
+        clearCaches(); // the expiry warning was removed with SQL, behind the application cache
         stock("owner", "?expiryAlertOnly=true").andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
 
         jdbc.update("UPDATE lot SET status = 'EXPIRED', expiry_date = '2026-12-31' WHERE store_id = ?", branch);
