@@ -148,6 +148,33 @@ class ReportApiTest extends SalesOrderTestData {
 
     // ------------------------------------------------------------------------------------------------------------
 
+    @Test
+    void aCorrectedDebtPaymentKeepsItsRecordedCollectionAndOnlyItsNewSplitCounts() throws Exception {
+        // 150,000 đ paid on the 200,000 đ debt at 10:00, corrected to 100,000 đ at 13:00 (BR-71: the first
+        // allocation is reversed and 100,000 allocated again).
+        long debt = id("SELECT id FROM receivable WHERE store_id = ?", store);
+        long payment = id("INSERT INTO payment (payment_type, amount, payment_method, status, recorded_by, recorded_at, "
+                + "verified_by, verified_at) VALUES ('DEBT_PAYMENT', 150000, 'CASH', 'VERIFIED', ?, "
+                + "'2026-10-13 10:00', ?, '2026-10-13 10:00') RETURNING id", manager.getId(), manager.getId());
+        long first = id("INSERT INTO payment_allocation (payment_id, receivable_id, allocated_amount) "
+                + "VALUES (?, ?, 150000) RETURNING id", payment, debt);
+        long correction = id("INSERT INTO adjustment_request (adjustment_type, store_id, payment_id, reason, status, "
+                + "requested_by, submitted_at, decided_by, decided_at, applied_at) VALUES ('DOCUMENT_CORRECTION', ?, ?, "
+                + "'Thu nhầm', 'APPLIED', ?, '2026-10-13 12:00', ?, '2026-10-13 13:00', '2026-10-13 13:00') RETURNING id",
+                store, payment, manager.getId(), owner.getId());
+        jdbc.update("INSERT INTO adjustment_amount_line (adjustment_request_id, payment_id, amount_change) "
+                + "VALUES (?, ?, -50000)", correction, payment);
+        jdbc.update("UPDATE payment_allocation SET reversed_by_adjustment_id = ?, reversed_at = '2026-10-13 13:00' "
+                + "WHERE id = ?", correction, first);
+        jdbc.update("INSERT INTO payment_allocation (payment_id, receivable_id, allocated_amount) VALUES (?, ?, 100000)",
+                payment, debt);
+
+        report(ownerToken, "/sales-collection").andExpect(status().isOk())
+                .andExpect(jsonPath("$.total.debtCollected").value(150_000))
+                .andExpect(jsonPath("$.total.collectionCorrections").value(-150_000))
+                .andExpect(jsonPath("$.total.receivableAtEnd").value(100_000));
+    }
+
     private long confirmedOrder() throws Exception {
         long order = createOrder(pad, 2, oil, 1);
         assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());

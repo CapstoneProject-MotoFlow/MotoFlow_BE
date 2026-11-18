@@ -57,18 +57,35 @@ public class ReportQueries {
                 params(storeId, from, to).addValue("unit", unit));
     }
 
-    /** [store_id, day, debt_collected]: debt payments verified in the period, by the store of the debt paid. */
+    /**
+     * When each allocation row started to count. BR-71: correcting a debt payment reverses its rows and writes new
+     * ones; a row written by a correction counts from that correction's application, the others from the payment's
+     * verification. The rows a row's own reverser also reversed were written with it, so they are left out.
+     */
+    private static final String ALLOCATIONS = """
+            SELECT a.payment_id, a.receivable_id, a.allocated_amount, a.reversed_at, p.verified_at, p.payment_type,
+                   (SELECT max(q.applied_at) FROM payment_allocation x
+                    JOIN adjustment_request q ON q.id = x.reversed_by_adjustment_id
+                    WHERE x.payment_id = a.payment_id AND x.id < a.id
+                      AND x.reversed_by_adjustment_id IS DISTINCT FROM a.reversed_by_adjustment_id) AS rewritten_at
+            FROM payment_allocation a
+            JOIN payment p ON p.id = a.payment_id
+            WHERE p.status = 'VERIFIED'""";
+
+    /**
+     * [store_id, day, debt_collected]: debt payments verified in the period, by the store of the debt paid, as they
+     * were recorded (BR-65). A later correction of the amount shows among the collection corrections.
+     */
     public List<Map<String, Object>> debtCollections(Long storeId, LocalDateTime from, LocalDateTime to,
                                                      String unit) {
         return jdbc.queryForList("""
-                SELECT r.store_id, CAST(date_trunc(:unit, p.verified_at) AS DATE) AS day,
+                SELECT r.store_id, CAST(date_trunc(:unit, a.verified_at) AS DATE) AS day,
                        coalesce(sum(a.allocated_amount), 0) AS debt_collected
-                FROM payment p
-                JOIN payment_allocation a ON a.payment_id = p.id
+                FROM (%s) a
                 JOIN receivable r ON r.id = a.receivable_id
-                WHERE p.payment_type = 'DEBT_PAYMENT' AND p.status = 'VERIFIED'
-                  AND p.verified_at >= :from AND p.verified_at < :to AND %s
-                GROUP BY 1, 2""".formatted(STORE.formatted("r.store_id")),
+                WHERE a.payment_type = 'DEBT_PAYMENT' AND a.rewritten_at IS NULL
+                  AND a.verified_at >= :from AND a.verified_at < :to AND %s
+                GROUP BY 1, 2""".formatted(ALLOCATIONS, STORE.formatted("r.store_id")),
                 params(storeId, from, to).addValue("unit", unit));
     }
 
@@ -97,7 +114,7 @@ public class ReportQueries {
 
     /**
      * [store_id, remaining]: debt left at {@code to}: original amounts of the debts recognised before it, with the
-     * corrections applied before it, less what verified debt payments allocated before it.
+     * corrections applied before it, less what verified payments had allocated to them at that moment (BR-71).
      */
     public List<Map<String, Object>> receivableAt(Long storeId, LocalDateTime to) {
         return jdbc.queryForList("""
@@ -110,12 +127,12 @@ public class ReportQueries {
                            WHERE q.status = 'APPLIED' AND q.applied_at < :to AND a.receivable_id IS NOT NULL
                            GROUP BY a.receivable_id) c ON c.receivable_id = r.id
                 LEFT JOIN (SELECT a.receivable_id, sum(a.allocated_amount) AS paid
-                           FROM payment_allocation a
-                           JOIN payment p ON p.id = a.payment_id
-                           WHERE p.status = 'VERIFIED' AND p.verified_at < :to
+                           FROM (%s) a
+                           WHERE coalesce(a.rewritten_at, a.verified_at) < :to
+                             AND (a.reversed_at IS NULL OR a.reversed_at >= :to)
                            GROUP BY a.receivable_id) p ON p.receivable_id = r.id
                 WHERE r.recognized_at < :to AND %s
-                GROUP BY r.store_id""".formatted(STORE.formatted("r.store_id")),
+                GROUP BY r.store_id""".formatted(ALLOCATIONS, STORE.formatted("r.store_id")),
                 new MapSqlParameterSource().addValue("storeId", storeId).addValue("to", Timestamp.valueOf(to)));
     }
 
