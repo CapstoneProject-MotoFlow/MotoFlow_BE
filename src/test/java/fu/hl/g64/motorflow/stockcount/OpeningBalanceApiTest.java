@@ -128,6 +128,8 @@ class OpeningBalanceApiTest extends StockCountTestData {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.parts[*].locked", contains(true, false)))
                 .andExpect(jsonPath("$.complete").value(true));
+        putAs(ownerToken, costs, Map.of("costs", List.of(cost(pad, 70_000), cost(pad, 60_000))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"));
         putAs(ownerToken, costs, Map.of("costs", List.of(cost(plug, 1)))).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG237"));
         putAs(otherManagerToken, costs, Map.of("costs", List.of(cost(pad, 1)))).andExpect(status().isForbidden());

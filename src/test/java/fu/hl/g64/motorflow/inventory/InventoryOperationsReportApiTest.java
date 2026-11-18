@@ -145,7 +145,9 @@ class InventoryOperationsReportApiTest extends ApiTestUsers {
         call("owner", "?month=2026-10&from=2026-10-02&to=2026-10-02").andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"));
         call("owner", "?from=2026-10-02").andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG264"));
+                .andExpect(jsonPath("$.code").value("MSG02"));
+        call("owner", "?to=2026-10-02").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
         call("owner", "?from=2026-10-03&to=2026-10-02").andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG264"));
         call("owner", "?from=2025-10-01&to=2026-10-02").andExpect(status().isBadRequest())

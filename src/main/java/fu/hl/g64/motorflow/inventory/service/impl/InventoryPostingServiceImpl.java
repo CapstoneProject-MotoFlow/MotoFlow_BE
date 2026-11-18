@@ -536,6 +536,11 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
                     period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));
         }
+        // A period's opening adds up the movements before its first day (PeriodTotals), so the time must fall in it.
+        LocalDate day = occurredAt.toLocalDate();
+        if (day.isBefore(period.getFromDate()) || day.isAfter(period.getToDate())) {
+            throw new IllegalArgumentException("occurredAt " + occurredAt + " is outside period " + periodId);
+        }
         return new PostingTime(period, occurredAt);
     }
 

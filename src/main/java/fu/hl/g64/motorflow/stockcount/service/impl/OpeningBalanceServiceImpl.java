@@ -111,8 +111,11 @@ public class OpeningBalanceServiceImpl implements OpeningBalanceService {
         }
         Set<Long> inCount = openingBalances.countedLines(count).stream().map(StockCountLine::getProductId)
                 .collect(Collectors.toSet());
+        // One cost per part: a part sent twice is refused rather than keeping whichever came last.
         Map<Long, Long> costs = request.costs().stream().collect(Collectors.toMap(
-                OpeningCostsSaveRequest.Cost::productId, OpeningCostsSaveRequest.Cost::initialUnitCost, (a, b) -> b));
+                OpeningCostsSaveRequest.Cost::productId, OpeningCostsSaveRequest.Cost::initialUnitCost, (a, b) -> {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+                }));
         if (!inCount.containsAll(costs.keySet())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG237");
         }

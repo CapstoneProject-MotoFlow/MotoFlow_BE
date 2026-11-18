@@ -142,6 +142,10 @@ class InventoryPostingPeriodTest extends IntegrationTest {
         assertThatThrownBy(() -> tx.executeWithoutResult(s -> posting.adjustLot(
                 adjust(-1, MovementType.COUNT_ADJUSTMENT, null, END_OF_SEPTEMBER))))
                 .isInstanceOf(IllegalArgumentException.class);
+        // The time has to fall inside the period it names.
+        assertThatThrownBy(() -> tx.executeWithoutResult(s -> posting.adjustLot(
+                adjust(-1, MovementType.COUNT_ADJUSTMENT, september, END_OF_SEPTEMBER.plusSeconds(1)))))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private LotAdjustPosting adjust(int change, MovementType type, Long periodId, LocalDateTime at) {

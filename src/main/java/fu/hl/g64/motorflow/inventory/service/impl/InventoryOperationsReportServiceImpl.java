@@ -61,11 +61,11 @@ public class InventoryOperationsReportServiceImpl implements InventoryOperations
     public InventoryOperationsResponse report(AuthenticatedUser user, YearMonth month, LocalDate from, LocalDate to,
                                               Long storeId, String q, Long categoryId, int page, int size) {
         boolean byDates = from != null || to != null;
-        if (byDates && month != null) {
+        // A month or both dates, never a mix and never one date alone.
+        if (byDates && (month != null || from == null || to == null)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
         }
-        if (byDates && (from == null || to == null || from.isAfter(to)
-                || ChronoUnit.DAYS.between(from, to) + 1 > MAX_DAYS)) {
+        if (byDates && (from.isAfter(to) || ChronoUnit.DAYS.between(from, to) + 1 > MAX_DAYS)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG264", MAX_DAYS);
         }
         boolean owner = user.role() == Role.OWNER;
