@@ -29,4 +29,12 @@ public record StoreResponse(long id, String storeName, String address, String ph
                 store.getOwnerManagerId(),
                 productsInStock, store.getCopiedFromStoreId(), store.getCreatedAt(), store.getUpdatedAt());
     }
+
+    /** The same store with its current managers and number of parts in stock (used with the cached store rows). */
+    public StoreResponse with(List<UserAccount> currentManagers, long currentProductsInStock) {
+        return new StoreResponse(id, storeName, address, phone, status, central,
+                currentManagers.stream().map(m -> new ManagerInfo(m.getId(), m.getFullName(), m.getPhone(), m.getRole()))
+                        .toList(),
+                ownerManagerId, currentProductsInStock, copiedFromStoreId, createdAt, updatedAt);
+    }
 }
