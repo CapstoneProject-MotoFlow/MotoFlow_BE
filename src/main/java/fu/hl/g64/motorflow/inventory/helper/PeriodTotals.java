@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -92,17 +93,35 @@ public class PeriodTotals {
     private List<Line> fromLedger(LocalDate month, Long periodId, Collection<Long> storeIds) {
         InventoryPeriod base = periods.findFirstByStatusAndPeriodMonthBeforeOrderByPeriodMonthDesc(
                 InventoryPeriodStatus.CLOSED, month).orElse(null);
+        return lines(ledger.opening(base == null ? null : base.getId(),
+                        base == null ? BEFORE_ANY_PERIOD : base.getPeriodMonth(), month, storeIds),
+                periodId == null ? List.of() : ledger.flows(periodId, storeIds), ledger.inTransit(month, storeIds));
+    }
+
+    /**
+     * From the start of {@code from} to the end of {@code to}, split by movement type (UC-88 by dates). The opening
+     * is the stock at the end of the day before {@code from}: the latest period closed before then, plus the
+     * movements after it, as for the stock on a past date (UC-103).
+     */
+    public List<Line> between(LocalDate from, LocalDate to, Collection<Long> storeIds) {
+        LocalDateTime start = from.atStartOfDay();
+        LocalDateTime end = to.plusDays(1).atStartOfDay();
+        InventoryPeriod base = periods.findFirstByStatusAndToDateBeforeOrderByToDateDesc(InventoryPeriodStatus.CLOSED,
+                from).orElse(null);
+        return lines(ledger.openingAt(base == null ? null : base.getId(),
+                        base == null ? BEFORE_ANY_PERIOD : base.getPeriodMonth(), start, storeIds),
+                ledger.flowsBetween(start, end, storeIds), ledger.inTransitAt(end, storeIds));
+    }
+
+    private static List<Line> lines(List<Row> opening, List<Row> flows, List<Row> inTransit) {
         Map<Key, Builder> lines = new TreeMap<>(Comparator.comparingLong(Key::storeId).thenComparingLong(Key::productId));
-        for (Row r : ledger.opening(base == null ? null : base.getId(),
-                base == null ? BEFORE_ANY_PERIOD : base.getPeriodMonth(), month, storeIds)) {
+        for (Row r : opening) {
             line(lines, r).opening = new Amount(r.inQty(), r.inValue());
         }
-        if (periodId != null) {
-            for (Row r : ledger.flows(periodId, storeIds)) {
-                line(lines, r).add(MovementType.valueOf(r.movementType()), r);
-            }
+        for (Row r : flows) {
+            line(lines, r).add(MovementType.valueOf(r.movementType()), r);
         }
-        for (Row r : ledger.inTransit(month, storeIds)) {
+        for (Row r : inTransit) {
             line(lines, r).inTransit = new Amount(r.inQty(), r.inValue());
         }
         return lines.entrySet().stream()

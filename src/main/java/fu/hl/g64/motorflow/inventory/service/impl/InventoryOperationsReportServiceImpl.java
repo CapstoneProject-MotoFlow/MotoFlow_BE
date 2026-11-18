@@ -28,8 +28,10 @@ import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.Period;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
@@ -45,6 +47,7 @@ import java.util.stream.Collectors;
 public class InventoryOperationsReportServiceImpl implements InventoryOperationsReportService {
 
     private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("yyyy-MM");
+    private static final int MAX_DAYS = 366;
 
     private final PeriodTotals totals;
     private final InventoryPeriodRepository periods;
@@ -55,8 +58,16 @@ public class InventoryOperationsReportServiceImpl implements InventoryOperations
 
     @Override
     @Transactional(readOnly = true)
-    public InventoryOperationsResponse report(AuthenticatedUser user, YearMonth month, Long storeId, String q,
-                                              Long categoryId, int page, int size) {
+    public InventoryOperationsResponse report(AuthenticatedUser user, YearMonth month, LocalDate from, LocalDate to,
+                                              Long storeId, String q, Long categoryId, int page, int size) {
+        boolean byDates = from != null || to != null;
+        if (byDates && month != null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        if (byDates && (from == null || to == null || from.isAfter(to)
+                || ChronoUnit.DAYS.between(from, to) + 1 > MAX_DAYS)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG264", MAX_DAYS);
+        }
         boolean owner = user.role() == Role.OWNER;
         if (!owner) {
             if (user.storeId() == null || storeId != null && !storeId.equals(user.storeId())) {
@@ -66,9 +77,14 @@ public class InventoryOperationsReportServiceImpl implements InventoryOperations
         } else if (storeId != null && !stores.existsById(storeId)) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "MSG52");
         }
-        LocalDate first = (month != null ? month : YearMonth.now(clock)).atDay(1);
-        InventoryPeriodStatus status = periods.findByPeriodMonth(first).map(InventoryPeriod::getStatus).orElse(null);
-        List<Line> lines = totals.forMonth(first, storeId == null ? null : List.of(storeId));
+        List<Long> storeIds = storeId == null ? null : List.of(storeId);
+        LocalDate first = byDates ? from : (month != null ? month : YearMonth.now(clock)).atDay(1);
+        LocalDate last = byDates ? to : first.plusMonths(1).minusDays(1);
+        InventoryPeriodStatus status = byDates ? null
+                : periods.findByPeriodMonth(first).map(InventoryPeriod::getStatus).orElse(null);
+        boolean provisional = first.withDayOfMonth(1).datesUntil(last.plusDays(1), Period.ofMonths(1))
+                .anyMatch(m -> periods.findByPeriodMonth(m).filter(p -> !p.isOpen()).isEmpty());
+        List<Line> lines = byDates ? totals.between(from, to, storeIds) : totals.forMonth(first, storeIds);
 
         Map<Long, Product> partsById = products.findAllById(lines.stream().map(Line::productId)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
@@ -88,7 +104,7 @@ public class InventoryOperationsReportServiceImpl implements InventoryOperations
         List<InventoryOperationsRow> items = matching.stream().skip((long) pageNo * pageSize).limit(pageSize)
                 .map(l -> row(l, storesById.get(l.storeId()), partsById.get(l.productId()), owner))
                 .toList();
-        return new InventoryOperationsResponse(first.format(MONTH), status, status != InventoryPeriodStatus.CLOSED,
+        return new InventoryOperationsResponse(byDates ? null : first.format(MONTH), first, last, status, provisional,
                 owner, owner ? sum(matching) : null, new PageResponse<>(items, matching.size(), pageNo, pageSize));
     }
 

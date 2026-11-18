@@ -105,6 +105,54 @@ class InventoryOperationsReportApiTest extends ApiTestUsers {
     }
 
     @Test
+    void fromOneDayToAnotherTheOpeningIsTheStockAtTheEndOfTheDayBefore() throws Exception {
+        at("2026-09-20T10:00:00");
+        receive(longBien, chain, 4);
+        // September is closed: the opening of a later day starts from its stored closing.
+        jdbc.update("UPDATE inventory_period SET status = 'CLOSED', closed_by = ?, closed_at = now() "
+                + "WHERE period_month = '2026-09-01'", owner.getId());
+        long september = jdbc.queryForObject("SELECT id FROM inventory_period WHERE period_month = '2026-09-01'",
+                Long.class);
+        jdbc.update("INSERT INTO period_stock_balance (inventory_period_id, store_id, product_id, opening_qty, "
+                + "opening_value, in_qty, in_value, out_qty, out_value, closing_qty, closing_value, "
+                + "period_avg_unit_cost) VALUES (?, ?, ?, 0, 0, 4, 400000, 0, 0, 4, 400000, 100000)",
+                september, longBien, chain);
+        at("2026-10-01T10:00:00");
+        receive(longBien, chain, 10);
+        at("2026-10-02T10:00:00");
+        sell(longBien, chain, 3);
+        returnToSupplier(longBien, chain, 2);
+
+        call("owner", "?from=2026-10-02&to=2026-10-02").andExpect(status().isOk())
+                .andExpect(jsonPath("$.month").value(nullValue()))
+                .andExpect(jsonPath("$.from").value("2026-10-02"))
+                .andExpect(jsonPath("$.to").value("2026-10-02"))
+                .andExpect(jsonPath("$.provisional").value(true))
+                .andExpect(jsonPath("$.page.items[0].openingQty").value(14))
+                .andExpect(jsonPath("$.page.items[0].openingValue").value(1_400_000))
+                .andExpect(jsonPath("$.page.items[0].inQty").value(0))
+                .andExpect(jsonPath("$.page.items[0].outQty").value(5))
+                .andExpect(jsonPath("$.page.items[0].closingQty").value(9))
+                .andExpect(jsonPath("$.page.items[0].bySource[*].source", contains("SUPPLIER_RETURN", "SALE")));
+        call("owner", "?from=2026-09-25&to=2026-10-01").andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.items[0].openingQty").value(4))
+                .andExpect(jsonPath("$.page.items[0].inQty").value(10))
+                .andExpect(jsonPath("$.page.items[0].closingQty").value(14));
+        call("owner", "?from=2026-09-01&to=2026-09-30").andExpect(jsonPath("$.provisional").value(false));
+        call("bm", "?from=2026-10-02&to=2026-10-02")
+                .andExpect(jsonPath("$.page.items[0].openingValue").value(nullValue()));
+
+        call("owner", "?month=2026-10&from=2026-10-02&to=2026-10-02").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG02"));
+        call("owner", "?from=2026-10-02").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG264"));
+        call("owner", "?from=2026-10-03&to=2026-10-02").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG264"));
+        call("owner", "?from=2025-10-01&to=2026-10-02").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG264"));
+    }
+
+    @Test
     void aMonthWithNoMovementShowsTheStockCarriedIn() throws Exception {
         at("2026-09-20T10:00:00");
         receive(longBien, chain, 4);
