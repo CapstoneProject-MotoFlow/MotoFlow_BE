@@ -90,8 +90,17 @@ public class DocumentQuery {
                                   ORDER BY a.id LIMIT 1) debt ON TRUE
              WHERE p.status = 'VERIFIED'""";
 
+    /**
+     * The value of an applied request is Owner's (BR-72): the stock value it posted, negative when it wrote stock
+     * down, or for a request that moved no stock (a debt correction) the money it changed. Not applied yet: null.
+     */
     private static final String ADJUSTMENTS = """
-            SELECT 'ADJUSTMENT', a.id, a.adjustment_type, a.status, a.submitted_at, a.store_id, NULL, NULL, NULL, NULL
+            SELECT 'ADJUSTMENT', a.id, a.adjustment_type, a.status, a.submitted_at, a.store_id, NULL, NULL, NULL,
+                   CASE WHEN %s AND a.status = 'APPLIED' THEN
+                       COALESCE((SELECT CAST(SUM(m.value) AS BIGINT) FROM stock_movement m
+                                  WHERE m.adjustment_request_id = a.id),
+                                (SELECT CAST(SUM(l.amount_change) AS BIGINT) FROM adjustment_amount_line l
+                                  WHERE l.adjustment_request_id = a.id)) END
               FROM adjustment_request a
              WHERE a.status <> 'DRAFT' AND a.submitted_at IS NOT NULL""";
 
@@ -131,7 +140,7 @@ public class DocumentQuery {
                 case GOODS_RECEIPT -> RECEIPTS.formatted(owner ? "TRUE" : "FALSE");
                 case TRANSFER_ORDER -> TRANSFERS;
                 case PAYMENT -> PAYMENTS;
-                case ADJUSTMENT -> ADJUSTMENTS;
+                case ADJUSTMENT -> ADJUSTMENTS.formatted(owner ? "TRUE" : "FALSE");
             });
         }
         // The first part names the columns; the others only need the same order.

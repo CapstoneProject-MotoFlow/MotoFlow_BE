@@ -10,7 +10,8 @@ import java.util.List;
  * verified, submitted). {@code storeId}: the store the document belongs to (the receiving store of a goods receipt,
  * the source of a transfer order); {@code otherStoreId}: the other store of a transfer (its destination, or the store a
  * transferred receipt came from). {@code partnerName}: customer or supplier. {@code value}: total of a sales order,
- * amount of a payment, value accepted of a supplier receipt for Owner only (BR-72), otherwise null.
+ * amount of a payment; for Owner only (BR-72) also the value accepted of a supplier receipt and the value of an applied
+ * adjustment (negative = written down), otherwise null.
  * {@code printForms}: what UC-80 can print of it.
  */
 public record DocumentRow(DocumentType type, long id, String number, String subType, String status,
