@@ -47,6 +47,8 @@ public record AdjustmentDetail(
      * What the caller may do now: approve or reject (Owner, PENDING), apply again (Owner, APPROVED: UC-84 Step
      * 1_Approved but unapplied), withdraw (the requester, PENDING).
      */
-    public record Actions(boolean canApprove, boolean canReject, boolean canApply, boolean canWithdraw) {
+    /** {@code canEditDraft}: the requester's own draft, which they may save again, submit or throw away. */
+    public record Actions(boolean canApprove, boolean canReject, boolean canApply, boolean canWithdraw,
+                          boolean canEditDraft) {
     }
 }

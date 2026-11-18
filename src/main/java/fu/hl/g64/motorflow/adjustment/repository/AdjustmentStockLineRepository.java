@@ -14,6 +14,9 @@ public interface AdjustmentStockLineRepository extends JpaRepository<AdjustmentS
 
     List<AdjustmentStockLine> findByAdjustmentRequestIdIn(Collection<Long> adjustmentRequestIds);
 
+    /** The lines of a draft being replaced or thrown away. */
+    void deleteByAdjustmentRequestId(Long adjustmentRequestId);
+
     /** Statuses whose requests still hold stock they may take: submitted and not applied, rejected or withdrawn. */
     String OPEN = """
             q.status in (fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.PENDING,

@@ -32,6 +32,15 @@ public interface AttachmentService {
     /** The files of one record, oldest first. */
     List<AttachmentResponse> list(OwnerType ownerType, long ownerId);
 
+    /**
+     * Makes the record's files exactly {@code files} (a draft saved again): files no longer listed are dropped, new
+     * ones are checked and attached as {@link #attach(OwnerType, long, List, long)} does.
+     */
+    void replace(OwnerType ownerType, long ownerId, List<AttachmentUpload> files, long uploadedBy);
+
+    /** Drops every file of the record (a draft thrown away). */
+    void detachAll(OwnerType ownerType, long ownerId);
+
     /** The files of several records of one type, by record id; a record without files has an empty list. */
     Map<Long, List<AttachmentResponse>> list(OwnerType ownerType, Collection<Long> ownerIds);
 }

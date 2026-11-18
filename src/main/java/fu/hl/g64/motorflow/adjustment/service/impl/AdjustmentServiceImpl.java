@@ -158,12 +158,81 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         LocalDateTime now = LocalDateTime.now(clock);
         AdjustmentRequest saved = requests.save(AdjustmentRequest.submit(AdjustmentType.STOCK_LOSS,
                 loss.store().getId(), loss.source(), request.reason().strip(), user.id(), now));
-        for (Change c : loss.changes()) {
-            stockLines.save(AdjustmentStockLine.of(saved.getId(), loss.store().getId(), c.productId(), c.lotId(),
-                    c.status(), c.change()));
-        }
+        saveLines(saved, loss);
         submitted(user, saved, request.attachments(), now);
         return detail(user, saved);
+    }
+
+    // ---------------------------------------------------------------------------------------------- drafts (R-07)
+
+    @Transactional
+    @Override
+    public AdjustmentDetail saveStockLossDraft(AuthenticatedUser user, StockLossRequest request) {
+        StockLoss loss = checkStockLoss(user, request);
+        LocalDateTime now = LocalDateTime.now(clock);
+        AdjustmentRequest saved = requests.save(AdjustmentRequest.draft(AdjustmentType.STOCK_LOSS,
+                loss.store().getId(), loss.source(), request.reason().strip(), user.id(), now));
+        saveLines(saved, loss);
+        attachments.attach(OwnerType.ADJUSTMENT_REQUEST, saved.getId(), request.attachments(), user.id());
+        return detail(user, saved);
+    }
+
+    @Transactional
+    @Override
+    public AdjustmentDetail updateDraft(AuthenticatedUser user, long id, StockLossRequest request) {
+        AdjustmentRequest draft = ownDraft(user, id);
+        StockLoss loss = checkStockLoss(user, request);
+        draft.replaceDraft(loss.store().getId(), loss.source(), request.reason().strip(), LocalDateTime.now(clock));
+        stockLines.deleteByAdjustmentRequestId(id);
+        stockLines.flush();
+        saveLines(draft, loss);
+        attachments.replace(OwnerType.ADJUSTMENT_REQUEST, id, request.attachments(), user.id());
+        return detail(user, draft);
+    }
+
+    @Transactional
+    @Override
+    public AdjustmentDetail submitDraft(AuthenticatedUser user, long id) {
+        AdjustmentRequest draft = ownDraft(user, id);
+        // The stock may have moved since the draft was saved (UC-83 step 4 again).
+        List<AdjustmentStockLine> lines = stockLines.findByAdjustmentRequestIdOrderByIdAsc(id);
+        checkStockLoss(draft.getStoreId(), draft.source(), AdjustmentStock.changesOf(lines), 0);
+        if (attachments.list(OwnerType.ADJUSTMENT_REQUEST, id).isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG255");
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        draft.submitDraft(now);
+        submitted(user, draft, List.of(), now);
+        return detail(user, draft);
+    }
+
+    @Transactional
+    @Override
+    public void deleteDraft(AuthenticatedUser user, long id) {
+        AdjustmentRequest draft = ownDraft(user, id);
+        if (discrepancyEvents.existsByAdjustmentRequestId(id)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG302", id);
+        }
+        stockLines.deleteByAdjustmentRequestId(id);
+        attachments.detachAll(OwnerType.ADJUSTMENT_REQUEST, id);
+        requests.delete(draft);
+    }
+
+    private void saveLines(AdjustmentRequest request, StockLoss loss) {
+        for (Change c : loss.changes()) {
+            stockLines.save(AdjustmentStockLine.of(request.getId(), loss.store().getId(), c.productId(), c.lotId(),
+                    c.status(), c.change()));
+        }
+    }
+
+    /** The caller's own draft, locked; MSG253 for anyone else's, MSG281 once it has been submitted. */
+    private AdjustmentRequest ownDraft(AuthenticatedUser user, long id) {
+        AdjustmentRequest request = lock(user, id);
+        if (!request.isRequestedBy(user.id())) {
+            throw notFound();
+        }
+        requireStatus(request, AdjustmentRequestStatus.DRAFT);
+        return request;
     }
 
     /** Records the evidence and the submission, and tells Owner unless Owner raised it (UC-83 Step 7). */
@@ -353,7 +422,7 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         }
         Page<AdjustmentRequest> found = requests.findAll(matching(user, storeId, search), PageRequest.of(
                 Math.max(page, 0), Math.clamp(size, 1, 100),
-                Sort.by(Sort.Order.desc("submittedAt"), Sort.Order.desc("id"))));
+                Sort.by(Sort.Order.desc("submittedAt"), Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
         return PageResponse.of(found, summaries(user, found.getContent()));
     }
 
@@ -361,7 +430,11 @@ public class AdjustmentServiceImpl implements AdjustmentService {
                                                              AdjustmentSearch search) {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
-            where.add(cb.notEqual(root.get("status"), AdjustmentRequestStatus.DRAFT));
+            // A draft is its requester's alone, and only when drafts are asked for (R-07: status=DRAFT).
+            boolean drafts = search.statuses() != null && search.statuses().contains(AdjustmentRequestStatus.DRAFT);
+            where.add(drafts ? cb.or(cb.notEqual(root.get("status"), AdjustmentRequestStatus.DRAFT),
+                    cb.equal(root.get("requestedBy"), user.id()))
+                    : cb.notEqual(root.get("status"), AdjustmentRequestStatus.DRAFT));
             if (storeId != null && user.role() != Role.OWNER && search.storeId() == null) {
                 // A Branch Manager's own store, and the transit losses they reported for others (R-05).
                 where.add(cb.or(cb.equal(root.get("storeId"), storeId), cb.equal(root.get("requestedBy"), user.id())));
@@ -412,7 +485,7 @@ public class AdjustmentServiceImpl implements AdjustmentService {
             return new AdjustmentSummary(r.getId(), "#" + r.getId(), r.getAdjustmentType(), r.getStatus(),
                     r.getStoreId(), storeNames.get(r.getStoreId()), source(r.source()), r.getReason(),
                     lines.size(), value, people.get(r.getRequestedBy()), r.getSubmittedAt(),
-                    people.get(r.getDecidedBy()), r.getDecidedAt(), r.getAppliedAt());
+                    people.get(r.getDecidedBy()), r.getDecidedAt(), r.getAppliedAt(), r.getCreatedAt());
         }).toList();
     }
 
@@ -560,7 +633,8 @@ public class AdjustmentServiceImpl implements AdjustmentService {
                 people.get(e.getActorId()), e.getOccurredAt(), e.getReason())).toList();
         boolean pending = r.getStatus() == AdjustmentRequestStatus.PENDING;
         Actions actions = new Actions(owner && pending, owner && pending,
-                owner && r.getStatus() == AdjustmentRequestStatus.APPROVED, pending && r.isRequestedBy(user.id()));
+                owner && r.getStatus() == AdjustmentRequestStatus.APPROVED, pending && r.isRequestedBy(user.id()),
+                r.isDraft() && r.isRequestedBy(user.id()));
         LocalDate postingDate = r.getAppliedAt() != null ? r.getAppliedAt().toLocalDate()
                 : EnumSet.of(AdjustmentRequestStatus.PENDING, AdjustmentRequestStatus.APPROVED).contains(r.getStatus())
                 ? LocalDate.now(clock) : null;
@@ -636,11 +710,13 @@ public class AdjustmentServiceImpl implements AdjustmentService {
 
     /**
      * Owner sees every request; a Branch Manager those of their store, and those they made for another store as the
-     * transfer coordinator (UC-82, R-05).
+     * transfer coordinator (UC-82, R-05). A draft only its requester sees (R-07).
      */
     private static boolean visible(AuthenticatedUser user, AdjustmentRequest request) {
-        return request.getStatus() != AdjustmentRequestStatus.DRAFT
-                && (user.role() == Role.OWNER || request.getStoreId().equals(user.storeId())
+        if (request.isDraft()) {
+            return request.isRequestedBy(user.id());
+        }
+        return (user.role() == Role.OWNER || request.getStoreId().equals(user.storeId())
                 || Objects.equals(request.getRequestedBy(), user.id()));
     }
 

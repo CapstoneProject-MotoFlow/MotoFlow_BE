@@ -103,6 +103,43 @@ public class AdjustmentRequest {
         return request;
     }
 
+    /**
+     * Review 17/11 R-07: a stock loss saved as a draft. Only its requester sees it; nothing is checked against evidence
+     * and nobody is told until it is submitted.
+     */
+    public static AdjustmentRequest draft(AdjustmentType type, long storeId, Source source, String reason,
+                                          long requestedBy, LocalDateTime now) {
+        AdjustmentRequest request = submit(type, storeId, source, reason, requestedBy, now);
+        request.status = AdjustmentRequestStatus.DRAFT;
+        request.submittedAt = null;
+        return request;
+    }
+
+    /** Replaces the whole draft; {@code createdAt} becomes the time it was last saved. */
+    public void replaceDraft(long storeId, Source source, String reason, LocalDateTime now) {
+        require(AdjustmentRequestStatus.DRAFT);
+        AdjustmentRequest fresh = submit(adjustmentType, storeId, source, reason, requestedBy, now);
+        this.storeId = fresh.storeId;
+        salesOrderId = fresh.salesOrderId;
+        paymentId = fresh.paymentId;
+        goodsReceiptNoteId = fresh.goodsReceiptNoteId;
+        transferOrderId = fresh.transferOrderId;
+        receivableId = fresh.receivableId;
+        this.reason = reason;
+        createdAt = now;
+    }
+
+    /** The draft goes to Owner: PENDING from now on. */
+    public void submitDraft(LocalDateTime now) {
+        require(AdjustmentRequestStatus.DRAFT);
+        status = AdjustmentRequestStatus.PENDING;
+        submittedAt = now;
+    }
+
+    public boolean isDraft() {
+        return status == AdjustmentRequestStatus.DRAFT;
+    }
+
     /** The document a request comes from. */
     public record Source(SourceType type, long id) {
         public enum SourceType { SALES_ORDER, PAYMENT, GOODS_RECEIPT_NOTE, TRANSFER_ORDER, RECEIVABLE }
