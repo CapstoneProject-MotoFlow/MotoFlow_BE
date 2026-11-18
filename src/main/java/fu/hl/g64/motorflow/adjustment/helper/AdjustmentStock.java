@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.adjustment.dto.AdjustmentLineView;
 import fu.hl.g64.motorflow.adjustment.entity.AdjustmentRequest;
 import fu.hl.g64.motorflow.adjustment.entity.AdjustmentStockLine;
 import fu.hl.g64.motorflow.adjustment.repository.AdjustmentStockLineRepository;
+import fu.hl.g64.motorflow.adjustment.repository.AdjustmentStockLineRepository.OpenDeduction;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
@@ -12,6 +13,7 @@ import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.LotBalance;
+import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
@@ -21,6 +23,7 @@ import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository.TransitLot;
+import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository.TransitLotOfPart;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -80,17 +83,22 @@ public class AdjustmentStock {
     public void requireAvailable(long storeId, Long transferOrderId, List<Change> changes, long exceptRequestId,
                                  Map<String, Long> reserved) {
         Map<Long, Product> parts = parts(changes.stream().map(Change::productId).toList());
+        Map<Long, Lot> lotById = lots.findAllById(changes.stream().map(Change::lotId).filter(Objects::nonNull)
+                .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Lot::getId, Function.identity()));
+        boolean takesAny = changes.stream().anyMatch(c -> c.change() < 0);
+        Snapshot stock = takesAny ? snapshot(storeId, transferOrderId, changes) : null;
+        Taken taken = takesAny ? taken(storeId, transferOrderId, parts.keySet(), exceptRequestId) : null;
         Map<String, Integer> byPartAndStatus = new LinkedHashMap<>();
         for (Change c : changes) {
             Product part = parts.get(c.productId());
             if (c.lotId() != null) {
-                Lot lot = lots.findById(c.lotId()).filter(l -> l.getProductId().equals(c.productId()))
-                        .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG258", c.lotId(),
-                                part.getSku()));
+                Lot lot = lotById.get(c.lotId());
+                if (lot == null || !lot.getProductId().equals(c.productId())) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG258", c.lotId(), part.getSku());
+                }
                 if (c.change() < 0) {
-                    long free = lotQuantity(lot.getId(), storeId, c.status())
-                            - stockLines.sumOpenDeductions(storeId, c.productId(), c.status(), lot.getId(),
-                            exceptRequestId);
+                    long free = stock.lot(lot.getId(), c.status())
+                            - taken.lot(c.productId(), c.status(), lot.getId());
                     if (-c.change() > free) {
                         throw tooMuch(part, free);
                     }
@@ -106,10 +114,8 @@ public class AdjustmentStock {
             StockStatus status = StockStatus.valueOf(key[1]);
             Product part = parts.get(productId);
             long free = transferOrderId != null
-                    ? transit(transferOrderId, storeId, productId)
-                    - stockLines.sumOpenTransitWriteOffs(transferOrderId, productId, exceptRequestId)
-                    : statusQuantity(storeId, productId, status)
-                    - stockLines.sumOpenDeductions(storeId, productId, status, null, exceptRequestId)
+                    ? stock.transit(productId) - taken.transit(productId)
+                    : stock.status(productId, status) - taken.status(productId, status)
                     - reserved.getOrDefault(e.getKey(), 0L);
             if (e.getValue() > free) {
                 throw tooMuch(part, free);
@@ -143,14 +149,15 @@ public class AdjustmentStock {
         Map<Long, Product> parts = parts(changes.stream().map(Change::productId).toList());
         Map<Long, Lot> lotById = lots.findAllById(changes.stream().map(Change::lotId).filter(Objects::nonNull)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Lot::getId, Function.identity()));
+        Snapshot stock = snapshot(storeId, transferOrderId, changes);
         List<AdjustmentLineView> views = new ArrayList<>();
         for (Change c : changes) {
             Product part = parts.get(c.productId());
             Lot lot = c.lotId() == null ? null : lotById.get(c.lotId());
-            int current = (int) (lot != null ? lotQuantity(lot.getId(), storeId, c.status())
+            int current = (int) (lot != null ? stock.lot(lot.getId(), c.status())
                     : transferOrderId != null && c.status() == StockStatus.IN_TRANSIT
-                    ? transit(transferOrderId, storeId, c.productId())
-                    : statusQuantity(storeId, c.productId(), c.status()));
+                    ? stock.transit(c.productId())
+                    : stock.status(c.productId(), c.status()));
             Long unitCost = withCost ? unitCost(part) : null;
             views.add(new AdjustmentLineView(part.getId(), part.getSku(), part.getPartName(), part.getBaseUnit(),
                     lot == null ? null : lot.getId(), lot == null ? null : lot.getManufacturerLotNo(),
@@ -222,19 +229,84 @@ public class AdjustmentStock {
         return taken;
     }
 
-    private long transit(long orderId, long storeId, long productId) {
-        return transferOrders.findTransitLots(orderId, storeId, productId).stream()
-                .mapToLong(TransitLot::getQuantity).sum();
+    /**
+     * The warehouse's stock of the changes' parts and lots, read once: lot balances by lot and status, part balances
+     * by status, and, for a transit loss, the order's own goods in transit by part (BR-75).
+     */
+    private record Snapshot(Map<String, Long> byLot, Map<Long, StockBalance> byPart, Map<Long, Long> inTransit) {
+
+        long lot(long lotId, StockStatus status) {
+            return byLot.getOrDefault(lotId + ":" + status, 0L);
+        }
+
+        long status(long productId, StockStatus status) {
+            StockBalance balance = byPart.get(productId);
+            return balance == null ? 0 : balance.quantityOf(status);
+        }
+
+        long transit(long productId) {
+            return inTransit.getOrDefault(productId, 0L);
+        }
     }
 
-    private long statusQuantity(long storeId, long productId, StockStatus status) {
-        return stockBalances.findByStoreIdAndProductId(storeId, productId).map(b -> b.quantityOf(status))
-                .orElse(0);
+    /**
+     * What other open requests would already take: by part, status and lot at the warehouse, and, for a transit
+     * loss, by part from the order's goods in transit.
+     */
+    private record Taken(Map<String, Long> byLot, Map<String, Long> byStatus, Map<Long, Long> fromTransit) {
+
+        long lot(long productId, StockStatus status, long lotId) {
+            return byLot.getOrDefault(productId + ":" + status + ":" + lotId, 0L);
+        }
+
+        /** Every lot of the part and status, and lines that name no lot. */
+        long status(long productId, StockStatus status) {
+            return byStatus.getOrDefault(productId + ":" + status, 0L);
+        }
+
+        long transit(long productId) {
+            return fromTransit.getOrDefault(productId, 0L);
+        }
     }
 
-    private long lotQuantity(long lotId, long storeId, StockStatus status) {
-        return lotBalances.findByLotIdAndStoreIdOrderByStockStatusAsc(lotId, storeId).stream()
-                .filter(b -> b.getStockStatus() == status).mapToLong(LotBalance::getQuantity).sum();
+    private Taken taken(long storeId, Long transferOrderId, Collection<Long> productIds, long exceptRequestId) {
+        Map<String, Long> byLot = new HashMap<>();
+        Map<String, Long> byStatus = new HashMap<>();
+        for (OpenDeduction d : stockLines.findOpenDeductions(storeId, productIds, exceptRequestId)) {
+            String partAndStatus = d.getProductId() + ":" + d.getStatus();
+            byStatus.merge(partAndStatus, d.getQuantity(), Long::sum);
+            if (d.getLotId() != null) {
+                byLot.merge(partAndStatus + ":" + d.getLotId(), d.getQuantity(), Long::sum);
+            }
+        }
+        Map<Long, Long> fromTransit = new HashMap<>();
+        if (transferOrderId != null) {
+            for (Object[] row : stockLines.findOpenTransitWriteOffs(transferOrderId, productIds, exceptRequestId)) {
+                fromTransit.put((Long) row[0], ((Number) row[1]).longValue());
+            }
+        }
+        return new Taken(byLot, byStatus, fromTransit);
+    }
+
+    private Snapshot snapshot(long storeId, Long transferOrderId, List<Change> changes) {
+        Set<Long> lotIds = changes.stream().map(Change::lotId).filter(Objects::nonNull).collect(Collectors.toSet());
+        Set<Long> productIds = changes.stream().map(Change::productId).collect(Collectors.toSet());
+        Map<String, Long> byLot = new HashMap<>();
+        if (!lotIds.isEmpty()) {
+            for (LotBalance b : lotBalances.findByStoreIdAndLotIdIn(storeId, lotIds)) {
+                byLot.merge(b.getLotId() + ":" + b.getStockStatus(), (long) b.getQuantity(), Long::sum);
+            }
+        }
+        Map<Long, StockBalance> byPart = productIds.isEmpty() ? Map.of()
+                : stockBalances.findByStoreIdAndProductIdIn(storeId, productIds).stream()
+                .collect(Collectors.toMap(StockBalance::getProductId, Function.identity()));
+        Map<Long, Long> inTransit = new HashMap<>();
+        if (transferOrderId != null) {
+            for (TransitLotOfPart t : transferOrders.findTransitLots(transferOrderId, storeId)) {
+                inTransit.merge(t.getProductId(), t.getQuantity(), Long::sum);
+            }
+        }
+        return new Snapshot(byLot, byPart, inTransit);
     }
 
     private Map<Long, Product> parts(Collection<Long> ids) {

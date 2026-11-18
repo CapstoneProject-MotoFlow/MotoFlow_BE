@@ -5,11 +5,19 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface TransferOrderLineRepository extends JpaRepository<TransferOrderLine, Long> {
 
     List<TransferOrderLine> findByTransferOrderIdOrderByProductId(Long transferOrderId);
+
+    /** [transferOrderId, number of lines] of each order. */
+    @Query("""
+            select l.transferOrderId, count(l) from TransferOrderLine l
+            where l.transferOrderId in :orderIds
+            group by l.transferOrderId""")
+    List<Object[]> countLinesByOrder(@Param("orderIds") Collection<Long> orderIds);
 
     interface ProductQty {
         long getProductId();

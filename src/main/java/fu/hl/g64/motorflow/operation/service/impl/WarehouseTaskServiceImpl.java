@@ -20,15 +20,19 @@ import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
+import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderRepository;
 import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderLineRepository;
 import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderReceiving;
+import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
+import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +47,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -243,25 +248,37 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         Map<Long, String> names = users.findAllById(held.stream().map(WarehouseTask::getAssignedBy)
                 .collect(Collectors.toSet())).stream()
                 .collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
+        // One query per kind of data for the whole list, not per task.
+        Set<Long> documentIds = held.stream().map(task -> documentOf(task, type)).collect(Collectors.toSet());
+        Map<Long, String> partners = new HashMap<>();
+        Map<Long, Long> lineCounts = new HashMap<>();
+        if (!documentIds.isEmpty() && type == TaskType.SUPPLIER_RECEIVING) {
+            Map<Long, Long> supplierOf = purchaseOrders.findAllById(documentIds).stream()
+                    .collect(Collectors.toMap(PurchaseOrder::getId, PurchaseOrder::getSupplierId));
+            Map<Long, String> supplierNames = suppliers.findAllById(new HashSet<>(supplierOf.values())).stream()
+                    .collect(Collectors.toMap(Supplier::getId, Supplier::getSupplierName));
+            supplierOf.forEach((order, supplier) -> partners.put(order, supplierNames.get(supplier)));
+            purchaseOrderLines.summarizeByRequest(documentIds)
+                    .forEach(row -> lineCounts.put((Long) row[0], (Long) row[1]));
+        } else if (!documentIds.isEmpty()) {
+            Map<Long, Long> sourceOf = transferOrders.findAllById(documentIds).stream()
+                    .collect(Collectors.toMap(TransferOrder::getId, TransferOrder::getSourceStoreId));
+            Map<Long, String> storeNames = stores.findAllById(new HashSet<>(sourceOf.values())).stream()
+                    .collect(Collectors.toMap(Store::getId, Store::getStoreName));
+            sourceOf.forEach((order, source) -> partners.put(order, storeNames.get(source)));
+            transferOrderLines.countLinesByOrder(documentIds)
+                    .forEach(row -> lineCounts.put((Long) row[0], (Long) row[1]));
+        }
         return held.stream().map(task -> {
-            long documentId = type == TaskType.SUPPLIER_RECEIVING ? task.getPurchaseOrderId()
-                    : task.getTransferOrderId();
-            String partner;
-            long lineCount;
-            if (type == TaskType.SUPPLIER_RECEIVING) {
-                partner = purchaseOrders.findById(documentId)
-                        .flatMap(order -> suppliers.findById(order.getSupplierId()))
-                        .map(supplier -> supplier.getSupplierName()).orElse(null);
-                lineCount = purchaseOrderLines.findByPurchaseOrderIdOrderByIdAsc(documentId).size();
-            } else {
-                partner = transferOrders.findById(documentId)
-                        .flatMap(order -> stores.findById(order.getSourceStoreId()))
-                        .map(store -> store.getStoreName()).orElse(null);
-                lineCount = transferOrderLines.findByTransferOrderIdOrderByProductId(documentId).size();
-            }
-            return new ReceivingTaskResponse(task.getId(), type, documentId, "#" + documentId, partner, lineCount,
-                    task.getAssignedAt(), task.getAssignedBy(), names.get(task.getAssignedBy()));
+            long documentId = documentOf(task, type);
+            return new ReceivingTaskResponse(task.getId(), type, documentId, "#" + documentId,
+                    partners.get(documentId), lineCounts.getOrDefault(documentId, 0L), task.getAssignedAt(),
+                    task.getAssignedBy(), names.get(task.getAssignedBy()));
         }).toList();
+    }
+
+    private static long documentOf(WarehouseTask task, TaskType type) {
+        return type == TaskType.SUPPLIER_RECEIVING ? task.getPurchaseOrderId() : task.getTransferOrderId();
     }
 
     /** The document, if the user is a Branch Manager of its store (MSG05 otherwise, MSG120 if it does not exist). */

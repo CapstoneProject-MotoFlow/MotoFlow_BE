@@ -3,7 +3,9 @@ package fu.hl.g64.motorflow.transfer;
 import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.support.QueryCounter;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
@@ -13,6 +15,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -21,6 +26,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /** UC-106, UC-43, UC-44 for a transfer arriving at its destination. */
 class TransferReceiptApiTest extends TransferFlowTestData {
+
+    @Autowired
+    private QueryCounter queries;
 
     @Test
     void fullReceiptMovesTheOrdersLotsIntoAvailable() throws Exception {
@@ -243,6 +251,37 @@ class TransferReceiptApiTest extends TransferFlowTestData {
 
     private long coordinatorId() {
         return jdbc.queryForObject("SELECT id FROM user_account WHERE username = 'bmkt'", Long.class);
+    }
+
+    /** No N+1: the receiving list runs as many queries for three transfer orders as for one. */
+    @Test
+    void theReceivingListLoadsEveryOrderTogether() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 10, 50_000, null, "B");
+        long first = createOrder(brake, 1);
+        holdReceiving("nvlb", first);
+        String token = signIn("nvlb");
+        queries.reset();
+        receivingList(token).andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+        long forOne = queries.prepared();
+
+        long second = createOrder(brake, 1, chain, 1);
+        long third = createOrder(chain, 2);
+        holdReceiving("nvlb", second);
+        holdReceiving("nvlb", third);
+        queries.reset();
+        receivingList(token).andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].documentId", contains((int) first, (int) second,
+                        (int) third)))
+                .andExpect(jsonPath("$[*].partnerName", everyItem(
+                        is("Cầu Giấy"))))
+                .andExpect(jsonPath("$[*].lineCount", contains(1, 2, 1)));
+        assertThat(queries.prepared()).isEqualTo(forOne);
+    }
+
+    private ResultActions receivingList(String token) throws Exception {
+        return mvc.perform(get("/api/v1/warehouse-tasks/assigned-to-me").param("taskType", "TRANSFER_RECEIVING")
+                .header(HttpHeaders.AUTHORIZATION, token));
     }
 
     // Lecturer feedback 12/11: the Staff member given the receiving records the arrival and then inspects it.

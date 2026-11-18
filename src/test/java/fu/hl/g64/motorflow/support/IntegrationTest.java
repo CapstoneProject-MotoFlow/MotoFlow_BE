@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(TestClockConfig.class)
+@Import({TestClockConfig.class, QueryCounter.class})
 public abstract class IntegrationTest {
 
     public static final Instant START = Instant.parse("2026-10-13T01:00:00Z");

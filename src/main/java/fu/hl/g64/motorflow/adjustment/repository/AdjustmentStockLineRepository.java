@@ -20,27 +20,47 @@ public interface AdjustmentStockLineRepository extends JpaRepository<AdjustmentS
                          fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPROVED)""";
 
     /**
-     * Units of the part and status at the warehouse that other open requests would take (a lot given: of that lot
-     * only), so two requests cannot write off the same goods.
+     * Units of the listed parts at the warehouse that other open requests would take, per part, status and lot (lot
+     * null: the line names no lot), so two requests cannot write off the same goods.
      */
-    @Query("select coalesce(-sum(l.quantityChange), 0) from AdjustmentStockLine l "
+    interface OpenDeduction {
+        long getProductId();
+
+        StockStatus getStatus();
+
+        Long getLotId();
+
+        long getQuantity();
+    }
+
+    @Query("select l.productId as productId, l.stockStatus as status, l.lotId as lotId, "
+            + "-sum(l.quantityChange) as quantity from AdjustmentStockLine l "
             + "join AdjustmentRequest q on q.id = l.adjustmentRequestId where " + OPEN + """
               and q.id <> :exceptRequestId and l.quantityChange < 0
-              and l.storeId = :storeId and l.productId = :productId and l.stockStatus = :status
-              and (:lotId is null or l.lotId = :lotId)""")
-    long sumOpenDeductions(long storeId, long productId, StockStatus status, Long lotId, long exceptRequestId);
+              and l.storeId = :storeId and l.productId in :productIds
+            group by l.productId, l.stockStatus, l.lotId""")
+    List<OpenDeduction> findOpenDeductions(long storeId, Collection<Long> productIds, long exceptRequestId);
 
-    /** Units of the part other open requests write off the transit of the transfer order (UC-83 Step 1_Transit loss). */
-    @Query("select coalesce(-sum(l.quantityChange), 0) from AdjustmentStockLine l "
+    /**
+     * [productId, units] of the listed parts other open requests write off the transit of the transfer order (UC-83
+     * Step 1_Transit loss).
+     */
+    @Query("select l.productId, -sum(l.quantityChange) from AdjustmentStockLine l "
             + "join AdjustmentRequest q on q.id = l.adjustmentRequestId where " + OPEN + """
-              and q.id <> :exceptRequestId and q.transferOrderId = :transferOrderId and l.productId = :productId
-              and l.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT""")
-    long sumOpenTransitWriteOffs(long transferOrderId, long productId, long exceptRequestId);
+              and q.id <> :exceptRequestId and q.transferOrderId = :transferOrderId and l.productId in :productIds
+              and l.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+            group by l.productId""")
+    List<Object[]> findOpenTransitWriteOffs(long transferOrderId, Collection<Long> productIds, long exceptRequestId);
 
-    /** Units of the part other open requests write off from the held goods of the supplier delivery. */
-    @Query("select coalesce(-sum(l.quantityChange), 0) from AdjustmentStockLine l "
+    /**
+     * [receiptId, productId, units] of the listed parts other open requests write off from the held goods of the
+     * listed supplier deliveries.
+     */
+    @Query("select q.goodsReceiptNoteId, l.productId, -sum(l.quantityChange) from AdjustmentStockLine l "
             + "join AdjustmentRequest q on q.id = l.adjustmentRequestId where " + OPEN + """
-              and q.id <> :exceptRequestId and q.goodsReceiptNoteId = :receiptId and l.productId = :productId
-              and l.quantityChange < 0""")
-    long sumOpenHeldWriteOffs(long receiptId, long productId, long exceptRequestId);
+              and q.id <> :exceptRequestId and q.goodsReceiptNoteId in :receiptIds and l.productId in :productIds
+              and l.quantityChange < 0
+            group by q.goodsReceiptNoteId, l.productId""")
+    List<Object[]> findOpenHeldWriteOffs(Collection<Long> receiptIds, Collection<Long> productIds,
+                                         long exceptRequestId);
 }

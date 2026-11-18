@@ -38,6 +38,7 @@ import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement;
+import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Standing;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
@@ -237,9 +238,17 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         if (parts.isEmpty()) {
             return held;
         }
-        for (DiscrepancyCase found : discrepancies.findOpenSupplierCasesAtStore(storeId, parts)) {
-            int undecided = settlement.standing(found).heldUndecided();
-            long pending = stockLines.sumOpenHeldWriteOffs(found.getGoodsReceiptNoteId(), found.getProductId(), 0);
+        List<DiscrepancyCase> open = discrepancies.findOpenSupplierCasesAtStore(storeId, parts);
+        if (open.isEmpty()) {
+            return held;
+        }
+        Map<Long, Standing> standings = settlement.standings(open);
+        Map<String, Long> pendingByDelivery = heldWriteOffs(
+                open.stream().map(DiscrepancyCase::getGoodsReceiptNoteId).collect(Collectors.toSet()), parts, 0);
+        for (DiscrepancyCase found : open) {
+            int undecided = standings.get(found.getId()).heldUndecided();
+            long pending = pendingByDelivery.getOrDefault(
+                    found.getGoodsReceiptNoteId() + ":" + found.getProductId(), 0L);
             long wrong = Math.max(Math.min(undecided, found.getWrongItemQty()) - pending, 0);
             long damaged = Math.max(Math.min(undecided, found.getDamagedQty()) - pending, 0);
             held.merge(found.getProductId() + ":" + StockStatus.WRONG_ITEM, wrong, Long::sum);
@@ -261,17 +270,30 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         Map<Long, Integer> byPart = new LinkedHashMap<>();
         changes.forEach(c -> byPart.merge(c.productId(), -c.change(), Integer::sum));
         Map<Long, DiscrepancyCase> caseByPart = cases(receipt.getId());
+        Map<Long, Standing> standings = settlement.standings(caseByPart.values().stream()
+                .filter(c -> byPart.containsKey(c.getProductId()) && c.isOpen()).toList());
+        Map<String, Long> pending = heldWriteOffs(List.of(receipt.getId()), byPart.keySet(), exceptRequestId);
         for (Map.Entry<Long, Integer> e : byPart.entrySet()) {
             DiscrepancyCase found = caseByPart.get(e.getKey());
             long free = found == null || !found.isOpen() ? 0
-                    : settlement.standing(found).heldUndecided()
-                    - stockLines.sumOpenHeldWriteOffs(receipt.getId(), e.getKey(), exceptRequestId);
+                    : standings.get(found.getId()).heldUndecided()
+                    - pending.getOrDefault(receipt.getId() + ":" + e.getKey(), 0L);
             if (e.getValue() > free) {
                 Product part = products.findById(e.getKey())
                         .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57"));
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG257", part.getSku(), Math.max(free, 0));
             }
         }
+    }
+
+    /** Units other open requests write off from held goods, keyed "receiptId:productId". */
+    private Map<String, Long> heldWriteOffs(Collection<Long> receiptIds, Collection<Long> productIds,
+                                            long exceptRequestId) {
+        Map<String, Long> pending = new HashMap<>();
+        for (Object[] row : stockLines.findOpenHeldWriteOffs(receiptIds, productIds, exceptRequestId)) {
+            pending.put(row[0] + ":" + row[1], ((Number) row[2]).longValue());
+        }
+        return pending;
     }
 
     private Map<Long, DiscrepancyCase> cases(long receiptId) {
