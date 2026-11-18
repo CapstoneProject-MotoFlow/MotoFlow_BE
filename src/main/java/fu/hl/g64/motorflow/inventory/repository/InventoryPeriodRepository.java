@@ -60,4 +60,7 @@ public interface InventoryPeriodRepository extends JpaRepository<InventoryPeriod
                     'OPEN')
             on conflict (period_month) do nothing""", nativeQuery = true)
     void openIfMissing(LocalDate month, LocalDate lastDay);
+
+    /** UC-96: a closed period in or after this month, so a posting into the month would come too late. */
+    boolean existsByStatusAndPeriodMonthGreaterThanEqual(InventoryPeriodStatus status, LocalDate periodMonth);
 }

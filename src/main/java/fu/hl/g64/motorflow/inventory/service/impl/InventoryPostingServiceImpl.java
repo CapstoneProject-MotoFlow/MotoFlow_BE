@@ -503,8 +503,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         if (periodId == null && occurredAt == null) {
             return new PostingTime(inventoryPeriods.openFor(now.toLocalDate()), now);
         }
-        if (type != MovementType.COUNT_ADJUSTMENT) {
-            throw new IllegalArgumentException("only a count adjustment may name its period and time");
+        if (type != MovementType.COUNT_ADJUSTMENT && type != MovementType.OPENING_BALANCE) {
+            throw new IllegalArgumentException("only a count adjustment or opening balance names its period and time");
         }
         if (periodId == null || occurredAt == null) {
             throw new IllegalArgumentException("periodId and occurredAt go together");

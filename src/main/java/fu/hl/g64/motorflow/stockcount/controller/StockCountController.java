@@ -52,7 +52,9 @@ public class StockCountController {
         return service.getPrefill(user, requestId);
     }
 
-    @Operation(summary = "Create a year-end or cycle count of the Branch Manager's warehouse (UC-91)")
+    @Operation(summary = "Create an opening, year-end or cycle count of the Branch Manager's warehouse (UC-91). "
+            + "An opening count covers the whole warehouse, starts with no line and is allowed only before anything "
+            + "moves in it (MSG244, UC-96, BR-86)")
     @PostMapping
     public ResponseEntity<StockCountDetailResponse> create(@AuthenticationPrincipal AuthenticatedUser user,
                                                            @Valid @RequestBody StockCountCreateRequest request) {

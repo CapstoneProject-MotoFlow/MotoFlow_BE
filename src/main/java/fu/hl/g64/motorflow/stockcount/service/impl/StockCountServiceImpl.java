@@ -51,6 +51,7 @@ import fu.hl.g64.motorflow.stockcount.dto.StockCountRecountRequest;
 import fu.hl.g64.motorflow.stockcount.dto.StockCountSubmitRequest;
 import fu.hl.g64.motorflow.stockcount.helper.StockCountAccess.Viewer;
 import fu.hl.g64.motorflow.stockcount.helper.StockCountAccess;
+import fu.hl.g64.motorflow.stockcount.helper.OpeningBalances;
 import fu.hl.g64.motorflow.stockcount.helper.StockCountMapper;
 import fu.hl.g64.motorflow.stockcount.service.CountSheetService;
 import fu.hl.g64.motorflow.stockcount.service.StockCountService;
@@ -100,6 +101,7 @@ public class StockCountServiceImpl implements StockCountService {
     private final WarehouseTaskRepository tasks;
     private final InventoryPeriods inventoryPeriods;
     private final InventoryPostingService posting;
+    private final OpeningBalances openingBalances;
     private final WarehouseTaskService warehouseTasks;
     private final NotificationService notifications;
     private final CountSheetService countSheets;
@@ -124,9 +126,6 @@ public class StockCountServiceImpl implements StockCountService {
     @Override
     @Transactional
     public StockCountDetailResponse create(AuthenticatedUser user, StockCountCreateRequest request) {
-        if (request.countType() == CountType.OPENING) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG244");
-        }
         if (user.storeId() == null) { // the Owner has no warehouse
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
@@ -139,6 +138,9 @@ public class StockCountServiceImpl implements StockCountService {
         LocalDate today = LocalDate.now(clock);
         if (request.countDate().isAfter(today.withDayOfMonth(today.lengthOfMonth()))) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG232");
+        }
+        if (request.countType() == CountType.OPENING) {
+            return createOpening(user, storeId, request);
         }
         if (request.countDate().withDayOfMonth(1).equals(today.withDayOfMonth(1))) {
             inventoryPeriods.openIfMissing(request.countDate());
@@ -177,6 +179,26 @@ public class StockCountServiceImpl implements StockCountService {
         if (answered != null) {
             answered.markDone();
         }
+        return mapper.toDetail(count, StockCountAccess.Viewer.MANAGER);
+    }
+
+    /**
+     * UC-96, BR-86: an opening count of a warehouse that has no stock movement yet (MSG244). It covers the whole
+     * warehouse and starts with no line: the counter enters one line per part and expiry date. It belongs to no
+     * period (the schema requires it), but its date must fall in a month that is not closed (MSG232), where its
+     * opening balances are posted on approval.
+     */
+    private StockCountDetailResponse createOpening(AuthenticatedUser user, long storeId,
+                                                   StockCountCreateRequest request) {
+        if (request.scopeType() != ScopeType.WHOLE || request.scopeNote() != null && !request.scopeNote().isBlank()
+                || request.partCategoryId() != null || request.productIds() != null && !request.productIds().isEmpty()
+                || request.stockCountRequestId() != null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        openingBalances.requireNoMovement(storeId);
+        openingBalances.requireMonthOpen(request.countDate());
+        StockCount count = counts.save(StockCount.create(storeId, null, null, CountType.OPENING,
+                request.countDate(), ScopeType.WHOLE, null, null, user.id(), LocalDateTime.now(clock)));
         return mapper.toDetail(count, StockCountAccess.Viewer.MANAGER);
     }
 
@@ -385,13 +407,15 @@ public class StockCountServiceImpl implements StockCountService {
                 .collect(Collectors.toMap(StockCountConfirmRequest.Reason::lineId, r -> r.reason().strip(), (a, b) -> b));
 
         // SC-7: only uncounted lines of this count may go, every other line is counted and a difference has a reason.
+        // Opening stock has no book to differ from, so its lines need no reason (BR-86).
+        boolean opening = count.getCountType() == CountType.OPENING;
         boolean invalid = !allIds.containsAll(removedIds) || removedIds.size() == all.size();
         List<StockCountLine> kept = all.stream().filter(l -> !removedIds.contains(l.getId())).toList();
         for (StockCountLine line : all) {
             if (removedIds.contains(line.getId())) {
                 invalid |= line.isCounted();
             } else {
-                boolean needsReason = line.isCounted()
+                boolean needsReason = !opening && line.isCounted()
                         && (line.difference() != 0 || line.damagedChange() != 0);
                 invalid |= !line.isCounted() || (needsReason && !reasons.containsKey(line.getId()));
             }
@@ -403,7 +427,11 @@ public class StockCountServiceImpl implements StockCountService {
         if (!removedIds.isEmpty() && count.wasConfirmed()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG243");
         }
-        access.requireOpenPeriod(count.getInventoryPeriodId());
+        if (opening) {
+            openingBalances.requireMonthOpen(count.getCountDate());
+        } else {
+            access.requireOpenPeriod(count.getInventoryPeriodId());
+        }
 
         warehouseTasks.confirmResult(user, TaskType.COUNTING, id);
         lines.deleteAll(all.stream().filter(l -> removedIds.contains(l.getId())).toList());
@@ -485,10 +513,14 @@ public class StockCountServiceImpl implements StockCountService {
         if (count.getStatus() != StockCountStatus.AWAITING_APPROVAL) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG235");
         }
+        if (count.getCountType() == CountType.OPENING) {
+            // UC-96: the counted stock becomes opening lots at the initial unit costs (BR-74, BR-86).
+            openingBalances.post(count, user.id());
+            return finishApproval(user, count, request);
+        }
         access.requireOpenPeriod(count.getInventoryPeriodId());
 
         List<CountPosting> steps = planCountAdjustments(count);
-        LocalDateTime now = LocalDateTime.now(clock);
         // BR-83: the differences belong to the period and the end of the count day, even if approved a month later.
         LocalDateTime occurredAt = count.getCountDate().atTime(23, 59, 59);
         Map<Long, Product> surplusParts = products.findAllById(steps.stream().filter(step -> step.lotId() == null)
@@ -511,11 +543,18 @@ public class StockCountServiceImpl implements StockCountService {
             }
         }
 
+        return finishApproval(user, count, request);
+    }
+
+    private StockCountDetailResponse finishApproval(AuthenticatedUser user, StockCount count,
+                                                    StockCountApproveRequest request) {
         String decision = request == null || request.decisionReason() == null || request.decisionReason().isBlank()
                 ? null : request.decisionReason().strip();
-        count.approve(user.id(), decision, now);
+        count.approve(user.id(), decision, LocalDateTime.now(clock));
+        String message = count.getCountType() == CountType.OPENING
+                ? "Owner đã duyệt tồn đầu kỳ của phiếu kiểm kê #%d." : "Owner đã duyệt chênh lệch của phiếu kiểm kê #%d.";
         notifications.notifyStoreManagers(count.getStoreId(), "STOCK_COUNT_APPROVED",
-                "Owner đã duyệt chênh lệch của phiếu kiểm kê #%d.".formatted(id), "STOCK_COUNT", id);
+                message.formatted(count.getId()), "STOCK_COUNT", count.getId());
         return mapper.toDetail(count, Viewer.OWNER);
     }
 

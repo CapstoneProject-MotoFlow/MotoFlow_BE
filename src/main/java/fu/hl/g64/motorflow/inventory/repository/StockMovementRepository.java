@@ -96,4 +96,7 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
               and (q.salesOrderId = :salesOrderId or q.goodsReceiptNoteId = :receiptId)
             group by m.productId, m.lotId""")
     List<Object[]> sumAppliedCorrections(Long salesOrderId, Long receiptId);
+
+    /** UC-96: whether anything ever moved in this warehouse (BR-86 allows an opening count only before). */
+    boolean existsByStoreId(Long storeId);
 }

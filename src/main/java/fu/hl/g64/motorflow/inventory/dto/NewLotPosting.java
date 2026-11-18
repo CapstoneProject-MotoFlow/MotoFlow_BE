@@ -17,9 +17,9 @@ import java.util.Map;
  * @param goodsReceiptNoteLineId set for {@link LotSourceType#RECEIPT}, otherwise null
  * @param supplierId             set for {@link LotSourceType#RECEIPT}, otherwise null
  * @param source                 the GRN for a receipt; the stock count for an opening or surplus lot
- * @param periodId               COUNT_ADJUSTMENT only: the period to post into instead of the current month's (BR-83),
- *                               must be OPEN; null together with {@code occurredAt} keeps the current month
- * @param occurredAt             COUNT_ADJUSTMENT only: the movement time, normally the end of the count day
+ * @param periodId               COUNT_ADJUSTMENT or OPENING_BALANCE only: the period to post into instead of the
+ *                               current month's (BR-83), must be OPEN; null together with {@code occurredAt} keeps the current month
+ * @param occurredAt             COUNT_ADJUSTMENT or OPENING_BALANCE only: the movement time, the end of the count day
  */
 public record NewLotPosting(
         Long storeId,
