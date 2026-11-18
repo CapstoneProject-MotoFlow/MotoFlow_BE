@@ -139,15 +139,17 @@ public class ReportQueries {
     /**
      * Gross margin per store and part: [store_id, product_id, quantity, revenue, cost, correction_revenue,
      * correction_cost, write_off_value]. Sales: orders completed in the period; cost: their SALE_ISSUE movements.
-     * Corrections and write-offs: requests applied in the period. {@code categoryId} also takes its sub-categories.
+     * Corrections and write-offs: requests applied in the period. {@code categoryId} also takes its sub-categories, at any depth.
      */
     public List<Map<String, Object>> margins(Long storeId, Long categoryId, Long productId, LocalDateTime from,
                                              LocalDateTime to) {
         String filter = STORE.formatted("x.store_id") + """
                  AND (CAST(:productId AS BIGINT) IS NULL OR x.product_id = :productId)
                  AND (CAST(:categoryId AS BIGINT) IS NULL OR x.product_id IN (
-                      SELECT pr.id FROM product pr JOIN part_category c ON c.id = pr.category_id
-                      WHERE c.id = :categoryId OR c.parent_id = :categoryId))""";
+                      WITH RECURSIVE tree AS (
+                          SELECT id FROM part_category WHERE id = :categoryId
+                          UNION SELECT c.id FROM part_category c JOIN tree t ON c.parent_id = t.id)
+                      SELECT pr.id FROM product pr JOIN tree t ON t.id = pr.category_id))""";
         return jdbc.queryForList("""
                 WITH completed AS (
                     SELECT o.id, o.store_id FROM sales_order o

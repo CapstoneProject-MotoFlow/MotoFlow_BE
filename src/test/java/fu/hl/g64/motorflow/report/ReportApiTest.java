@@ -116,6 +116,16 @@ class ReportApiTest extends SalesOrderTestData {
         report(ownerToken, "/gross-margin?groupBy=CATEGORY&productId=" + oil)
                 .andExpect(jsonPath("$.rows[*].name", contains("Phanh")))
                 .andExpect(jsonPath("$.total.revenue").value(170_000));
+        // A category two levels above the parts' category still takes their sales.
+        long oilCategory = id("SELECT category_id FROM product WHERE id = ?", oil);
+        long top = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Bảo dưỡng', 'MOTORCYCLE') "
+                + "RETURNING id");
+        long middle = id("INSERT INTO part_category (category_name, vehicle_type, parent_id) "
+                + "VALUES ('Dầu nhớt', 'MOTORCYCLE', ?) RETURNING id", top);
+        jdbc.update("UPDATE part_category SET parent_id = ? WHERE id = ?", middle, oilCategory);
+        report(ownerToken, "/gross-margin?groupBy=PRODUCT&categoryId=" + top)
+                .andExpect(jsonPath("$.rows[*].code", contains("MA-PHANH-01", "NHOT-01")))
+                .andExpect(jsonPath("$.total.revenue").value(570_000));
         report(ownerToken, "/gross-margin?categoryId=999999").andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("MSG61"));
         report(managerToken, "/gross-margin").andExpect(status().isForbidden());
