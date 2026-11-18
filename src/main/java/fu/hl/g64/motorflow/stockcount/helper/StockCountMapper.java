@@ -2,7 +2,9 @@ package fu.hl.g64.motorflow.stockcount.helper;
 
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
+import fu.hl.g64.motorflow.catalog.entity.PartCategory;
 import fu.hl.g64.motorflow.catalog.entity.Product;
+import fu.hl.g64.motorflow.catalog.repository.PartCategoryRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
@@ -27,6 +29,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -44,6 +47,7 @@ public class StockCountMapper {
     private final StockCountRequestRepository requests;
     private final StockCountRequestProductRepository requestProducts;
     private final ProductRepository products;
+    private final PartCategoryRepository categories;
     private final StockBalanceRepository balances;
     private final StoreRepository stores;
     private final UserAccountRepository users;
@@ -59,7 +63,8 @@ public class StockCountMapper {
                 : toRequest(requests.findById(count.getStockCountRequestId()).orElseThrow());
         return new StockCountDetailResponse(count.getId(), store.getId(), store.getStoreName(),
                 count.getInventoryPeriodId(), count.getCountType(), count.getCountDate(), count.getScopeType(),
-                count.getScopeNote(), count.getStatus(), count.getCreatedBy(), nameOf(count.getCreatedBy()),
+                count.getScopeNote(), count.getPartCategoryId(), categoryName(count.getPartCategoryId()),
+                count.getStatus(), count.getCreatedBy(), nameOf(count.getCreatedBy()),
                 count.getCreatedAt(), count.getCountingStartedAt(), count.getConfirmedBy(), count.getConfirmedAt(),
                 count.getApprovedBy(), count.getApprovedAt(), count.getDecisionReason(), count.getCancelledBy(),
                 count.getCancelledAt(), count.getCancellationReason(),
@@ -87,36 +92,54 @@ public class StockCountMapper {
                 .collect(Collectors.toSet())), Store::getId);
         Map<Long, UserAccount> requesters = byId(users.findAllById(found.stream().map(StockCountRequest::getRequestedBy)
                 .collect(Collectors.toSet())), UserAccount::getId);
-        return found.stream().map(request -> new CountRequestResponse(request.getId(), request.getStoreId(),
+        Set<Long> categoryIds = found.stream().map(StockCountRequest::getPartCategoryId).filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, PartCategory> categoriesById = byId(categories.findAllById(categoryIds), PartCategory::getId);
+        return found.stream().map(request -> {
+            PartCategory category = request.getPartCategoryId() == null ? null
+                    : categoriesById.get(request.getPartCategoryId());
+            return new CountRequestResponse(request.getId(), request.getStoreId(),
                 storesById.get(request.getStoreId()).getStoreName(), request.getScopeType(), request.getScopeNote(),
-                request.getReason(), request.getStatus(), request.getRequestedBy(),
+                request.getPartCategoryId(), category == null ? null : category.getCategoryName(), request.getReason(),
+                request.getStatus(), request.getRequestedBy(),
                 requesters.get(request.getRequestedBy()).getFullName(), request.getRequestedAt(),
                 request.getCancelledAt(),
                 listed.getOrDefault(request.getId(), List.of()).stream()
                         .sorted(Comparator.comparing(StockCountRequestProduct::getProductId))
                         .map(p -> parts.get(p.getProductId()))
                         .map(p -> new CountRequestResponse.Product(p.getId(), p.getSku(), p.getPartName()))
-                        .toList())).toList();
+                        .toList());
+        }).toList();
     }
 
     private static StockCountDetailResponse.Line toLine(StockCountLine line, Product part, StockBalance location,
                                                         Viewer viewer) {
         boolean counter = viewer == Viewer.COUNTER;
         Integer difference = counter ? null : line.difference();
+        Integer damagedChange = counter ? null : line.damagedChange();
         BigDecimal value = viewer == Viewer.OWNER && difference != null && part.getMovingAvgCost() != null
                 ? part.getMovingAvgCost().multiply(BigDecimal.valueOf(difference)).setScale(0, RoundingMode.HALF_UP)
+                : null;
+        BigDecimal damagedValue = viewer == Viewer.OWNER && damagedChange != null && part.getMovingAvgCost() != null
+                ? part.getMovingAvgCost().multiply(BigDecimal.valueOf(damagedChange)).setScale(0, RoundingMode.HALF_UP)
                 : null;
         return new StockCountDetailResponse.Line(line.getId(), part.getId(), part.getSku(), part.getPartName(),
                 part.getBaseUnit(), line.getLotId(), line.getExpiryDate(),
                 location == null ? null : location.getStorageArea(), location == null ? null : location.getBinLocation(),
-                counter ? null : line.getBookQty(), line.getCountedQty(), difference, value,
-                counter ? null : line.getReason(), line.isRecountRequested(), line.getRecountReason(),
-                counter ? null : line.getPreviousBookQty(), counter ? null : line.getPreviousCountedQty(),
+                counter ? null : line.getBookQty(), counter ? null : line.getBookDamagedQty(), line.getCountedQty(),
+                line.getDamagedQty(), difference, damagedChange, value, damagedValue, counter ? null : line.getReason(),
+                line.isRecountRequested(), line.getRecountReason(), counter ? null : line.getPreviousBookQty(),
+                counter ? null : line.getPreviousCountedQty(), counter ? null : line.getPreviousDamagedQty(),
                 line.getCountedAt());
     }
 
     private String nameOf(long userId) {
         return users.findById(userId).map(UserAccount::getFullName).orElse(null);
+    }
+
+    private String categoryName(Long categoryId) {
+        return categoryId == null ? null
+                : categories.findById(categoryId).map(PartCategory::getCategoryName).orElse(null);
     }
 
     private static <T> Map<Long, T> byId(Collection<T> items, Function<T, Long> id) {

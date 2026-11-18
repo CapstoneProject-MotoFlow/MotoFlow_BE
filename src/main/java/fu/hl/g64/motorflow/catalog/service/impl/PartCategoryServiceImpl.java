@@ -28,6 +28,8 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -125,11 +127,13 @@ public class PartCategoryServiceImpl implements PartCategoryService {
     }
 
     private void requireUsableParent(Long selfId, long parentId, VehicleType vehicleType) {
-        PartCategory parent = categories.findById(parentId)
+        Map<Long, PartCategory> byId = categories.findAll().stream()
+                .collect(Collectors.toMap(PartCategory::getId, Function.identity()));
+        PartCategory parent = Optional.ofNullable(byId.get(parentId))
                 .filter(p -> p.getStatus() == PartCategoryStatus.ACTIVE && p.getVehicleType() == vehicleType)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG59"));
         // Walking up from the new parent must never reach the category being moved.
-        for (PartCategory c = parent; c != null; c = c.getParentId() == null ? null : categories.findById(c.getParentId()).orElse(null)) {
+        for (PartCategory c = parent; c != null; c = c.getParentId() == null ? null : byId.get(c.getParentId())) {
             if (c.getId().equals(selfId)) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG59");
             }

@@ -10,7 +10,9 @@ body:
       "lines": [
         { "productId": {{shortPartId}}, "dispatchedQty": 2 },
         { "productId": {{excessPartId}}, "dispatchedQty": 2 }
-      ]
+      ],
+      "delivererName": "Anh Hùng",
+      "vehiclePlateNo": "29C-678.90"
     }
 auth:
   type: bearer

@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * UC-105. {@code productIds}: at least one, no repeats, for PRODUCTS only. {@code scopeNote}: the storage area, required
- * for AREA.
+ * for AREA. {@code partCategoryId}: required for CATEGORY.
  */
 public record CountRequestCreateRequest(
         @NotNull(message = "Vui lòng chọn cửa hàng.")
@@ -25,5 +25,7 @@ public record CountRequestCreateRequest(
         @Size(max = 255, message = "Lý do tối đa 255 ký tự.")
         String reason,
 
-        List<@NotNull Long> productIds) {
+        List<@NotNull Long> productIds,
+
+        Long partCategoryId) {
 }

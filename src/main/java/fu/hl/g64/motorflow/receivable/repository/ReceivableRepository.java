@@ -2,7 +2,9 @@ package fu.hl.g64.motorflow.receivable.repository;
 
 import fu.hl.g64.motorflow.receivable.entity.Receivable;
 import fu.hl.g64.motorflow.receivable.entity.enums.OriginType;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDate;
@@ -14,11 +16,8 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
 
     /**
      * Remaining amount in VND of receivable {@code r} (BR-53): the original amount with its applied corrections, less
-     * the verified debt payments allocated to it with their corrections. Only verified payments count. Every query
-     * below uses this one expression, so every screen shows the same debt.
-     * shortcut: a correction of a payment split over several receivables counts against each of them. BR-71 says the
-     * corrected amount is allocated again over the same receivables; build that when document corrections of debt
-     * payments are built.
+     * the active rows of verified debt payments allocated to it. Reversed allocation rows stay for history and no longer
+     * reduce the receivable (BR-71). Every query below uses this one expression, so every screen shows the same debt.
      */
     String REMAINING = """
             r.originalAmount
@@ -29,14 +28,8 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
                    - coalesce((select sum(a.allocatedAmount) from PaymentAllocation a
                                join Payment p on p.id = a.paymentId
                                where a.receivableId = r.id
+                                 and a.reversedAt is null
                                  and p.status = fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus.VERIFIED), 0)
-                   - coalesce((select sum(l.amountChange) from AdjustmentAmountLine l
-                               join AdjustmentRequest q on q.id = l.adjustmentRequestId
-                               join Payment p on p.id = l.paymentId
-                               join PaymentAllocation a on a.paymentId = p.id
-                               where a.receivableId = r.id
-                                 and p.status = fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus.VERIFIED
-                                 and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED), 0)
             """;
 
     /** [receivable, remaining amount in VND] of each unsettled receivable of the customers. */
@@ -81,4 +74,15 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
     /** UC-67 Step 5_Debt already recorded: the same opening debt entered a second time. */
     Optional<Receivable> findFirstByCustomerIdAndStoreIdAndOriginTypeAndOriginalAmountAndDueDateOrderByIdAsc(
             long customerId, long storeId, OriginType originType, long originalAmount, LocalDate dueDate);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from Receivable r where r.id in :ids order by r.recognizedAt, r.id")
+    List<Receivable> findAllByIdForUpdate(Collection<Long> ids);
+
+    /** [receivable, remaining amount in VND] of the given receivables. */
+    @Query("select r, " + REMAINING + """
+            from Receivable r
+            where r.id in :ids
+            order by r.recognizedAt, r.id""")
+    List<Object[]> findWithRemainingByIds(Collection<Long> ids);
 }

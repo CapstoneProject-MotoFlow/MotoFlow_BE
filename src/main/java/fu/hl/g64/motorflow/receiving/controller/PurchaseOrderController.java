@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.receiving.dto.CancelPurchaseOrderRequest;
 import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptDetail;
 import fu.hl.g64.motorflow.receiving.dto.GoodsReceiptRequest;
+import fu.hl.g64.motorflow.receiving.dto.LastPurchasePrice;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderReceivingView;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderRequest;
@@ -33,9 +34,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.List;
 
 @Tag(name = "Purchase orders", description = "UC-39 to UC-42: Owner creates, changes and cancels purchase orders "
-        + "(yêu cầu nhập hàng); the Branch Manager of the receiving warehouse follows them")
+        + "(đơn nhập hàng, DNH-xxxx); the Branch Manager of the receiving warehouse follows them")
 @RestController
 @RequestMapping("/api/v1/purchase-orders")
 @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
@@ -46,9 +48,11 @@ public class PurchaseOrderController {
     private final GoodsReceiptService goodsReceipts;
 
     @Operation(summary = "Purchase orders of every warehouse (Owner) or of the user's warehouse (UC-39)",
-            description = "q: PO number (with or without #) or supplier name or code. view: OPEN (default), "
-                    + "FULLY_RECEIVED, CANCELLED or ALL. createdFrom and createdTo (yyyy-MM-dd): creation days; "
-                    + "the views other than OPEN keep the last 30 days when none are given.")
+            description = "q: PO number (12, #12, DNH-0012 or dnh-12) or supplier name or code. view: OPEN "
+                    + "(default), AWAITING_RECEIVING_ASSIGNMENT (open POs with no receiving task held by someone, "
+                    + "for the Branch Manager's to-do box), FULLY_RECEIVED, CANCELLED or ALL. createdFrom and "
+                    + "createdTo (yyyy-MM-dd): creation days; FULLY_RECEIVED, CANCELLED and ALL keep the last "
+                    + "30 days when none are given.")
     @GetMapping
     public PageResponse<PurchaseOrderSummary> list(
             @AuthenticationPrincipal AuthenticatedUser user,
@@ -62,6 +66,16 @@ public class PurchaseOrderController {
             @RequestParam(defaultValue = "20") int size) {
         return purchaseOrders.list(user, new PurchaseOrderSearch(q, storeId, supplierId, view, createdFrom, createdTo),
                 page, size);
+    }
+
+    @Operation(summary = "Last purchase price of each part from this supplier (PM 17/11, UC-40/UC-42 form)",
+            description = "Owner only. productIds: comma separated, at most 200. The unit price on the latest confirmed "
+                    + "delivery from this supplier that brought the part (by confirmedAt). A part never received from "
+                    + "this supplier has no row; show \"—\". For reference only, not filled into the price.")
+    @GetMapping("/last-prices")
+    @PreAuthorize("hasRole('OWNER')")
+    public List<LastPurchasePrice> lastPrices(@RequestParam long supplierId, @RequestParam List<Long> productIds) {
+        return purchaseOrders.lastPrices(supplierId, productIds);
     }
 
     @Operation(summary = "A purchase order with its lines, deliveries, discrepancies and history (UC-41)")

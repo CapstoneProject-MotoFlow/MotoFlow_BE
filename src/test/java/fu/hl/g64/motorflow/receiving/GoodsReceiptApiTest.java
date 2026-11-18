@@ -87,6 +87,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         // Two pads are damaged and four oils did not come.
         record(staffToken, grn, findings(pads, counted(oilLine, 24, 20, 0, 0)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inspectionNote").value("Ghi chú kiểm nhận (fixture)."))
                 .andExpect(jsonPath("$.status").value("AWAITING_CONFIRMATION"))
                 .andExpect(jsonPath("$.recordedById").value(staff.getId()))
                 .andExpect(jsonPath("$.recordedByName").value("Test staff"))
@@ -101,7 +102,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         // BR-25: nothing reaches stock before the confirmation.
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement", Long.class)).isZero();
         assertThat(notificationsOf(manager)).contains(List.of("GOODS_RECEIPT_SUBMITTED", "Phiếu nhận hàng #" + grn
-                + " của yêu cầu nhập hàng #" + order + " đã có kết quả kiểm nhận và đang chờ xác nhận.",
+                + " của đơn nhập hàng " + dnh(order) + " đã có kết quả kiểm nhận và đang chờ xác nhận.",
                 "GOODS_RECEIPT_NOTE", grn));
 
         receipt(managerToken, grn)
@@ -145,7 +146,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 Map.of("product_id", oil, "short_qty", 4, "damaged_qty", 0, "return_required_qty", 0,
                         "replacement_required_qty", 4, "status", "OPEN"));
         assertThat(notificationsOf(owner)).contains(List.of("SUPPLIER_DISCREPANCY_OPENED", "Phiếu nhận hàng #" + grn
-                + " của yêu cầu nhập hàng #" + order + " có 2 phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà "
+                + " của đơn nhập hàng " + dnh(order) + " có 2 phụ tùng thiếu, giao sai hoặc hư hỏng cần xử lý với nhà "
                 + "cung cấp.", "GOODS_RECEIPT_NOTE", grn));
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ? "
                 + "AND status <> 'CANCELLED'", String.class, grn)).isEqualTo("DONE");
@@ -221,26 +222,21 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
     }
 
     @Test
-    void whoRecordedTheResultCannotConfirmIt() throws Exception {
+    void aBranchManagerWhoInspectedCanConfirmAndTheOwnerIsTold() throws Exception {
         long grn = receive("PX-001");
-        // The Branch Manager takes the inspection themself (MSG40), which needs another manager of the store to
-        // confirm it (review R-01).
-        createUser("bm3", Role.BRANCH_MANAGER, giaLam);
         assign(grn, manager);
         record(managerToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 0)))
                 .andExpect(status().isOk())
-                // A part left out did not come.
                 .andExpect(jsonPath("$.lines[*].deliveredQty", contains(10, 0)))
-                .andExpect(jsonPath("$.canConfirm").value(false))
+                .andExpect(jsonPath("$.canConfirm").value(true))
                 .andExpect(jsonPath("$.canReturnForRecount").value(true));
         confirm(managerToken, grn)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG32"))
-                .andExpect(jsonPath("$.message").value("Bạn đã ghi kết quả kiểm nhận của lượt này nên không thể tự xác "
-                        + "nhận. Lượt này cần người khác xác nhận."));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement", Long.class)).isZero();
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT status FROM goods_receipt_note WHERE id = ?", String.class, grn))
-                .isEqualTo("AWAITING_CONFIRMATION");
+                .isEqualTo("CONFIRMED");
     }
 
     @Test
@@ -251,6 +247,9 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         long padLine = lineOf(grn, pad);
         long oilLine = lineOf(grn, oil);
 
+        recordAsIs(staffToken, grn, findings(counted(padLine, 10, 9, 0, 0), counted(oilLine, 24, 24, 0, 0)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG265"));
         record(staffToken, grn, findings(counted(padLine, 10, 3, 2, 2)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG27"))
@@ -315,11 +314,6 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         createReceipt(managerToken, order, tomorrow)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG138"));
-        Map<String, Object> noDocument = deliveryNote("  ");
-        createReceipt(managerToken, order, noDocument)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG02"))
-                .andExpect(jsonPath("$.fieldErrors.deliveryDocumentNo").value("Vui lòng nhập số chứng từ giao hàng."));
         // UC-106 step 3: the photo of the delivery document comes with it.
         Map<String, Object> noPhoto = deliveryNote("PX-001");
         noPhoto.remove("documents");
@@ -341,13 +335,24 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         // A second truck of the same PO is a GRN of its own (BR-22).
         long second = receive("PX-002");
         assertThat(second).isNotEqualTo(first);
+        // PM 17/11 Q1-Q2: the number and the date may be left out, several times on one PO; blank is none.
+        Map<String, Object> blank = deliveryNote("  ");
+        blank.remove("deliveryDocumentDate");
+        createReceipt(managerToken, order, blank).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.deliveryDocumentNo").doesNotExist())
+                .andExpect(jsonPath("$.deliveryDocumentDate").doesNotExist());
+        Map<String, Object> none = deliveryNote(null);
+        none.remove("deliveryDocumentNo");
+        createReceipt(managerToken, order, none).andExpect(status().isCreated());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note WHERE delivery_document_no IS NULL",
+                Long.class)).isEqualTo(2);
 
         long cancelled = created(order(honda, giaLam, TODAY, null, line(lamp, 2, 200_000)));
         cancel(ownerToken, cancelled, "NCC hết hàng").andExpect(status().isOk());
         createReceipt(managerToken, cancelled, deliveryNote("PX-009"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG29"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note", Long.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note", Long.class)).isEqualTo(4);
     }
 
     @Test
@@ -516,7 +521,7 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         assertThat(averageCost(pad)).isEqualByComparingTo("110000");
         assertThat(stock(giaLam, pad, "AVAILABLE")).isEqualTo(20);
         assertThat(notificationsOf(owner)).contains(List.of("EXCESS_AWAITING_DECISION", "Phiếu nhận hàng #" + grn
-                + " của yêu cầu nhập hàng #" + order + " có hàng giao thừa đang chờ quyết định nhận hoặc không nhận.",
+                + " của đơn nhập hàng " + dnh(order) + " có hàng giao thừa đang chờ quyết định nhận hoặc không nhận.",
                 "GOODS_RECEIPT_NOTE", grn));
         receipts(ownerToken, "excessAwaiting", "true")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(grn))))
@@ -581,5 +586,40 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         assertThat(stock(giaLam, pad, "AVAILABLE")).isEqualTo(13);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM lot WHERE product_id = ?", Long.class, pad)).isEqualTo(2);
         assertStockAgrees(giaLam, pad);
+    }
+
+    /** FE review PR #43 R-01 (PM 15/11): the delivery-document quantities are entered with the GRN and kept. */
+    @Test
+    void theDeliveryDocumentQuantitiesAreEnteredWithTheReceiptAndKeptByTheInspection() throws Exception {
+        Map<String, Object> body = deliveryNote("PX-DOC");
+        body.put("documentLines", List.of());
+        createReceipt(managerToken, order, body).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG278"));
+        body.put("documentLines", List.of(Map.of("productId", pad, "documentQty", 10),
+                Map.of("productId", pad, "documentQty", 9)));
+        createReceiptAs(managerToken, order, body).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG277"));
+        body.put("documentLines", List.of(Map.of("productId", 999_999L, "documentQty", 1)));
+        createReceiptAs(managerToken, order, body).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG277"));
+
+        // Oil left out: its document lists none.
+        body.put("documentLines", List.of(Map.of("productId", pad, "documentQty", 10)));
+        String created = createReceiptAs(managerToken, order, body).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lines[*].documentQty", contains(10, 0)))
+                .andReturn().getResponse().getContentAsString();
+        long grn = ((Number) JsonPath.read(created, "$.id")).longValue();
+        assign(grn, staff);
+
+        // The inspector sends only what arrived; a document quantity in the result is ignored.
+        Map<String, Object> pads = counted(lineOf(grn, pad), null, 8, 0, 0);
+        Map<String, Object> oils = counted(lineOf(grn, oil), null, 0, 0, 0);
+        oils.put("documentQty", 24);
+        Map<String, Object> result = findings(pads, oils);
+        result.put("inspectionNote", "Thiếu 2 má phanh.");
+        recordAsIs(staffToken, grn, result).andExpect(status().isOk());
+        assertThat(jdbc.queryForList("SELECT document_qty FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? "
+                + "ORDER BY id", Integer.class, grn)).containsExactly(10, 0);
+        receipt(managerToken, grn).andExpect(jsonPath("$.lines[0].shortQty").value(2));
     }
 }

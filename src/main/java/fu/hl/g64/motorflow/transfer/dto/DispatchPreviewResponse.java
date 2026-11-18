@@ -10,7 +10,7 @@ import java.util.List;
  * (FEFO, then FIFO, expired lots skipped). Nothing is reserved, so the lots can change until the dispatch is confirmed.
  *
  * @param readyToConfirm the preparer has sent their result and the order still waits for dispatch
- * @param canConfirm     ready, and the user is a source Branch Manager other than the preparer (BR-26)
+ * @param canConfirm     ready, and the user is a source Branch Manager (BR-26)
  */
 public record DispatchPreviewResponse(long id, TransferOrderStatus status, Long preparedBy, boolean readyToConfirm,
                                       boolean canConfirm, List<Line> lines) {

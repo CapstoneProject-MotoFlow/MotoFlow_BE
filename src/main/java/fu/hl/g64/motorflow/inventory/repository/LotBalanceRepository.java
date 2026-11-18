@@ -30,16 +30,16 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
     Optional<LotBalance> findForUpdate(Long lotId, Long storeId, StockStatus status);
 
     /**
-     * Lots of a part in one warehouse and status that still hold stock, in picking order: earliest expiry first
-     * (lots without expiry last), then oldest received (FEFO, then FIFO). Row-locked.
+     * Pickable lots of the given parts in one warehouse and status, row-locked. Ordered by product id, then earliest
+     * expiry (lots without expiry last), then oldest received (FEFO, then FIFO).
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select b from LotBalance b, Lot l
-            where l.id = b.lotId and l.productId = :productId
+            where l.id = b.lotId and l.productId in :productIds
               and b.storeId = :storeId and b.stockStatus = :status and b.quantity > 0
-            order by l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
-    List<LotBalance> findPickableForUpdate(Long storeId, Long productId, StockStatus status);
+            order by l.productId asc, l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
+    List<LotBalance> findPickableForUpdate(Long storeId, Collection<Long> productIds, StockStatus status);
 
     @Query("select coalesce(sum(b.quantity), 0) from LotBalance b where b.lotId = :lotId")
     long sumQuantityOfLot(Long lotId);
@@ -98,8 +98,8 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
             order by b.storeId, b.lotId""")
     List<ExpiringLotRow> findAvailableOf(Collection<Long> lotIds);
 
-    /** One lot holding AVAILABLE stock in a warehouse, as a stock count sees it. */
-    interface CountableLot {
+    /** One lot of a part in a warehouse with its AVAILABLE and DAMAGED quantities, as a stock count sees it. */
+    interface CountedLot {
         Long getProductId();
 
         Long getLotId();
@@ -108,27 +108,47 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
 
         LocalDate getReceivedDate();
 
-        int getQuantity();
+        int getAvailable();
+
+        int getDamaged();
     }
 
     /**
-     * UC-91, UC-93, UC-95: the lots of the listed parts holding AVAILABLE stock in the warehouse, by part, then earliest
-     * expiry (lots without expiry last), then oldest received (FIFO among the lots without expiry). Not locked.
+     * UC-91, UC-93, UC-95: the lots of the listed parts with AVAILABLE or DAMAGED stock in the warehouse, by part,
+     * then earliest expiry (lots without expiry last), then oldest received (FIFO among the lots without expiry).
+     * Not locked.
      */
     @Query("""
             select l.productId as productId, l.id as lotId, l.expiryDate as expiryDate,
-                   l.receivedDate as receivedDate, b.quantity as quantity
+                   l.receivedDate as receivedDate,
+                   cast(sum(case when b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE
+                                 then b.quantity else 0 end) as int) as available,
+                   cast(sum(case when b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.DAMAGED
+                                 then b.quantity else 0 end) as int) as damaged
             from LotBalance b, Lot l
-            where l.id = b.lotId and b.storeId = :storeId and l.productId in :productIds
-              and b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE and b.quantity > 0
+            where l.id = b.lotId and b.storeId = :storeId and l.productId in :productIds and b.quantity > 0
+              and b.stockStatus in (fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE,
+                                    fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.DAMAGED)
+            group by l.productId, l.id, l.expiryDate, l.receivedDate
             order by l.productId, l.expiryDate asc nulls last, l.receivedDate asc, l.id asc""")
-    List<CountableLot> findCountableLots(Long storeId, Collection<Long> productIds);
+    List<CountedLot> findCountedLots(Long storeId, Collection<Long> productIds);
 
-    /** UC-91: the parts with AVAILABLE stock in a lot of the warehouse, by id. */
+    /** UC-91: the parts with AVAILABLE or DAMAGED stock in a lot of the warehouse, by id. */
     @Query("""
             select distinct l.productId from LotBalance b, Lot l
             where l.id = b.lotId and b.storeId = :storeId and b.quantity > 0
-              and b.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE
+              and b.stockStatus in (fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE,
+                                    fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.DAMAGED)
             order by l.productId""")
-    List<Long> findProductIdsWithAvailableStock(Long storeId);
+    List<Long> findProductIdsWithCountableStock(Long storeId);
+
+    /** UC-91: parts in the listed categories with AVAILABLE or DAMAGED stock in a lot of the warehouse, by id. */
+    @Query("""
+            select distinct l.productId from LotBalance b, Lot l, Product p
+            where l.id = b.lotId and p.id = l.productId and b.storeId = :storeId and b.quantity > 0
+              and b.stockStatus in (fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.AVAILABLE,
+                                  fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.DAMAGED)
+              and p.categoryId in :categoryIds
+            order by l.productId""")
+    List<Long> findProductIdsWithStockInCategories(Long storeId, Collection<Long> categoryIds);
 }

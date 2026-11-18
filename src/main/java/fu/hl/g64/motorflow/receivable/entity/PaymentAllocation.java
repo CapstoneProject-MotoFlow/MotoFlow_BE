@@ -10,6 +10,8 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 /** The part of a debt payment that settles one receivable; one payment can settle several. */
 @Entity
 @Table(name = "payment_allocation")
@@ -29,6 +31,25 @@ public class PaymentAllocation {
 
     @Column(name = "allocated_amount", nullable = false)
     private long allocatedAmount;
+
+    @Column(name = "reversed_by_adjustment_id")
+    private Long reversedByAdjustmentId;
+
+    @Column(name = "reversed_at")
+    private LocalDateTime reversedAt;
+
+    public boolean isActive() {
+        return reversedAt == null;
+    }
+
+    /** BR-71: an applied correction of the payment reverses this row; it stays for history. */
+    public void reverse(long adjustmentRequestId, LocalDateTime now) {
+        if (reversedAt != null) {
+            throw new IllegalStateException("allocation " + id + " already reversed");
+        }
+        reversedByAdjustmentId = adjustmentRequestId;
+        reversedAt = now;
+    }
 
     public static PaymentAllocation of(long paymentId, long receivableId, long amount) {
         PaymentAllocation allocation = new PaymentAllocation();

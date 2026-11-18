@@ -2,7 +2,9 @@ package fu.hl.g64.motorflow.receiving;
 
 import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
+import fu.hl.g64.motorflow.receiving.helper.ReceivingLedger;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
@@ -31,6 +33,9 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
             "AWAITING_SUPPLIER_RETURN", "IN_TRANSIT"};
 
     protected long order;
+
+    @Autowired
+    protected ReceivingLedger receivingLedger;
 
     @BeforeEach
     void createOrderToReceive() throws Exception {
@@ -77,6 +82,10 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
     /** UC-106 as is: the caller must already hold the PO's receiving task. */
     protected ResultActions createReceiptAs(String token, long purchaseOrder, Map<String, Object> body)
             throws Exception {
+        if (!body.containsKey("documentLines")) {
+            body = new LinkedHashMap<>(body);
+            body.put("documentLines", documentLines(purchaseOrder, body.get("replacementForCaseIds")));
+        }
         return mvc.perform(post("/api/v1/purchase-orders/" + purchaseOrder + "/goods-receipt-notes")
                 .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
@@ -120,7 +129,54 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
         return body;
     }
 
+    /**
+     * UC-43 by the inspector. The delivery-document quantity is entered when the GRN is recorded (PM 15/11); the
+     * tests give it with each counted line, so it is written to the GRN line here as if it had been entered then.
+     */
     protected ResultActions record(String token, long receipt, Map<String, Object> body) throws Exception {
+        Object lines = body.get("lines");
+        if (lines instanceof List<?> list) {
+            for (Object item : list) {
+                if (item instanceof Map<?, ?> line && line.get("documentQty") instanceof Number qty) {
+                    jdbc.update("UPDATE goods_receipt_note_line SET document_qty = ? WHERE id = ? "
+                            + "AND goods_receipt_note_id = ?", qty.intValue(), ((Number) line.get("lineId")).longValue(),
+                            receipt);
+                }
+            }
+        }
+        ensureInspectionNoteIfNeeded(body);
+        return recordAsIs(token, receipt, body);
+    }
+
+    private static void ensureInspectionNoteIfNeeded(Map<String, Object> body) {
+        if (body.containsKey("inspectionNote")) {
+            return;
+        }
+        Object lines = body.get("lines");
+        if (!(lines instanceof List<?> list)) {
+            return;
+        }
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> line)) {
+                continue;
+            }
+            int documentQty = intOrZero(line.get("documentQty"));
+            int delivered = intOrZero(line.get("deliveredQty"));
+            int wrong = intOrZero(line.get("wrongItemQty"));
+            int damaged = intOrZero(line.get("damagedQty"));
+            if (wrong > 0 || damaged > 0 || documentQty > delivered || delivered > documentQty) {
+                body.put("inspectionNote", "Ghi chú kiểm nhận (fixture).");
+                return;
+            }
+        }
+    }
+
+    private static int intOrZero(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    /** UC-43 with the body exactly as given: nothing is written to the GRN lines first. */
+    protected ResultActions recordAsIs(String token, long receipt, Map<String, Object> body) throws Exception {
         return mvc.perform(post("/api/v1/goods-receipt-notes/" + receipt + "/result")
                 .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
@@ -262,5 +318,28 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
 
     protected static Integer[] ids(long... ids) {
         return Arrays.stream(ids).mapToObj(id -> (int) id).toArray(Integer[]::new);
+    }
+
+    /**
+     * The delivery-document lines a test leaves out: every part the delivery is expected to bring (the PO's
+     * outstanding parts, or the parts of the replaced cases) with 0; {@link #record} sets the real quantity.
+     */
+    protected List<Map<String, Object>> documentLines(long purchaseOrder, Object caseIds) {
+        List<Long> parts;
+        if (caseIds instanceof List<?> ids && !ids.isEmpty()) {
+            parts = new ArrayList<>();
+            for (Object id : ids) {
+                jdbc.queryForList("SELECT product_id FROM discrepancy_case WHERE id = ?", Long.class,
+                        ((Number) id).longValue()).stream().filter(p -> !parts.contains(p)).forEach(parts::add);
+            }
+        } else {
+            ReceivingLedger.Ledger standing = receivingLedger.of(purchaseOrder);
+            parts = jdbc.queryForList("SELECT product_id FROM purchase_order_line WHERE purchase_order_id = ? "
+                    + "ORDER BY id", Long.class, purchaseOrder).stream()
+                    .filter(p -> standing.outstanding(p) > 0).toList();
+        }
+        List<Map<String, Object>> lines = new ArrayList<>();
+        parts.forEach(p -> lines.add(Map.of("productId", p, "documentQty", 0)));
+        return lines;
     }
 }

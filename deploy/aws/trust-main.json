@@ -12,8 +12,7 @@
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
           "token.actions.githubusercontent.com:sub": [
-            "repo:CapstoneProject-MotoFlow/MotoFlow_BE:ref:refs/heads/main",
-            "repo:CapstoneProject-MotoFlow/MotoFlow_FE:ref:refs/heads/main"
+            "repo:CapstoneProject-MotoFlow@326311735/MotoFlow_BE@1360857735:ref:refs/heads/main"
           ]
         }
       }

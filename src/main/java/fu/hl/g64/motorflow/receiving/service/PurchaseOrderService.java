@@ -9,7 +9,7 @@ import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderUpdateRequest;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 
 /**
- * Purchase Orders (PO), shown to users as "yêu cầu nhập hàng" (Owner screens: "phiếu nhập hàng"). Owner creates,
+ * Purchase Orders (PO), shown to users as "đơn nhập hàng (DNH-xxxx)". Owner creates,
  * changes and cancels them; the Branch Manager of the receiving warehouse follows them. Only Owner sees purchase
  * prices and values (BR-72).
  */
@@ -51,4 +51,32 @@ public interface PurchaseOrderService {
      * holding its SUPPLIER_RECEIVING task (MSG05 otherwise); MSG131 if there is no such PO.
      */
     fu.hl.g64.motorflow.receiving.dto.PurchaseOrderReceivingView receivingView(AuthenticatedUser user, long id);
+
+    /** PM 17/11 D1: the caller's PO drafts, last saved first; q as in {@link #list}. Never in any other list (N4). */
+    PageResponse<PurchaseOrderSummary> drafts(AuthenticatedUser owner, String q, int page, int size);
+
+    /** Saves a draft, checked as {@link #create} except the replenishment link; no notification, no task. */
+    PurchaseOrderDetail createDraft(AuthenticatedUser owner, PurchaseOrderRequest request);
+
+    /** One of the caller's drafts; MSG131 (404) for anyone else's or for a PO that is no draft (N5). */
+    PurchaseOrderDetail draft(AuthenticatedUser owner, long id);
+
+    /** Replaces the whole draft, checked as {@link #createDraft}. */
+    PurchaseOrderDetail updateDraft(AuthenticatedUser owner, long id, PurchaseOrderRequest request);
+
+    /**
+     * "Tạo đơn" on a draft: saves the content sent and places it exactly as {@link #create}, keeping its id; it is
+     * created now. A refusal leaves the draft as it was.
+     */
+    PurchaseOrderDetail submitDraft(AuthenticatedUser owner, long id, PurchaseOrderRequest request);
+
+    /** Deletes the draft and its lines for good. */
+    void deleteDraft(AuthenticatedUser owner, long id);
+
+    /**
+     * PM 17/11 Q6 (UC-40, UC-42): the last confirmed purchase price of each part from this supplier only. A part never
+     * received from it has no row. At most 200 parts.
+     */
+    java.util.List<fu.hl.g64.motorflow.receiving.dto.LastPurchasePrice> lastPrices(long supplierId,
+                                                                               java.util.List<Long> productIds);
 }

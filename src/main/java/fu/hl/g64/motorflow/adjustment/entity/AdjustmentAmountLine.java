@@ -32,4 +32,22 @@ public class AdjustmentAmountLine {
 
     @Column(name = "amount_change", nullable = false)
     private long amountChange;
+
+    /** A change of a payment's amount (BR-49). */
+    public static AdjustmentAmountLine ofPayment(long requestId, long paymentId, long amountChange) {
+        AdjustmentAmountLine line = new AdjustmentAmountLine();
+        line.adjustmentRequestId = requestId;
+        line.paymentId = paymentId;
+        line.amountChange = amountChange;
+        return line;
+    }
+
+    /** A change of what a receivable still asks for (BR-53, BR-71). */
+    public static AdjustmentAmountLine ofReceivable(long requestId, long receivableId, long amountChange) {
+        AdjustmentAmountLine line = new AdjustmentAmountLine();
+        line.adjustmentRequestId = requestId;
+        line.receivableId = receivableId;
+        line.amountChange = amountChange;
+        return line;
+    }
 }

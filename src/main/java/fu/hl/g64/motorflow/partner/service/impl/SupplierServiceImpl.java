@@ -76,7 +76,8 @@ public class SupplierServiceImpl implements SupplierService {
     public SupplierDetailResponse detail(long id) {
         Supplier supplier = find(id);
         Pageable newest = PageRequest.of(0, HISTORY_SIZE, Sort.by(Sort.Direction.DESC, "id"));
-        Page<PurchaseOrder> orders = purchaseOrders.findBySupplierId(id, newest);
+        Page<PurchaseOrder> orders = purchaseOrders.findBySupplierIdAndStatusNot(id,
+                fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus.DRAFT, newest);
         Page<GoodsReceiptNote> received = deliveries.findBySupplier(id, newest);
         Page<DiscrepancyCase> cases = discrepancies.findBySupplier(id, newest);
 

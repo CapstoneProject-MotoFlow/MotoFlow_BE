@@ -10,7 +10,8 @@ body:
       "lines": [
         { "productId": {{shortPartId}}, "passedQty": 1, "damagedQty": 0 },
         { "productId": {{excessPartId}}, "passedQty": 3, "damagedQty": 0 }
-      ]
+      ],
+      "inspectionNote": "Thiếu một và thừa một so với phiếu chuyển."
     }
 auth:
   type: bearer

@@ -97,4 +97,9 @@ public class Receivable {
             settledAt = now;
         }
     }
+
+    /** A corrected debt payment left something owed on it again. */
+    public void reopen() {
+        settledAt = null;
+    }
 }

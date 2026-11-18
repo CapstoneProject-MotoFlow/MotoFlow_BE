@@ -31,8 +31,8 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
 
     private static final String MSG02 = "Vui lòng nhập đầy đủ và đúng định dạng các thông tin bắt buộc.";
     private static final String MSG20 = "Số lượng và giá nhập phải lớn hơn 0, và mỗi phụ tùng chỉ có một dòng (dòng %d).";
-    private static final String MSG25 = "Yêu cầu nhập hàng đã có lượt giao được ghi nhận nên không thể sửa hoặc hủy.";
-    private static final String MSG130 = "Yêu cầu nhập hàng đã bị hủy nên không thể sửa hoặc hủy lại.";
+    private static final String MSG25 = "Đơn nhập hàng đã có lượt giao được ghi nhận nên không thể sửa hoặc hủy.";
+    private static final String MSG130 = "Đơn nhập hàng đã bị hủy nên không thể sửa hoặc hủy lại.";
 
     private static final LocalDate OCT_20 = LocalDate.of(2026, 10, 20);
     private static final LocalDate OCT_22 = LocalDate.of(2026, 10, 22);
@@ -85,7 +85,7 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
 
         // Only the Branch Manager of the receiving warehouse is told. Stock does not change before a delivery.
         assertThat(notificationsOf(manager)).containsExactly(List.of("PURCHASE_ORDER_CREATED",
-                "Có yêu cầu nhập hàng mới #" + order + " từ nhà cung cấp Honda Việt Nam.", "PURCHASE_ORDER", order));
+                "Có đơn nhập hàng mới " + dnh(order) + " từ nhà cung cấp Honda Việt Nam.", "PURCHASE_ORDER", order));
         assertThat(notificationsOf(otherManager)).isEmpty();
         assertThat(notificationsOf(staff)).isEmpty();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_balance", Long.class)).isZero();
@@ -147,7 +147,7 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG129"))
                 .andExpect(jsonPath("$.message")
-                        .value("Nhà cung cấp Phụ tùng Cũ đã ngừng giao dịch, không thể lập yêu cầu nhập hàng."));
+                        .value("Nhà cung cấp Phụ tùng Cũ đã ngừng giao dịch, không thể lập đơn nhập hàng."));
 
         jdbc.update("UPDATE store SET status = 'INACTIVE' WHERE id = ?", longBien);
         for (long store : new long[] {planned, longBien, 999_999}) {
@@ -165,7 +165,7 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG21"))
                 .andExpect(jsonPath("$.message")
-                        .value("Phụ tùng CU-01 đã ngừng kinh doanh, không thể đưa vào yêu cầu nhập hàng."));
+                        .value("Phụ tùng CU-01 đã ngừng kinh doanh, không thể đưa vào đơn nhập hàng."));
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();
     }
@@ -253,7 +253,7 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
         assertThat(jdbc.queryForList("SELECT product_id FROM purchase_order_line WHERE purchase_order_id = ? ORDER BY id",
                 Long.class, order)).containsExactly(pad, oil, filter);
         assertThat(notificationsOf(manager)).last().isEqualTo(List.of("PURCHASE_ORDER_UPDATED",
-                "Yêu cầu nhập hàng #" + order + " đã được cập nhật. Lý do: NCC báo tăng giá má phanh",
+                "Đơn nhập hàng " + dnh(order) + " đã được cập nhật. Lý do: NCC báo tăng giá má phanh",
                 "PURCHASE_ORDER", order));
 
         // The Branch Manager sees neither prices nor a change of price alone (BR-72).
@@ -323,14 +323,14 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG21"))
                 .andExpect(jsonPath("$.message")
-                        .value("Phụ tùng CU-01 đã ngừng kinh doanh, không thể đưa vào yêu cầu nhập hàng."));
+                        .value("Phụ tùng CU-01 đã ngừng kinh doanh, không thể đưa vào đơn nhập hàng."));
 
         // Once taken off, the discontinued lamp cannot be put back.
         update(ownerToken, order, change(null, null, "Bỏ đèn", line(pad, 10, 120_000))).andExpect(status().isOk());
         update(ownerToken, order, change(null, null, "Lấy lại đèn", line(pad, 10, 120_000), line(lamp, 8, 200_000)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
-                        .value("Phụ tùng DEN-01 đã ngừng kinh doanh, không thể đưa vào yêu cầu nhập hàng."));
+                        .value("Phụ tùng DEN-01 đã ngừng kinh doanh, không thể đưa vào đơn nhập hàng."));
     }
 
     @Test
@@ -356,7 +356,7 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.history[0].reason").value("NCC hết hàng"))
                 .andExpect(jsonPath("$.history[0].at").value("2026-10-13T08:05:00"));
         assertThat(notificationsOf(manager)).last().isEqualTo(List.of("PURCHASE_ORDER_CANCELLED",
-                "Yêu cầu nhập hàng #" + order + " đã bị hủy. Lý do: NCC hết hàng", "PURCHASE_ORDER", order));
+                "Đơn nhập hàng " + dnh(order) + " đã bị hủy. Lý do: NCC hết hàng", "PURCHASE_ORDER", order));
 
         cancel(ownerToken, order, "Hủy lần nữa")
                 .andExpect(status().isConflict())
@@ -433,7 +433,7 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
         detail(ownerToken, 999_999)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("MSG131"))
-                .andExpect(jsonPath("$.message").value("Không tìm thấy yêu cầu nhập hàng."));
+                .andExpect(jsonPath("$.message").value("Không tìm thấy đơn nhập hàng."));
         update(ownerToken, 999_999, change(null, null, "Sửa", line(pad, 1, 1_000)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("MSG131"));

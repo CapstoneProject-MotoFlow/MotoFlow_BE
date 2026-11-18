@@ -65,4 +65,35 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
             where m.lotId = :lotId and m.storeId = :storeId and m.quantityChange > 0 and m.movementType in :types
               and (:stockCountId is null or m.stockCountId = :stockCountId)""")
     long sumIncoming(Long lotId, Long storeId, Long stockCountId, Collection<MovementType> types);
+
+    /** [adjustment request id, sum of the value its movements posted in VND] (negative for a write-off). */
+    @Query("""
+            select m.adjustmentRequestId, sum(m.value) from StockMovement m
+            where m.adjustmentRequestId in :requestIds
+            group by m.adjustmentRequestId""")
+    List<Object[]> sumValueByAdjustmentRequest(Collection<Long> requestIds);
+
+    /** The movements an applied adjustment posted, by part and lot. */
+    List<StockMovement> findByAdjustmentRequestIdOrderByProductIdAscIdAsc(Long adjustmentRequestId);
+
+    /** The SALE_ISSUE movements of the order's part, latest first: where a corrected sale puts goods back. */
+    @Query("""
+            select m from StockMovement m
+            where m.salesOrderId = :salesOrderId and m.productId = :productId
+              and m.movementType = fu.hl.g64.motorflow.inventory.entity.enums.MovementType.SALE_ISSUE
+            order by m.id desc""")
+    List<StockMovement> findSaleIssues(long salesOrderId, long productId);
+
+    /**
+     * [product id, lot id, sum of quantity change] the applied corrections (UC-81) of a sales order or a supplier
+     * delivery posted, so a later correction starts from the corrected figures (BR-65 keeps the document itself).
+     */
+    @Query("""
+            select m.productId, m.lotId, sum(m.quantityChange) from StockMovement m
+            join AdjustmentRequest q on q.id = m.adjustmentRequestId
+            where q.adjustmentType = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentType.DOCUMENT_CORRECTION
+              and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED
+              and (q.salesOrderId = :salesOrderId or q.goodsReceiptNoteId = :receiptId)
+            group by m.productId, m.lotId""")
+    List<Object[]> sumAppliedCorrections(Long salesOrderId, Long receiptId);
 }

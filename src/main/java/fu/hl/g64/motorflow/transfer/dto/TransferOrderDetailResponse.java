@@ -15,13 +15,14 @@ import java.util.List;
 /**
  * UC-73. For Staff the reconciliation figures are null and {@code discrepancies} is empty: they see only what to
  * prepare or receive. {@code unitCost} of a lot is for the Owner only (BR-72). {@code attachments}: evidence of the
- * extra dispatch (UC-75), empty for Staff.
+ * dispatch (UC-74) and extra dispatch (UC-75), empty for Staff.
  */
 public record TransferOrderDetailResponse(
         long id, TransferOrderStatus status, Long replenishmentRequestId,
         long sourceStoreId, String sourceStoreName, long destStoreId, String destStoreName,
         Person createdBy, LocalDateTime createdAt,
         Person dispatchedBy, LocalDateTime dispatchedAt,
+        String delivererName, String vehiclePlateNo,
         Person extraDispatchConfirmedBy, LocalDateTime extraDispatchConfirmedAt,
         Person closedBy, LocalDateTime closedAt,
         List<Line> lines, List<Lot> lots, List<Receipt> receipts, List<Discrepancy> discrepancies,

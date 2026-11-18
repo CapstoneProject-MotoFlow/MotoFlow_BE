@@ -64,6 +64,14 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
     @Query("select b from StockBalance b where b.storeId = :storeId and b.productId = :productId")
     Optional<StockBalance> findForUpdate(Long storeId, Long productId);
 
+    /** The same lock for every part of one warehouse, in product id order. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select b from StockBalance b
+            where b.storeId = :storeId and b.productId in :productIds
+            order by b.productId""")
+    List<StockBalance> findByStoreForUpdate(Long storeId, Collection<Long> productIds);
+
     /**
      * Chain-wide quantity of a part that carries its moving average: everything held except goods that are not
      * accepted from the supplier (wrong item, damaged, awaiting return to supplier).
