@@ -37,7 +37,7 @@ public class VehicleModelServiceImpl implements VehicleModelService {
     private final Clock clock;
 
     @Cacheable(cacheNames = CacheConfig.VEHICLE_MODELS,
-            key = "(#q == null ? '' : #q.strip().toLowerCase()) + '|' + #vehicleType + '|' + #status")
+            key = "(#q == null ? '' : #q.strip().toLowerCase(T(java.util.Locale).ROOT)) + '|' + #vehicleType + '|' + #status")
     @Transactional(readOnly = true)
     @Override
     public List<VehicleModelResponse> list(String q, VehicleType vehicleType, VehicleModelStatus status) {
