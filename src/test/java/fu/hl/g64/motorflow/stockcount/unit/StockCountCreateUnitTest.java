@@ -52,7 +52,9 @@ class StockCountCreateUnitTest extends StockCountUnitTestBase {
     @BeforeEach
     void defaultData() {
         unfinishedCount = false;
-        when(counts.existsByStoreIdAndStatusIn(eq(2L), any())).thenAnswer(inv -> unfinishedCount);
+        when(countSheets.partsInScope(eq(2L), any(), any(), any(), anyList())).thenReturn(List.of(P1));
+        when(lines.findPartsOnCounts(eq(2L), any(), any())).thenAnswer(inv -> unfinishedCount
+                ? List.<Object[]>of(new Object[] {P1, 5L}) : List.of());
         when(counts.save(any())).thenAnswer(inv -> withId(inv.<StockCount>getArgument(0), 1));
         when(countSheets.buildLines(any(), anyList())).thenAnswer(inv -> {
             StockCount count = inv.getArgument(0);
@@ -172,10 +174,12 @@ class StockCountCreateUnitTest extends StockCountUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID11 A: store 2 already has a DRAFT count -> MSG230")
+    @DisplayName("UTCID11 A: P1 is already on unfinished count #5 of store 2 -> MSG230")
     void utcid11() {
         unfinishedCount = true;
         assertBusiness(() -> service.create(bmStore2, whole()), HttpStatus.CONFLICT, "MSG230");
+        verify(lines).findPartsOnCounts(eq(2L), eq(List.of(StockCountStatus.DRAFT, StockCountStatus.COUNTING,
+                StockCountStatus.AWAITING_APPROVAL)), eq(List.of(P1)));
         assertNotCreated();
     }
 

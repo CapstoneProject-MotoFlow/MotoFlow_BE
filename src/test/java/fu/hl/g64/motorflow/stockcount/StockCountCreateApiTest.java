@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.stockcount;
 
+import fu.hl.g64.motorflow.inventory.entity.enums.CountType;
 import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountRequestStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
@@ -105,14 +106,39 @@ class StockCountCreateApiTest extends StockCountTestData {
     }
 
     @Test
-    void anotherCountOfTheWarehouseStillUnfinishedIsRefused() throws Exception {
+    void anotherUnfinishedCountMayRunUnlessItHasTheSamePart() throws Exception {
+        // PM 19/11: counts of different parts run side by side; a part on two counts would be adjusted twice.
         for (StockCountStatus unfinished : List.of(StockCountStatus.DRAFT, StockCountStatus.COUNTING,
                 StockCountStatus.AWAITING_APPROVAL)) {
-            long existing = count(unfinished).insert();
+            long existing = count(unfinished).scope(ScopeType.PRODUCTS, null)
+                    .line(SeedLine.of(oil, null, null, 0, null)).insert();
+            refused(cycle(ScopeType.PRODUCTS, null, List.of(plug, oil)), 409, "MSG230")
+                    .andExpect(jsonPath("$.message").value("Phụ tùng NHOT-01 đang nằm trong phiếu kiểm kê #" + existing
+                            + " chưa hoàn tất (nháp, đang đếm hoặc chờ duyệt). Vui lòng bỏ phụ tùng đó khỏi phạm vi, "
+                            + "hoặc hoàn tất hay hủy phiếu #" + existing + " trước."));
+            // The whole warehouse holds the oil too.
             refused(cycle(ScopeType.WHOLE, null, null), 409, "MSG230");
-            jdbc.update("DELETE FROM stock_count WHERE id = ?", existing);
+            long before = countRows();
+            cycle(ScopeType.PRODUCTS, null, List.of(plug)).andExpect(status().isCreated());
+            assertThat(countRows()).isEqualTo(before + 1);
+            jdbc.update("DELETE FROM stock_count_line WHERE stock_count_id IN (SELECT id FROM stock_count "
+                    + "WHERE count_type <> 'OPENING')");
+            jdbc.update("DELETE FROM stock_count WHERE count_type <> 'OPENING'");
         }
+        // A finished count holds nothing back.
+        count(StockCountStatus.CANCELLED).scope(ScopeType.PRODUCTS, null)
+                .line(SeedLine.of(oil, null, null, 0, null)).insert();
         cycle(ScopeType.WHOLE, null, null).andExpect(status().isCreated());
+    }
+
+    @Test
+    void anOpeningCountRunsAlone() throws Exception {
+        long opening = count(StockCountStatus.COUNTING).type(CountType.OPENING).scope(ScopeType.WHOLE, null).insert();
+        refused(cycle(ScopeType.PRODUCTS, null, List.of(plug)), 409, "MSG304");
+        jdbc.update("DELETE FROM stock_count WHERE id = ?", opening);
+
+        cycle(ScopeType.PRODUCTS, null, List.of(plug)).andExpect(status().isCreated());
+        refused(create(managerToken, body("OPENING", TODAY, ScopeType.WHOLE, null, null, null, null)), 409, "MSG304");
     }
 
     @Test

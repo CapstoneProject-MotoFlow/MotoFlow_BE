@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.stockcount.service;
 
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
 import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
+import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
 
 import java.util.List;
 
@@ -17,6 +18,10 @@ public interface CountSheetService {
      * still gets one line with no lot). Book quantities stay 0 until counting starts.
      */
     List<StockCountLine> buildLines(StockCount count, List<Long> productIds);
+
+    /** The parts a new count of this scope would get lines for (what {@link #buildLines} uses). */
+    List<Long> partsInScope(long storeId, ScopeType scopeType, String scopeNote, Long partCategoryId,
+                            List<Long> productIds);
 
     /**
      * UC-93, BR-79: sets each line's book quantity to AVAILABLE + DAMAGED now, and book damaged to DAMAGED: of its lot,

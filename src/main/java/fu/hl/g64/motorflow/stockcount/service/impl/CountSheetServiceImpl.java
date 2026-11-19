@@ -30,13 +30,8 @@ public class CountSheetServiceImpl implements CountSheetService {
     // region buildLines (owner: Y)
     @Override
     public List<StockCountLine> buildLines(StockCount count, List<Long> productIds) {
-        List<Long> parts = switch (count.getScopeType()) {
-            case WHOLE -> lotBalances.findProductIdsWithCountableStock(count.getStoreId());
-            case AREA -> stockBalances.findProductIdsByStorageArea(count.getStoreId(), count.getScopeNote());
-            case PRODUCTS -> productIds;
-            case CATEGORY -> lotBalances.findProductIdsWithStockInCategories(count.getStoreId(),
-                    categories.withDescendants(count.getPartCategoryId()));
-        };
+        List<Long> parts = partsInScope(count.getStoreId(), count.getScopeType(), count.getScopeNote(),
+                count.getPartCategoryId(), productIds);
         Map<Long, List<CountedLot>> lotsByPart = parts.isEmpty() ? Map.of()
                 : lotBalances.findCountedLots(count.getStoreId(), parts).stream()
                 .collect(Collectors.groupingBy(CountedLot::getProductId));
@@ -59,6 +54,18 @@ public class CountSheetServiceImpl implements CountSheetService {
         return lines.saveAll(built);
     }
     // endregion
+
+    @Override
+    public List<Long> partsInScope(long storeId, ScopeType scopeType, String scopeNote, Long partCategoryId,
+                                   List<Long> productIds) {
+        return switch (scopeType) {
+            case WHOLE -> lotBalances.findProductIdsWithCountableStock(storeId);
+            case AREA -> stockBalances.findProductIdsByStorageArea(storeId, scopeNote);
+            case PRODUCTS -> productIds;
+            case CATEGORY -> lotBalances.findProductIdsWithStockInCategories(storeId,
+                    categories.withDescendants(partCategoryId));
+        };
+    }
 
     // region captureBookQuantities (owner: Y)
     @Override
