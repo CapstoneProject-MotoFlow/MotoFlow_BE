@@ -177,6 +177,7 @@ class CustomerApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.items[0].debtAtOwnStore").doesNotExist());
         send(get("/api/v1/customers?q=0912345678"), bmToken).andExpect(jsonPath("$.items[*].id", contains((int) hung)));
         send(get("/api/v1/customers?q=NGUYỄN"), bmToken).andExpect(jsonPath("$.items[*].id", contains((int) binh)));
+        send(get("/api/v1/customers?q=nguyen"), bmToken).andExpect(jsonPath("$.items[*].id", contains((int) binh)));
         // A number is a customer number or part of a phone number.
         send(get("/api/v1/customers?q=" + tam), bmToken).andExpect(jsonPath("$.items[*].id", hasItem((int) tam)));
         send(get("/api/v1/customers?q=345 678"), bmToken).andExpect(jsonPath("$.items[*].id", contains((int) hung)));

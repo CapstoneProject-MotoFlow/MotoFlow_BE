@@ -147,6 +147,8 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(newOrder, lateOrder))));
         list(ownerToken, "q", "VIỆT NAM")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
+        list(ownerToken, "q", "viet nam")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
         list(ownerToken, "q", "ncc-hd", "view", "ALL")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, cancelledOrder))));
         list(ownerToken, "q", dnh(receivingOrder))

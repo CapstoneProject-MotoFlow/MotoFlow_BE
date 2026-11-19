@@ -198,6 +198,8 @@ class DocumentApiTest extends SalesOrderTestData {
         search(managerToken, "q", "tuấn").andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalItems").value(2))
                 .andExpect(jsonPath("$.items[*].id").value(contains((int) salePayment, (int) sale)));
+        search(managerToken, "q", "TUAN").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) salePayment, (int) sale)));
         search(otherManagerToken, "q", "Tuấn").andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[*].id").value(contains((int) debtPayment)));
         search(ownerToken, "q", "honda").andExpect(status().isOk())

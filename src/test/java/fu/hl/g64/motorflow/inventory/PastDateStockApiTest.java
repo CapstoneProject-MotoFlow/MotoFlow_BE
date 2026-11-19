@@ -221,6 +221,8 @@ class PastDateStockApiTest extends ApiTestUsers {
 
         String base = "date=2026-10-03&storeId=" + source;
         query("owner", base + "&q=XÍCH").andExpect(jsonPath("$.page.items[*].sku", contains("AAA-1")));
+        query("owner", base + "&q=xich 428").andExpect(jsonPath("$.page.items[*].sku", contains("AAA-1")));
+        query("owner", base + "&q=_").andExpect(jsonPath("$.page.totalItems").value(0));
         query("owner", base + "&q=bbb").andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));
         query("owner", base + "&categoryId=" + category).andExpect(jsonPath("$.page.totalItems").value(2));
         query("owner", base + "&categoryId=" + childCategory).andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));

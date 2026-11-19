@@ -201,6 +201,7 @@ class InventoryOperationsReportApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.totals.inValue").value(1_100_000));
         call("owner", "?month=2026-10&storeId=" + cauGiay).andExpect(jsonPath("$.page.totalItems").value(1));
         call("owner", "?month=2026-10&q=má PHANH").andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));
+        call("owner", "?month=2026-10&q=MA PHANH TRUOC").andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));
         call("owner", "?month=2026-10&categoryId=" + brakes)
                 .andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));
         call("owner", "?month=2026-10&storeId=9999").andExpect(status().isNotFound())

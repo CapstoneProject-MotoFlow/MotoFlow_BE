@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.document.repository;
 
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.document.dto.DocumentType;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -157,10 +158,9 @@ public class DocumentQuery {
             params.addValue("id", filter.id());
         }
         if (filter.partner() != null) {
-            // Part of the customer or supplier name, any case; % and _ typed by the user are taken literally.
-            where.append(" AND d.partner_name ILIKE :partner ESCAPE '\\'");
-            params.addValue("partner", "%" + filter.partner().replace("\\", "\\\\").replace("%", "\\%")
-                    .replace("_", "\\_") + "%");
+            // Part of the customer or supplier name, any case or accents; % and _ are taken literally (R-01).
+            where.append(" AND search_fold(d.partner_name) LIKE :partner ESCAPE '\\'");
+            params.addValue("partner", SearchText.likePattern(filter.partner()));
         }
         if (filter.from() != null) {
             where.append(" AND d.doc_date >= :from");

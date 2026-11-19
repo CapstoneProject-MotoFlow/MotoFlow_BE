@@ -169,6 +169,8 @@ class SupplierApiTest extends IntegrationTest {
                 .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC001", "NCC002", "NCC003")))
                 .andExpect(jsonPath("$.totalItems").value(3));
         send(get("/api/v1/suppliers?q=PHỤ TÙNG")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
+        send(get("/api/v1/suppliers?q=phu tung")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
+        send(get("/api/v1/suppliers?q=_")).andExpect(jsonPath("$.items", hasSize(0)));
         send(get("/api/v1/suppliers?q=0912345678")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
         send(get("/api/v1/suppliers?q=ncc0")).andExpect(jsonPath("$.items", hasSize(3)));
         send(get("/api/v1/suppliers?status=INACTIVE")).andExpect(jsonPath("$.items[*].id", contains((int) closed)));

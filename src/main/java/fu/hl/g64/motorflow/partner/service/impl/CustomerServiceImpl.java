@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.partner.dto.CustomerDetailResponse;
 import fu.hl.g64.motorflow.partner.dto.CustomerRequest;
 import fu.hl.g64.motorflow.partner.dto.CustomerResponse;
@@ -45,7 +46,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -199,12 +199,11 @@ public class CustomerServiceImpl implements CustomerService {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             if (StringUtils.hasText(q)) {
-                String needle = q.strip().toLowerCase(Locale.ROOT);
-                String digits = needle.replace(" ", "");
+                String digits = q.strip().replace(" ", "");
                 List<Predicate> any = new ArrayList<>(List.of(
-                        cb.like(cb.lower(root.get("customerName")), "%" + needle + "%"),
+                        SearchText.like(cb, root.get("customerName"), SearchText.likePattern(q)),
                         cb.like(cb.function("replace", String.class, root.get("phone"), cb.literal(" "), cb.literal("")),
-                                "%" + digits + "%")));
+                                SearchText.likePattern(digits), '\\')));
                 if (digits.matches("[0-9]{1,18}")) {
                     any.add(cb.equal(root.get("id"), Long.parseLong(digits)));
                 }

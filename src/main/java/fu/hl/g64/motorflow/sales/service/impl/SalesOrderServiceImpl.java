@@ -10,6 +10,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
 import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
@@ -1101,9 +1102,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             }
             if (StringUtils.hasText(q)) {
                 String needle = q.strip().toLowerCase(Locale.ROOT);
-                String like = "%" + needle + "%";
-                Predicate byCustomer = cb.or(cb.like(cb.lower(root.get("customerNameSnapshot")), like),
-                        cb.like(root.get("customerPhoneSnapshot"), like));
+                String like = SearchText.likePattern(q);
+                Predicate byCustomer = cb.or(SearchText.like(cb, root.get("customerNameSnapshot"), like),
+                        cb.like(root.get("customerPhoneSnapshot"), like, '\\'));
                 Long number = orderNumber(needle);
                 where.add(number == null ? byCustomer : cb.or(cb.equal(root.get("id"), number), byCustomer));
             }

@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/suppliers?q=phu tung minh phat"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có Công ty TNHH Phụ tùng Minh Phát', () => pm.expect(b.items.map(i => i.supplierName)).to.include('Công ty TNHH Phụ tùng Minh Phát'));
+    language: text/javascript
+order: 2000

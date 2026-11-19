@@ -322,7 +322,8 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
         created("owner", central);
         String code = String.format("YBS-%04d", wanted);
 
-        for (String q : List.of(code, code.toLowerCase(), String.valueOf(wanted), " " + code + " ")) {
+        for (String q : List.of(code, code.toLowerCase(), String.valueOf(wanted), " " + code + " ",
+                "YBS " + wanted, "ybs - 0" + wanted, "YBS" + wanted)) {
             list("owner", "q", q).andExpect(status().isOk())
                     .andExpect(jsonPath("$.items[*].id", contains((int) wanted)))
                     .andExpect(jsonPath("$.totalItems").value(1));
@@ -331,12 +332,23 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
     }
 
     @Test
+    void aCodeStillBeingTypedFiltersNothing() throws Exception {
+        long first = created("bm", null);
+        long second = created("owner", central);
+
+        for (String q : List.of("YBS", "ybs-", "YBS - ", "YBS-00")) {
+            list("owner", "q", q).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[*].id", contains((int) second, (int) first)));
+        }
+    }
+
+    @Test
     void qFindsRequestsByPartOfTheStoreNameInAnyCase() throws Exception {
         long first = created("bm", null);
         long second = created("bm", null);
         created("owner", central);
 
-        for (String q : List.of("long BIÊN", "LONG", "biên")) {
+        for (String q : List.of("long BIÊN", "LONG", "biên", "long bien", "LONG BIEN")) {
             list("owner", "q", q).andExpect(jsonPath("$.items[*].id", containsInAnyOrder((int) first, (int) second)))
                     .andExpect(jsonPath("$.items[*].storeName", contains("Long Biên", "Long Biên")));
         }

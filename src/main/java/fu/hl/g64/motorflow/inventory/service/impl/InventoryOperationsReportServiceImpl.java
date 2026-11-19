@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.inventory.dto.InventoryOperationsResponse;
 import fu.hl.g64.motorflow.inventory.dto.InventoryOperationsRow;
 import fu.hl.g64.motorflow.inventory.dto.InventoryOperationsRow.SourceFlow;
@@ -36,7 +37,6 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -91,7 +91,7 @@ public class InventoryOperationsReportServiceImpl implements InventoryOperations
         Map<Long, Store> storesById = stores.findAllById(lines.stream().map(Line::storeId)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Store::getId, Function.identity()));
         Set<Long> inCategory = categoryId == null ? null : new HashSet<>(categories.withDescendants(categoryId));
-        String text = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
+        String text = StringUtils.hasText(q) ? SearchText.fold(q.strip()) : null;
 
         List<Line> matching = lines.stream()
                 .filter(l -> matches(partsById.get(l.productId()), text, inCategory))
@@ -112,8 +112,7 @@ public class InventoryOperationsReportServiceImpl implements InventoryOperations
         if (inCategory != null && !inCategory.contains(part.getCategoryId())) {
             return false;
         }
-        return text == null || part.getSku().toLowerCase(Locale.ROOT).contains(text)
-                || part.getPartName().toLowerCase(Locale.ROOT).contains(text);
+        return text == null || SearchText.contains(part.getSku(), text) || SearchText.contains(part.getPartName(), text);
     }
 
     /** Movement types summed into their sources, in the order the sources are declared. */

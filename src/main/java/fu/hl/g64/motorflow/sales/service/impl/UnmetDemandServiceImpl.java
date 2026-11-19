@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.sales.dto.UnmetDemandRow;
 import fu.hl.g64.motorflow.sales.dto.UnmetDemandSearch;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
@@ -27,7 +28,6 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -54,8 +54,7 @@ public class UnmetDemandServiceImpl implements UnmetDemandService {
         LocalDate today = LocalDate.now(clock);
         LocalDate to = search.to() != null ? search.to() : today;
         LocalDate from = search.from() != null ? search.from() : to.minusDays(29);
-        String pattern = StringUtils.hasText(search.q())
-                ? "%" + search.q().strip().toLowerCase(Locale.ROOT) + "%" : "%";
+        String pattern = StringUtils.hasText(search.q()) ? SearchText.likePattern(search.q()) : "%";
         Page<Object[]> found = lines.findUnmetDemand(storeId, search.productId(), search.customerId(),
                 from.atStartOfDay(), to.plusDays(1).atStartOfDay(), pattern,
                 PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));

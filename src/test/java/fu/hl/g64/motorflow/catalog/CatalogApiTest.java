@@ -168,6 +168,8 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG62"));
             send(get("/api/v1/vehicle-models?q=air"), ownerToken)
                     .andExpect(jsonPath("$[*].id", contains((int) airBlade)));
+            send(get("/api/v1/vehicle-models").param("q", "ÁIR BLÂDE"), ownerToken)
+                    .andExpect(jsonPath("$[*].id", contains((int) airBlade)));
 
             long pads = categoryId(Map.of("categoryName", "Bố thắng đĩa", "vehicleType", "MOTORCYCLE"));
             Map<String, Object> fitsAirBlade = product("SKU-1", pads);
@@ -320,6 +322,7 @@ class CatalogApiTest extends IntegrationTest {
             long padsPart = productId(padsBody);
             Map<String, Object> chainBody = product("SKU-002", chains);
             chainBody.put("oemCodes", List.of("40530-KWB-921"));
+            chainBody.put("partName", "Xích tải Đông Á");
             long chainPart = productId(chainBody);
             long old = productId(product("SKU-003", chains));
             send(post("/api/v1/products/{id}/discontinue", old), ownerToken).andExpect(status().isNoContent());
@@ -344,6 +347,12 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.items[1].availableQty").value(0))
                     .andExpect(jsonPath("$.items[1].oemCodes", contains("40530-KWB-921")));
             send(get("/api/v1/products?q=40530-kwb"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-002")));
+            // R-01: no accents needed, and "_" is a character, not "any character".
+            send(get("/api/v1/products").param("q", "xich tai dong a"), staffToken)
+                    .andExpect(jsonPath("$.items[*].sku", contains("SKU-002")));
+            send(get("/api/v1/products").param("q", "BO THANG DIA"), staffToken)
+                    .andExpect(jsonPath("$.items[*].sku", contains("SKU-001", "SKU-003")));
+            send(get("/api/v1/products").param("q", "_"), staffToken).andExpect(jsonPath("$.totalItems").value(0));
             send(get("/api/v1/products?categoryId=" + brakes), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
             send(get("/api/v1/products?vehicleModelId=" + airBlade), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));
             send(get("/api/v1/products?inStockOnly=true"), staffToken).andExpect(jsonPath("$.items[*].sku", contains("SKU-001")));

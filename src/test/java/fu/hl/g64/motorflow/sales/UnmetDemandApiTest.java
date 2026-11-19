@@ -76,6 +76,11 @@ class UnmetDemandApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items[0].orderId").value(cancelled));
         unmetDemand(managerToken, "q", "0912345")
                 .andExpect(jsonPath("$.items", hasSize(2)));
+        unmetDemand(managerToken, "q", "anh tuan")
+                .andExpect(jsonPath("$.items", hasSize(2)));
+        unmetDemand(managerToken, "q", "ma phanh truoc")
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].orderId").value(shortOrder));
         unmetDemand(managerToken, "customerId", String.valueOf(customer))
                 .andExpect(jsonPath("$.items", hasSize(2)));
         unmetDemand(managerToken, "customerId", String.valueOf(customer + 100))

@@ -10,6 +10,7 @@ import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.IssueOrderLine;
 import fu.hl.g64.motorflow.inventory.dto.LotDetailResponse.SourceDocument;
@@ -347,7 +348,7 @@ public class InventoryServiceImpl implements InventoryService {
         Integer warnDays = expiryWarningDays();
         LocalDate warnUntil = warnUntil(today, warnDays);
         String q = StringUtils.hasText(filter.q()) ? filter.q().strip() : null;
-        String like = q == null ? null : "%" + q.toLowerCase(Locale.ROOT) + "%";
+        String like = q == null ? null : SearchText.likePattern(q);
         Page<LotStock> found = lotQueries.searchLots(filter.tab().name(), storeId, filter.supplierId(), filter.source(),
                 filter.receivedFrom(), filter.receivedTo(), q, like, today, warnUntil,
                 PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
@@ -449,18 +450,18 @@ public class InventoryServiceImpl implements InventoryService {
                 where.add(cb.equal(root.get("storeId"), storeId));
             }
             if (StringUtils.hasText(filter.q())) {
-                String like = "%" + filter.q().strip().toLowerCase(Locale.ROOT) + "%";
+                String like = SearchText.likePattern(filter.q());
                 Subquery<Long> byName = query.subquery(Long.class);
                 var product = byName.from(Product.class);
-                byName.select(product.get("id")).where(cb.or(cb.like(cb.lower(product.get("sku")), like),
-                        cb.like(cb.lower(product.get("partName")), like)));
+                byName.select(product.get("id")).where(cb.or(SearchText.like(cb, product.get("sku"), like),
+                        SearchText.like(cb, product.get("partName"), like)));
                 Subquery<Long> byOemCode = query.subquery(Long.class);
                 var identifier = byOemCode.from(ProductIdentifier.class);
                 byOemCode.select(identifier.get("productId")).where(
                         cb.equal(identifier.get("identifierType"), IdentifierType.OEM),
-                        cb.like(cb.lower(identifier.get("identifierValue")), like));
+                        SearchText.like(cb, identifier.get("identifierValue"), like));
                 where.add(cb.or(root.get("productId").in(byName), root.get("productId").in(byOemCode),
-                        cb.like(cb.lower(root.get("binLocation")), like)));
+                        SearchText.like(cb, root.get("binLocation"), like)));
             }
             if (filter.categoryId() != null) {
                 Subquery<Long> inCategory = query.subquery(Long.class);
@@ -545,7 +546,8 @@ public class InventoryServiceImpl implements InventoryService {
                 : period.getToDate().plusDays(1).atStartOfDay();
         List<Long> categoryIds = categoryId == null ? List.of(-1L) : categories.withDescendants(categoryId);
         Page<PastDateLine> found = movements.pastDateStock(period == null ? null : period.getId(), store, from,
-                date.plusDays(1).atStartOfDay(), StringUtils.hasText(q) ? q.trim() : null, categoryId != null,
+                date.plusDays(1).atStartOfDay(), StringUtils.hasText(q) ? SearchText.likePattern(q) : null,
+                categoryId != null,
                 categoryIds.isEmpty() ? List.of(-1L) : categoryIds, includeZero,
                 PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100)));
         return new PastDateStockResponse(date, store, storeName,

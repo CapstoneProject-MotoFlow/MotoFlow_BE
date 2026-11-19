@@ -27,8 +27,8 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
                    or exists (select 1 from stock_movement x where x.store_id = :storeId and x.product_id = p.id
                               and x.occurred_at < :to)
                    or psb.id is not null)
-              and (cast(:q as text) is null or lower(p.sku) like lower(concat('%', cast(:q as text), '%'))
-                   or lower(p.part_name) like lower(concat('%', cast(:q as text), '%')))
+              and (cast(:q as text) is null or search_fold(p.sku) like cast(:q as text) escape '\\'
+                   or search_fold(p.part_name) like cast(:q as text) escape '\\')
               and (not :filterCategory or p.category_id in (:categoryIds))
               and (:includeZero or coalesce(psb.closing_qty, 0) + coalesce(m.qty, 0) <> 0)""";
 

@@ -10,6 +10,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
@@ -47,7 +48,6 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -59,7 +59,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestService {
 
-    private static final Pattern CODE = Pattern.compile("(?i)ybs-?0*(\\d+)");
+    /** A request code as people type it: "YBS-0012", "ybs 12", "YBS - 012". */
+    private static final Pattern CODE = Pattern.compile("(?i)ybs[-\\s]*0*(\\d+)");
+    /** A code still being typed ("YBS", "ybs-", "YBS-00"): every request may still match, so it filters nothing. */
+    private static final Pattern CODE_PREFIX = Pattern.compile("(?i)ybs[-\\s]*0*");
     private static final Pattern DIGITS = Pattern.compile("\\d+");
 
     private final ReplenishmentRequestRepository requests;
@@ -113,7 +116,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
 
     /**
      * The search text as the query takes it: a request id when it reads as a code, and a LIKE pattern for store
-     * names.
+     * names without case or accents (R-01).
      */
     private record TextQuery(boolean present, Long id, String pattern) {
 
@@ -122,6 +125,9 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                 return new TextQuery(false, null, "");
             }
             String text = raw.trim();
+            if (CODE_PREFIX.matcher(text).matches()) {
+                return new TextQuery(false, null, "");
+            }
             Matcher code = CODE.matcher(text);
             String digits = code.matches() ? code.group(1) : DIGITS.matcher(text).matches() ? text : null;
             Long id = null;
@@ -132,9 +138,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                     // Digits beyond a Long cannot be an id, so only the store name can match.
                 }
             }
-            String escaped = text.toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%")
-                    .replace("_", "\\_");
-            return new TextQuery(true, id, "%" + escaped + "%");
+            return new TextQuery(true, id, SearchText.likePattern(text));
         }
     }
 

@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/stores?q=kho tong"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có Kho tổng Nga Minh', () => pm.expect(b.map(i => i.storeName)).to.include('Kho tổng Nga Minh'));
+    language: text/javascript
+order: 6000

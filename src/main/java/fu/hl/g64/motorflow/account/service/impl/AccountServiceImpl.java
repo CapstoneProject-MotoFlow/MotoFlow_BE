@@ -16,6 +16,7 @@ import fu.hl.g64.motorflow.auth.service.SessionService;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
@@ -35,7 +36,6 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -58,7 +58,7 @@ public class AccountServiceImpl implements AccountService {
         LocalDateTime now = LocalDateTime.now(clock);
         Map<Long, String> storeNames = stores.findAll().stream()
                 .collect(Collectors.toMap(Store::getId, Store::getStoreName));
-        String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
+        String needle = StringUtils.hasText(q) ? SearchText.fold(q.strip()) : null;
         Map<Long, AuthSession> lastSessions = sessions.findLatestPerUser().stream()
                 .collect(Collectors.toMap(s -> s.getUser().getId(), s -> s));
 
@@ -69,7 +69,7 @@ public class AccountServiceImpl implements AccountService {
                 .filter(a -> storeId == null || storeId.equals(a.storeId()))
                 .filter(a -> state == null || a.state() == state)
                 .filter(a -> needle == null || Stream.of(a.fullName(), a.username(), a.email(), a.storeName())
-                        .anyMatch(text -> text != null && text.toLowerCase(Locale.ROOT).contains(needle)))
+                        .anyMatch(text -> SearchText.contains(text, needle)))
                 .sorted(Comparator.comparing(AccountResponse::lastLoginAt, Comparator.nullsLast(Comparator.reverseOrder()))
                         .thenComparing(AccountResponse::id))
                 .toList();

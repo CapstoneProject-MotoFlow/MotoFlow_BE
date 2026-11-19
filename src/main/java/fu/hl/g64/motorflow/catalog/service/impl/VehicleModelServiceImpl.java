@@ -9,6 +9,7 @@ import fu.hl.g64.motorflow.catalog.repository.VehicleModelRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.catalog.service.VehicleModelService;
 import fu.hl.g64.motorflow.common.config.CacheConfig;
@@ -25,7 +26,6 @@ import org.springframework.util.StringUtils;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Locale;
 import java.util.stream.Stream;
 
 @Service
@@ -41,12 +41,12 @@ public class VehicleModelServiceImpl implements VehicleModelService {
     @Transactional(readOnly = true)
     @Override
     public List<VehicleModelResponse> list(String q, VehicleType vehicleType, VehicleModelStatus status) {
-        String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
+        String needle = StringUtils.hasText(q) ? SearchText.fold(q.strip()) : null;
         return vehicleModels.findAll(Sort.by("manufacturer", "modelName", "yearFrom")).stream()
                 .filter(m -> vehicleType == null || m.getVehicleType() == vehicleType)
                 .filter(m -> status == null || m.getStatus() == status)
                 .filter(m -> needle == null || Stream.of(m.getManufacturer(), m.getModelName())
-                        .anyMatch(text -> text.toLowerCase(Locale.ROOT).contains(needle)))
+                        .anyMatch(text -> SearchText.contains(text, needle)))
                 .map(VehicleModelResponse::from)
                 .toList();
     }

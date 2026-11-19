@@ -68,7 +68,7 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
               and cast(r.createdAt as LocalDate) >= coalesce(:from, cast(r.createdAt as LocalDate))
               and cast(r.createdAt as LocalDate) <= coalesce(:to, cast(r.createdAt as LocalDate))
               and (:hasQ = false or r.id = :qId
-                   or r.requestingStoreId in (select qs.id from Store qs where lower(qs.storeName) like :pattern escape '\\'))
+                   or r.requestingStoreId in (select qs.id from Store qs where search_fold(qs.storeName) like :pattern escape '\\'))
             """;
 
     @Query(value = """
@@ -114,7 +114,7 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
               and r.createdBy = :createdBy
               and (:storeId is null or r.requestingStoreId = :storeId)
               and (:hasQ = false or r.id = :qId
-                   or r.requestingStoreId in (select qs.id from Store qs where lower(qs.storeName) like :pattern escape '\\'))
+                   or r.requestingStoreId in (select qs.id from Store qs where search_fold(qs.storeName) like :pattern escape '\\'))
             """;
 
     @Query("""
