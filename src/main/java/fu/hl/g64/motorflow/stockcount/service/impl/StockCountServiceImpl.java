@@ -89,6 +89,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class StockCountServiceImpl implements StockCountService {
 
+    /** SC-1: a count not approved or cancelled yet. */
+    private static final List<StockCountStatus> UNFINISHED = List.of(StockCountStatus.DRAFT,
+            StockCountStatus.COUNTING, StockCountStatus.AWAITING_APPROVAL);
+
     private final StockCountRepository counts;
     private final StockCountLineRepository lines;
     private final StockCountRequestRepository requests;
@@ -132,18 +136,18 @@ public class StockCountServiceImpl implements StockCountService {
         access.requireManagerOf(user, user.storeId());
         long storeId = user.storeId();
         // FOR UPDATE: postings read this row FOR SHARE, so nothing moves in the warehouse until this count is saved
-        // (MSG244, MSG301), and a second count cannot be created alongside (MSG230).
+        // (MSG244, MSG301), and no other count is created alongside, so two counts never share a part (MSG230).
         stores.findForUpdateById(storeId).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG05"));
-        if (counts.existsByStoreIdAndStatusIn(storeId,
-                List.of(StockCountStatus.DRAFT, StockCountStatus.COUNTING, StockCountStatus.AWAITING_APPROVAL))) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG230");
-        }
         LocalDate today = LocalDate.now(clock);
         if (request.countDate().isAfter(today.withDayOfMonth(today.lengthOfMonth()))) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG232");
         }
         if (request.countType() == CountType.OPENING) {
             return createOpening(user, storeId, request);
+        }
+        // An opening count covers the whole warehouse, whose lines are only entered while counting.
+        if (counts.existsByStoreIdAndCountTypeAndStatusIn(storeId, CountType.OPENING, UNFINISHED)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG304");
         }
         if (request.countDate().withDayOfMonth(1).equals(today.withDayOfMonth(1))) {
             inventoryPeriods.openIfMissing(request.countDate());
@@ -172,6 +176,8 @@ public class StockCountServiceImpl implements StockCountService {
             }
         }
         validateScope(storeId, request.scopeType(), scopeNote, partCategoryId, productIds);
+        requireNoPartOnAnotherCount(storeId, countSheets.partsInScope(storeId, request.scopeType(), scopeNote,
+                partCategoryId, productIds));
 
         LocalDateTime now = LocalDateTime.now(clock);
         StockCount count = counts.save(StockCount.create(storeId, periodId, answered == null ? null : answered.getId(),
@@ -186,6 +192,31 @@ public class StockCountServiceImpl implements StockCountService {
     }
 
     /**
+     * SC-1 (PM 19/11): several counts of a warehouse may be unfinished at once, but a part is on one of them only;
+     * otherwise approving both would adjust its stock twice. MSG230 names the first such count and up to 3 of its SKUs.
+     */
+    private void requireNoPartOnAnotherCount(long storeId, List<Long> parts) {
+        if (parts.isEmpty()) {
+            return;
+        }
+        List<Object[]> taken = lines.findPartsOnCounts(storeId, UNFINISHED, parts);
+        if (taken.isEmpty()) {
+            return;
+        }
+        long countId = ((Number) taken.getFirst()[1]).longValue();
+        // Only the parts on that count, so that MSG230 never names a part under a count that does not hold it.
+        List<Long> partIds = taken.stream().filter(row -> ((Number) row[1]).longValue() == countId)
+                .map(row -> ((Number) row[0]).longValue()).toList();
+        Map<Long, String> skus = products.findAllById(partIds.subList(0, Math.min(3, partIds.size()))).stream()
+                .collect(Collectors.toMap(Product::getId, Product::getSku));
+        String named = partIds.stream().limit(3).map(skus::get).collect(Collectors.joining(", "));
+        if (partIds.size() > 3) {
+            named += " và %d phụ tùng khác".formatted(partIds.size() - 3);
+        }
+        throw new BusinessException(HttpStatus.CONFLICT, "MSG230", named, "#" + countId);
+    }
+
+    /**
      * UC-96, BR-86: an opening count of a warehouse that has no stock movement yet (MSG244). It covers the whole
      * warehouse and starts with no line: the counter enters one line per part and expiry date. It belongs to no
      * period (the schema requires it), but its date must fall in a month that is not closed (MSG232), where its
@@ -197,6 +228,10 @@ public class StockCountServiceImpl implements StockCountService {
                 || request.partCategoryId() != null || request.productIds() != null && !request.productIds().isEmpty()
                 || request.stockCountRequestId() != null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        // The opening count covers the whole warehouse, so no other count may be unfinished.
+        if (counts.existsByStoreIdAndStatusIn(storeId, UNFINISHED)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG304");
         }
         openingBalances.requireNoMovement(storeId);
         openingBalances.requireMonthOpen(request.countDate());

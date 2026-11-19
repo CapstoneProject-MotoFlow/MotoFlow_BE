@@ -3111,7 +3111,7 @@
           ]
         },
         {
-          "name": "BM tạo phiếu thứ hai khi còn phiếu mở bị MSG230",
+          "name": "BM tạo phiếu toàn kho trùng phụ tùng phiếu đang mở bị MSG230",
           "request": {
             "method": "POST",
             "header": [
