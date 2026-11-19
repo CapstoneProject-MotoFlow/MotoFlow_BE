@@ -433,6 +433,8 @@ class CustomerDebtApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.items[*].customerId", contains(ids(hung))));
         send(get("/api/v1/receivables/customers").param("q", "0987 654"), ownerToken)
                 .andExpect(jsonPath("$.items[*].customerId", contains(ids(binh))));
+        send(get("/api/v1/receivables/customers").param("q", "nguyen van binh"), ownerToken)
+                .andExpect(jsonPath("$.items[*].customerId", contains(ids(binh))));
         send(get("/api/v1/receivables/customers?size=1&page=1"), ownerToken)
                 .andExpect(jsonPath("$.totalItems").value(2))
                 .andExpect(jsonPath("$.items[*].customerId", contains(ids(binh))));

@@ -289,6 +289,8 @@ class AccountAdminApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$[*].username", contains("staff01", "bm01", "staff02")));
             listAccounts("?q=TEST STAFF01")
                     .andExpect(jsonPath("$[*].id", contains(staff.getId().intValue())));
+            listAccounts("?q=cua hang ch01&storeId=" + storeId)
+                    .andExpect(jsonPath("$[*].username", contains("staff01", "bm01", "staff02")));
             listAccounts("?state=SOMETHING")
                     .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"));
         }

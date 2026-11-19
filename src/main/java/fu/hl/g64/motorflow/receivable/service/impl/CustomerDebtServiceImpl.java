@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.service.AttachmentService;
@@ -57,7 +58,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -359,9 +359,8 @@ public class CustomerDebtServiceImpl implements CustomerDebtService {
         if (!StringUtils.hasText(q)) {
             return true;
         }
-        String needle = q.strip().toLowerCase(Locale.ROOT);
-        String digits = needle.replace(" ", "");
-        return customer.getCustomerName().toLowerCase(Locale.ROOT).contains(needle)
+        String digits = q.strip().replace(" ", "");
+        return SearchText.contains(customer.getCustomerName(), SearchText.fold(q.strip()))
                 || (customer.getPhone() != null && customer.getPhone().replace(" ", "").contains(digits))
                 || (digits.matches("[0-9]{1,18}") && customer.getId() == Long.parseLong(digits));
     }
