@@ -852,9 +852,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .collect(Collectors.toMap(row -> (Long) row[0], row -> ((Number) row[1]).longValue()));
         Map<Long, WarehouseTask> pickings = tasks.findOpenPickings(ids).stream()
                 .collect(Collectors.toMap(WarehouseTask::getSalesOrderId, Function.identity()));
-        Set<Long> pickedByUser = tasks.findLatestPickings(ids).stream()
-                .filter(task -> task.getAssignedTo() == user.id()).map(WarehouseTask::getSalesOrderId)
-                .collect(Collectors.toSet());
         Map<Long, String> names = names(pickings.values().stream().map(WarehouseTask::getAssignedTo)
                 .collect(Collectors.toSet()));
         boolean staff = user.role() == Role.STAFF;
@@ -867,12 +864,11 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     order.getCreatedAt(), staff ? null : totals.getOrDefault(order.getId(), 0L),
                     picking == null ? null : picking.getAssignedTo(),
                     picking == null ? null : names.get(picking.getAssignedTo()),
-                    nextAction(user, order, picking, pickedByUser.contains(order.getId())));
+                    nextAction(user, order, picking));
         }).toList();
     }
 
-    private static NextAction nextAction(AuthenticatedUser user, SalesOrder order, WarehouseTask picking,
-                                         boolean pickedByUser) {
+    private static NextAction nextAction(AuthenticatedUser user, SalesOrder order, WarehouseTask picking) {
         if (picking != null && picking.getAssignedTo() == user.id()
                 && picking.getStatus() == WarehouseTaskStatus.ASSIGNED) {
             return NextAction.RECORD_PICKING;
@@ -884,8 +880,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             case DRAFT -> null;
             case AWAITING_PICKING -> picking == null && user.role() == Role.BRANCH_MANAGER
                     ? NextAction.ASSIGN_PICKER : null;
-            // BR-26: a Branch Manager who picked the goods leaves the confirmation to someone else.
-            case PICKED -> pickedByUser ? null : NextAction.CONFIRM;
+            // K1 (PM 19/11): the seller confirms, even a Branch Manager who picked the goods themself.
+            case PICKED -> NextAction.CONFIRM;
             case CONFIRMED -> NextAction.COLLECT_PAYMENT;
             case COMPLETED, CANCELLED -> null;
         };
@@ -975,7 +971,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                         && taskStatus == WarehouseTaskStatus.ASSIGNED)
                         || (order.getStatus() == SalesOrderStatus.PICKED
                         && taskStatus == WarehouseTaskStatus.RESULT_SUBMITTED)),
-                seller && !holdsTask && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
+                // K1 (PM 19/11): a Branch Manager selling alone confirms what they picked themself.
+                seller && (!holdsTask || user.role() == Role.BRANCH_MANAGER)
+                        && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
                 seller && confirmedNow && money.payableNow() > 0,
                 seller && unfinished && money.refundable() > 0,
                 seller && confirmedNow && settled && creditAllowed && money.remainingPayable() > 0

@@ -67,7 +67,8 @@ public interface SalesOrderService {
      * delivering less than requested saves a new version first. A confirmed order can be confirmed again with other
      * delivered quantities. MSG174 before picking, MSG164, MSG165, MSG166, MSG167, MSG169 more than picked, MSG170
      * nothing delivered, MSG162 or MSG163 the threshold, MSG171 not enough unexpired stock (BR-76), MSG172 or MSG173
-     * the minimum margin (BR-88), MSG124 the seller picked the goods themself (BR-26).
+     * the minimum margin (BR-88). A Branch Manager who picked the goods themself may
+     * confirm; the Owner is notified (K1, PM 19/11).
      */
     SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request);
 
