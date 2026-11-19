@@ -100,30 +100,6 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(cancelledOrder, lateOrder))));
     }
 
-    /** Form sync 19/11 (item 12): received in full with a discrepancy case still open is work still to do. */
-    @Test
-    void aFullyReceivedOrderWithAnOpenDiscrepancyHasItsOwnTab() throws Exception {
-        jdbc.update("UPDATE purchase_order SET status = 'FULLY_RECEIVED' WHERE id = ?", receivingOrder);
-
-        // No default range of creation days, like the open tab.
-        list(ownerToken, "view", "AWAITING_DISCREPANCY").andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))))
-                .andExpect(jsonPath("$.items[0].status").value("FULLY_RECEIVED"))
-                .andExpect(jsonPath("$.items[0].openDiscrepancies").value(1));
-        list(managerToken, "view", "AWAITING_DISCREPANCY")
-                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
-        list(ownerToken, "view", "FULLY_RECEIVED", "createdFrom", "2026-09-01", "createdTo", "2026-10-31")
-                .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
-        list(ownerToken).andExpect(jsonPath("$.items[*].id", contains(ids(newOrder, lateOrder))));
-
-        // Its last case closed: the order is done.
-        jdbc.update("UPDATE discrepancy_case SET status = 'CLOSED', closure_type = 'ALL_SETTLED', closed_at = ?"
-                + " WHERE status = 'OPEN'", LocalDateTime.of(2026, 10, 14, 9, 0));
-        list(ownerToken, "view", "AWAITING_DISCREPANCY").andExpect(jsonPath("$.items", hasSize(0)));
-        list(ownerToken, "view", "FULLY_RECEIVED", "createdFrom", "2026-09-01", "createdTo", "2026-10-31")
-                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, fullyReceived))));
-    }
-
     /** Form sync 19/11 (item 10): who did each receiving step of the PO, and on which delivery or case. */
     @Test
     void theHistoryHasTheStepsOfTheDeliveriesAndDiscrepancies() throws Exception {

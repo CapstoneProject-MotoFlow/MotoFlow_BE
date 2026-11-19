@@ -50,10 +50,9 @@ public class PurchaseOrderController {
     @Operation(summary = "Purchase orders of every warehouse (Owner) or of the user's warehouse (UC-39)",
             description = "q: PO number (12, #12, DNH-0012 or dnh-12) or supplier name or code. view: OPEN "
                     + "(default), AWAITING_RECEIVING_ASSIGNMENT (open POs with no receiving task held by someone, "
-                    + "for the Branch Manager's to-do box), AWAITING_DISCREPANCY (received in full, a discrepancy "
-                    + "case still open), FULLY_RECEIVED (received in full, no case open), CANCELLED or ALL. "
-                    + "createdFrom and createdTo (yyyy-MM-dd): creation days; FULLY_RECEIVED, CANCELLED and ALL "
-                    + "keep the last 30 days when none are given.")
+                    + "for the Branch Manager's to-do box), FULLY_RECEIVED, CANCELLED or ALL. createdFrom and "
+                    + "createdTo (yyyy-MM-dd): creation days; FULLY_RECEIVED, CANCELLED and ALL keep the last "
+                    + "30 days when none are given.")
     @GetMapping
     public PageResponse<PurchaseOrderSummary> list(
             @AuthenticationPrincipal AuthenticatedUser user,
