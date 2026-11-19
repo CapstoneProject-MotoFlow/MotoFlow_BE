@@ -134,7 +134,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         PurchaseOrderView view = search.view() == null ? PurchaseOrderView.OPEN : search.view();
         LocalDate from = search.createdFrom();
         LocalDate to = search.createdTo();
-        if (view != PurchaseOrderView.OPEN && view != PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT) {
+        if (view != PurchaseOrderView.OPEN && view != PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT
+                && view != PurchaseOrderView.DISCREPANCY_OPEN) {
             to = to != null ? to : today;
             from = from != null ? from : to.minusDays(DEFAULT_DAYS - 1);
         }
@@ -585,6 +586,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             } else if (view == PurchaseOrderView.FULLY_RECEIVED) {
                 where.add(root.get("status").in(view.statuses()));
                 where.add(cb.not(cb.exists(openCaseOf(root, query, cb))));
+            } else if (view == PurchaseOrderView.DISCREPANCY_OPEN) {
+                where.add(root.get("status").in(view.statuses()));
+                where.add(cb.exists(openCaseOf(root, query, cb)));
             } else {
                 where.add(root.get("status").in(view.statuses()));
             }
