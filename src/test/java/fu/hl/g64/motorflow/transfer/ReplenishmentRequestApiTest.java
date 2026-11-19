@@ -348,7 +348,7 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
         long second = created("bm", null);
         created("owner", central);
 
-        for (String q : List.of("long BIÊN", "LONG", "biên")) {
+        for (String q : List.of("long BIÊN", "LONG", "biên", "long bien", "LONG BIEN")) {
             list("owner", "q", q).andExpect(jsonPath("$.items[*].id", containsInAnyOrder((int) first, (int) second)))
                     .andExpect(jsonPath("$.items[*].storeName", contains("Long Biên", "Long Biên")));
         }

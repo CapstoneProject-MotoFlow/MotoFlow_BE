@@ -67,6 +67,7 @@ class ReplenishmentDraftApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.items[0].lineCount").value(1))
                 .andExpect(jsonPath("$.items[0].totalRequestedQty").value(3));
         call("bm", get(DRAFTS).param("q", "YBS-" + draft)).andExpect(jsonPath("$.items[*].id", contains((int) draft)));
+        call("bm", get(DRAFTS).param("q", "long bien")).andExpect(jsonPath("$.items[*].id", contains((int) draft)));
         call("bm", get(DRAFTS).param("q", "Kho")).andExpect(jsonPath("$.items", empty()));
 
         call("bm2", get(DRAFTS)).andExpect(jsonPath("$.items", empty()));

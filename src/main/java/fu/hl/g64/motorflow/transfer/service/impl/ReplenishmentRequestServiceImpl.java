@@ -10,6 +10,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus;
@@ -47,7 +48,6 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -116,7 +116,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
 
     /**
      * The search text as the query takes it: a request id when it reads as a code, and a LIKE pattern for store
-     * names.
+     * names without case or accents (R-01).
      */
     private record TextQuery(boolean present, Long id, String pattern) {
 
@@ -138,9 +138,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                     // Digits beyond a Long cannot be an id, so only the store name can match.
                 }
             }
-            String escaped = text.toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%")
-                    .replace("_", "\\_");
-            return new TextQuery(true, id, "%" + escaped + "%");
+            return new TextQuery(true, id, SearchText.likePattern(text));
         }
     }
 
