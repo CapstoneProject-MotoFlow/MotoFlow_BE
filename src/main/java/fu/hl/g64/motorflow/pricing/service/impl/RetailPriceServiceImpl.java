@@ -13,6 +13,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.pricing.dto.PriceVersionResponse;
 import fu.hl.g64.motorflow.pricing.dto.RetailPriceRequest;
 import fu.hl.g64.motorflow.pricing.dto.RetailPriceResponse;
@@ -41,7 +42,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -203,8 +203,8 @@ public class RetailPriceServiceImpl implements RetailPriceService {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             if (StringUtils.hasText(filter.q())) {
-                String like = "%" + filter.q().strip().toLowerCase(Locale.ROOT) + "%";
-                where.add(cb.or(cb.like(cb.lower(root.get("sku")), like), cb.like(cb.lower(root.get("partName")), like)));
+                String like = SearchText.likePattern(filter.q());
+                where.add(cb.or(SearchText.like(cb, root.get("sku"), like), SearchText.like(cb, root.get("partName"), like)));
             }
             if (filter.categoryId() != null) {
                 where.add(root.get("categoryId").in(categoryService.withDescendants(filter.categoryId())));

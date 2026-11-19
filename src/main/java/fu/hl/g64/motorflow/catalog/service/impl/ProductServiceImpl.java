@@ -25,6 +25,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.upload.service.CloudinaryService;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -220,11 +221,11 @@ public class ProductServiceImpl implements ProductService {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             if (StringUtils.hasText(filter.q())) {
-                String like = "%" + filter.q().strip().toLowerCase(Locale.ROOT) + "%";
+                String like = SearchText.likePattern(filter.q());
                 Subquery<Long> byCode = query.subquery(Long.class);
                 Root<ProductIdentifier> identifier = byCode.from(ProductIdentifier.class);
-                byCode.select(identifier.get("productId")).where(cb.like(cb.lower(identifier.get("identifierValue")), like));
-                where.add(cb.or(cb.like(cb.lower(root.get("sku")), like), cb.like(cb.lower(root.get("partName")), like),
+                byCode.select(identifier.get("productId")).where(SearchText.like(cb, identifier.get("identifierValue"), like));
+                where.add(cb.or(SearchText.like(cb, root.get("sku"), like), SearchText.like(cb, root.get("partName"), like),
                         root.get("id").in(byCode)));
             }
             if (filter.categoryId() != null) {

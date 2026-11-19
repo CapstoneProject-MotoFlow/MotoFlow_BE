@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.StockBalanceService;
 import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
@@ -35,7 +36,6 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
@@ -62,7 +62,7 @@ public class StoreServiceImpl implements StoreService {
         Map<Long, UserAccount> activeOwners = users.findByRoleAndStatus(Role.OWNER, AccountStatus.ACTIVE).stream()
                 .collect(Collectors.toMap(UserAccount::getId, Function.identity()));
         Map<Long, Long> productsByStore = productsInStockByStore();
-        String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
+        String needle = StringUtils.hasText(q) ? SearchText.fold(q.strip()) : null;
 
         return stores.findAll(Sort.by("id")).stream()
                 .map(store -> StoreResponse.from(store,
@@ -73,7 +73,7 @@ public class StoreServiceImpl implements StoreService {
                 .filter(s -> needle == null || Stream.concat(
                                 Stream.of(s.storeName(), String.valueOf(s.id()), s.address()),
                                 s.managers().stream().map(StoreResponse.ManagerInfo::fullName))
-                        .anyMatch(text -> text != null && text.toLowerCase(Locale.ROOT).contains(needle)))
+                        .anyMatch(text -> SearchText.contains(text, needle)))
                 .toList();
     }
 

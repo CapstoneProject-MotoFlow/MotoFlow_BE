@@ -69,6 +69,7 @@ class RetailPriceApiTest extends PricingTestData {
 
     @Test
     void branchManagersSeeTheSuggestionOnlyWithRetailPricePermissionAndNeverTheCost() throws Exception {
+        priceList(managerToken, "?q=ma phanh truoc").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH-01")));
         priceList(managerToken, "?q=phanh")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH-01")))

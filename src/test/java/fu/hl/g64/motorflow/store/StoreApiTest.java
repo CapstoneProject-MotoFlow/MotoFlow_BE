@@ -206,6 +206,7 @@ class StoreApiTest extends IntegrationTest {
         listStores("?status=ACTIVE").andExpect(jsonPath("$[*].id", contains((int) branch)));
         listStores("?central=true").andExpect(jsonPath("$[*].storeName", contains("Cửa hàng CH01")));
         listStores("?q=TEST BM01").andExpect(jsonPath("$[*].id", contains((int) branch)));
+        listStores("?q=cua hang ch02").andExpect(jsonPath("$[*].id", contains((int) branch)));
         listStores("?status=OPEN")
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"));
     }
