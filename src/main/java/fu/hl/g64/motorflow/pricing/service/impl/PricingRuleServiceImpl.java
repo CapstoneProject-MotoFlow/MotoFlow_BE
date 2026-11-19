@@ -34,7 +34,9 @@ import fu.hl.g64.motorflow.pricing.helper.PricingVersions;
 import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import fu.hl.g64.motorflow.pricing.service.PricingRuleService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.common.config.CacheConfig;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -78,6 +80,7 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     }
 
     // UC-38
+    @CacheEvict(cacheNames = CacheConfig.PRICING_RULES, allEntries = true)
     @Transactional
     @Override
     public SalesLimitsResponse setSalesLimit(AuthenticatedUser owner, SalesLimitRequest request) {
@@ -110,6 +113,7 @@ public class PricingRuleServiceImpl implements PricingRuleService {
     }
 
     // UC-101
+    @CacheEvict(cacheNames = CacheConfig.PRICING_RULES, allEntries = true)
     @Transactional
     @Override
     public MarkupRulesResponse setMarkupRules(AuthenticatedUser owner, MarkupRulesRequest request) {

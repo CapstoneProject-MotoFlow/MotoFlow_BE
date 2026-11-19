@@ -125,6 +125,7 @@ class SalesOrderApiTest extends SalesOrderTestData {
 
         // Without a threshold in effect no discount is allowed; a retail order still is.
         jdbc.update("DELETE FROM pricing_policy WHERE policy_type = 'DISCOUNT_THRESHOLD'");
+        clearCaches();
         create(managerToken, order(null, customer, "WHOLESALE", "5", lines(pad, 1)))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG163"));
         create(managerToken, order(null, customer, "WHOLESALE", "0", lines(pad, 1)))
@@ -427,6 +428,7 @@ class SalesOrderApiTest extends SalesOrderTestData {
 
         // BR-88 at 60%: 4 × 60,000 × 1.6 = 384,000; at 5% off the order makes 380,000.
         jdbc.update("UPDATE pricing_policy SET rate = 60 WHERE policy_type = 'MINIMUM_MARGIN'");
+        clearCaches();
         update(ownerToken, order, 1, order(null, customer, "WHOLESALE", "5", lines(pad, 4))).andExpect(status().isOk());
         confirm(ownerToken, order, 2, pad, 4)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG173"))

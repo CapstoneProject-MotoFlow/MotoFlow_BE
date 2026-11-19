@@ -6,7 +6,6 @@ import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository.LatestPurchase;
 import fu.hl.g64.motorflow.pricing.entity.PricingPolicy;
 import fu.hl.g64.motorflow.pricing.entity.enums.RoundingRule;
-import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -37,13 +36,13 @@ public class PriceSuggestions {
     /** Keeps each IN list well below the 32767 bind parameters a PostgreSQL statement can take. */
     public static final int CHUNK = 1000;
 
-    private final PricingPolicyRepository policies;
+    private final PricingRules rules;
     private final PartCategoryRepository categories;
     private final LotRepository lots;
 
     /** The markup configuration in force at {@code now}; no rules if Owner has not set any yet. */
     public MarkupRules rulesInEffect(LocalDateTime now) {
-        return MarkupRules.of(policies.findMarkupRulesInEffect(now));
+        return MarkupRules.ofVersions(rules.markupRulesInEffect(now));
     }
 
     /** The suggestion basis of each part, also for a part without purchase or rate (its fields are then null). */
@@ -107,6 +106,23 @@ public class PriceSuggestions {
             RoundingRule rounding = rows.stream().map(PricingPolicy::getRoundingRule).filter(r -> r != null)
                     .findFirst().orElse(RoundingRule.NONE);
             LocalDateTime from = rows.isEmpty() ? null : rows.getFirst().getEffectiveFrom();
+            return new MarkupRules(from, rounding, byCategory, byProduct);
+        }
+
+        /** The same rules built from the cached versions of {@link PricingRules}. */
+        public static MarkupRules ofVersions(List<PricingRuleVersions.Version> rows) {
+            Map<Long, BigDecimal> byCategory = new HashMap<>();
+            Map<Long, BigDecimal> byProduct = new HashMap<>();
+            for (PricingRuleVersions.Version row : rows) {
+                if (row.categoryId() != null) {
+                    byCategory.put(row.categoryId(), row.markupRate());
+                } else {
+                    byProduct.put(row.productId(), row.markupRate());
+                }
+            }
+            RoundingRule rounding = rows.stream().map(PricingRuleVersions.Version::roundingRule).filter(r -> r != null)
+                    .findFirst().orElse(RoundingRule.NONE);
+            LocalDateTime from = rows.isEmpty() ? null : rows.getFirst().effectiveFrom();
             return new MarkupRules(from, rounding, byCategory, byProduct);
         }
 

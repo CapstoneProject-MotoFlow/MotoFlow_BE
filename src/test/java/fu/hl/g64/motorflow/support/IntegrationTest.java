@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.support;
 import io.zonky.test.db.postgres.embedded.EmbeddedPostgres;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.cache.CacheManager;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,6 +41,9 @@ public abstract class IntegrationTest {
 
     @Autowired
     protected MutableClock clock;
+
+    @Autowired
+    private CacheManager cacheManager;
 
     /**
      * Test fixture for the receiving tasks (lecturer feedback 12/11): gives {@code assigneeId} the SUPPLIER_RECEIVING
@@ -107,6 +111,7 @@ public abstract class IntegrationTest {
                 + "product_image, product_vehicle_model, vehicle_model, product, part_category, user_account, store "
                 + "RESTART IDENTITY CASCADE");
         jdbc.execute("ALTER SEQUENCE supplier_code_seq RESTART WITH 1");
+        clearCaches();
         clock.set(START);
     }
 
@@ -121,5 +126,10 @@ public abstract class IntegrationTest {
         } catch (IOException e) {
             throw new UncheckedIOException("Could not start embedded PostgreSQL", e);
         }
+    }
+
+    /** Tests write reference data with SQL, which the application cache cannot see: clear it after such writes. */
+    protected void clearCaches() {
+        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
     }
 }

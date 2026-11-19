@@ -211,6 +211,7 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
         // Completion re-checks the discount threshold in effect now.
         jdbc.update("UPDATE sales_order SET discount_rate = 5 WHERE id = ?", order);
         jdbc.update("DELETE FROM pricing_policy WHERE policy_type = 'DISCOUNT_THRESHOLD'");
+        clearCaches(); // the rules were changed with SQL, behind the application cache
         complete(managerToken, order, 1)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG163"));
         jdbc.update("UPDATE sales_order SET discount_rate = 0 WHERE id = ?", order);

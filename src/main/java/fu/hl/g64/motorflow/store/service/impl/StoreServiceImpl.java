@@ -20,11 +20,13 @@ import fu.hl.g64.motorflow.store.dto.StoreResponse;
 import fu.hl.g64.motorflow.store.dto.UpdateStoreRequest;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
+import fu.hl.g64.motorflow.store.helper.StoreDirectory;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.store.service.StoreService;
+import fu.hl.g64.motorflow.common.config.CacheConfig;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,6 +49,7 @@ import java.util.stream.Stream;
 public class StoreServiceImpl implements StoreService {
 
     private final StoreRepository stores;
+    private final StoreDirectory storeDirectory;
     private final UserAccountRepository users;
     private final StockBalanceRepository stockBalances;
     private final StockBalanceService stockBalanceService;
@@ -64,10 +67,10 @@ public class StoreServiceImpl implements StoreService {
         Map<Long, Long> productsByStore = productsInStockByStore();
         String needle = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
 
-        return stores.findAll(Sort.by("id")).stream()
-                .map(store -> StoreResponse.from(store,
-                        withOwner(activeOwners.get(store.getOwnerManagerId()), managersByStore.getOrDefault(store.getId(), List.of())),
-                        productsByStore.getOrDefault(store.getId(), 0L)))
+        return storeDirectory.all().stream()
+                .map(store -> store.with(
+                        withOwner(activeOwners.get(store.ownerManagerId()), managersByStore.getOrDefault(store.id(), List.of())),
+                        productsByStore.getOrDefault(store.id(), 0L)))
                 .filter(s -> status == null || s.status() == status)
                 .filter(s -> central == null || s.central() == central)
                 .filter(s -> needle == null || Stream.concat(
@@ -99,6 +102,7 @@ public class StoreServiceImpl implements StoreService {
                 .toList();
     }
 
+    @CacheEvict(cacheNames = CacheConfig.STORES, allEntries = true)
     @Transactional
     @Override
     public StoreResponse setOwnerManager(AuthenticatedUser actor, long storeId, OwnerManagerRequest request) {
@@ -120,6 +124,7 @@ public class StoreServiceImpl implements StoreService {
         return StoreResponse.from(store, managersOf(store), productsInStockByStore().getOrDefault(storeId, 0L));
     }
 
+    @CacheEvict(cacheNames = CacheConfig.STORES, allEntries = true)
     @Transactional
     @Override
     public StoreResponse createStore(AuthenticatedUser actor, CreateStoreRequest request) {
@@ -138,6 +143,7 @@ public class StoreServiceImpl implements StoreService {
         return StoreResponse.from(store, List.of(), 0);
     }
 
+    @CacheEvict(cacheNames = CacheConfig.STORES, allEntries = true)
     @Transactional
     @Override
     public CopiedStoreResponse copyStore(AuthenticatedUser actor, long templateId, CopyStoreRequest request) {
@@ -157,6 +163,7 @@ public class StoreServiceImpl implements StoreService {
         return new CopiedStoreResponse(StoreResponse.from(store, List.of(), 0), copied);
     }
 
+    @CacheEvict(cacheNames = CacheConfig.STORES, allEntries = true)
     @Transactional
     @Override
     public StoreResponse updateStore(AuthenticatedUser actor, long storeId, UpdateStoreRequest request) {
