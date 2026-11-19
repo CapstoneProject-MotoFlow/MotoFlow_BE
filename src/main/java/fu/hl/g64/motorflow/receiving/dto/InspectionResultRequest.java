@@ -32,9 +32,9 @@ public record InspectionResultRequest(
 
     /**
      * One part of the GRN: the delivered, wrong-item and damaged quantities (wrong item and damaged are 0 when left
-     * out) and the lot data printed on the packaging. Passed and short are derived (BR-24). {@code documentQty} is
-     * ignored: the delivery-document quantity was entered when the GRN was recorded (PM 15/11); it stays optional so
-     * an older client still works.
+     * out), the quantity its delivery document lists, and the lot data printed on the packaging. Passed and short are
+     * derived (BR-24). {@code documentQty} is entered here by the inspector (PM 20/11); left out, it keeps what the GRN
+     * holds, so an older client that gave it when recording the GRN still works.
      */
     public record Line(
             @NotNull(message = "Vui lòng chọn dòng của phiếu nhận hàng.")

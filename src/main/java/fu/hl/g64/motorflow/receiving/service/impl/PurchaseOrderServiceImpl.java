@@ -59,6 +59,8 @@ import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.service.ReplenishmentRequestService;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
@@ -565,7 +567,18 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                                                          PurchaseOrderView view, LocalDate from, LocalDate to) {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
-            where.add(root.get("status").in(view.statuses()));
+            // PM 20/11: a PO fully received by its delivery documents but with a discrepancy case still open stays
+            // in OPEN (FE shows "Chờ xử lý sai lệch") and joins FULLY_RECEIVED once every case is closed.
+            if (view == PurchaseOrderView.OPEN) {
+                where.add(cb.or(root.get("status").in(view.statuses()), cb.and(
+                        cb.equal(root.get("status"), PurchaseOrderStatus.FULLY_RECEIVED),
+                        cb.exists(openCaseOf(root, query, cb)))));
+            } else if (view == PurchaseOrderView.FULLY_RECEIVED) {
+                where.add(root.get("status").in(view.statuses()));
+                where.add(cb.not(cb.exists(openCaseOf(root, query, cb))));
+            } else {
+                where.add(root.get("status").in(view.statuses()));
+            }
             if (view == PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT) {
                 Subquery<Long> held = query.subquery(Long.class);
                 Root<WarehouseTask> task = held.from(WarehouseTask.class);
@@ -589,6 +602,16 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             where.add(matchingText(q).toPredicate(root, query, cb));
             return cb.and(where.toArray(Predicate[]::new));
         };
+    }
+
+    /** An open discrepancy case on one of the PO's deliveries (the same cases as {@code openDiscrepancies}). */
+    private static Subquery<Long> openCaseOf(Root<PurchaseOrder> order, CriteriaQuery<?> query, CriteriaBuilder cb) {
+        Subquery<Long> open = query.subquery(Long.class);
+        Root<DiscrepancyCase> found = open.from(DiscrepancyCase.class);
+        Root<GoodsReceiptNote> receipt = open.from(GoodsReceiptNote.class);
+        return open.select(found.get("id")).where(cb.equal(found.get("goodsReceiptNoteId"), receipt.get("id")),
+                cb.equal(receipt.get("purchaseOrderId"), order.get("id")),
+                cb.equal(found.get("status"), DiscrepancyCaseStatus.OPEN));
     }
 
     /** q: the PO number (12, #12, DNH-0012) or part of the supplier's name or code; everything when blank. */

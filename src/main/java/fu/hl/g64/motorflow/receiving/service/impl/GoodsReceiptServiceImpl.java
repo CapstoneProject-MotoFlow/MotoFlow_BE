@@ -301,7 +301,9 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             }
             anything |= in.deliveredQty() > 0;
         }
-        anything |= lines.stream().anyMatch(line -> line.getDocumentQty() > 0);
+        for (GoodsReceiptNoteLine line : lines) {
+            anything |= documentQtyOf(line, given.get(line.getId())) > 0;
+        }
         if (!anything) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG140");
         }
@@ -310,10 +312,10 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             InspectionResultRequest.Line in = given.get(line.getId());
             if (in == null) {
                 // A part the delivery did not bring and its document did not list.
-                line.record(line.getDocumentQty(), 0, 0, 0, null, null, null);
+                line.record(documentQtyOf(line, null), 0, 0, 0, null, null, null);
             } else {
-                // The delivery-document quantity stays as entered when the GRN was recorded (PM 15/11).
-                line.record(line.getDocumentQty(), in.deliveredQty(), orZero(in.wrongItemQty()), orZero(in.damagedQty()),
+                // PM 20/11: the inspector enters the delivery-document quantity together with the counts.
+                line.record(documentQtyOf(line, in), in.deliveredQty(), orZero(in.wrongItemQty()), orZero(in.damagedQty()),
                         text(in.manufacturerLotNo()), in.manufactureDate(), in.expiryDate());
             }
         }
@@ -620,13 +622,22 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     }
 
     /**
-     * UC-106 step 3 (PM 15/11): the delivery-document quantity of each expected part; a part left out is 0. Another
-     * part, or a part given twice, is refused (MSG277); at least one line is needed (MSG278).
+     * UC-43 (PM 20/11): the delivery-document quantity the inspector entered for the line; a line or a quantity left
+     * out keeps what the GRN holds (0 unless it was given when the GRN was recorded).
+     */
+    private static int documentQtyOf(GoodsReceiptNoteLine line, InspectionResultRequest.Line in) {
+        return in == null || in.documentQty() == null ? line.getDocumentQty() : in.documentQty();
+    }
+
+    /**
+     * UC-106 step 3: the delivery-document quantity of each expected part given when the GRN is recorded; a part
+     * left out is 0. Another part, or a part given twice, is refused (MSG277). Since PM 20/11 the inspector enters
+     * it with the inspection result, so it may be left out here.
      */
     private static Map<Long, Integer> documentQuantities(List<GoodsReceiptRequest.DocumentLine> lines,
                                                          List<Long> expectedParts) {
-        if (lines == null || lines.isEmpty()) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG278");
+        if (lines == null) {
+            return Map.of();
         }
         Set<Long> expected = new HashSet<>(expectedParts);
         Map<Long, Integer> quantities = new HashMap<>();

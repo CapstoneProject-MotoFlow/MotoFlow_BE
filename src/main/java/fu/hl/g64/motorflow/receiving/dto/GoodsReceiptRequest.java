@@ -19,9 +19,9 @@ import java.util.List;
  * photos of the delivery document (UC-106 step 3: at least one), already uploaded with an ATTACHMENT signature.
  * {@code deliveryDocumentNo} and {@code deliveryDocumentDate} may be left out (PM 17/11, Q1-Q2): a number given is
  * still unique within the PO (MSG28), blank counts as none; a date given may not be in the future (MSG138).
- * {@code documentLines} are the quantities printed on the delivery document, entered once here (PM 15/11, FE review
- * PR #43 R-01): one per part the delivery is expected to bring, a part left out is 0; at least one is needed
- * (MSG278). The inspection result keeps them.
+ * {@code documentLines} are optional since PM 20/11: the inspector enters the delivery-document quantities with
+ * the inspection result (UC-43). When given, one per part the delivery is expected to bring, a part left out is 0.
+ * An inspection result that gives no document quantity keeps them.
  */
 public record GoodsReceiptRequest(
         @Size(max = 50, message = "Số chứng từ tối đa 50 ký tự.")

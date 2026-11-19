@@ -9,6 +9,7 @@ import java.util.Arrays;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -135,6 +136,31 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG02"))
                 .andExpect(jsonPath("$.fieldErrors.createdFrom").value(INVALID_VALUE));
+    }
+
+    /** PM 20/11: a fully received PO with a discrepancy case still open waits in the open tab. */
+    @Test
+    void aFullyReceivedOrderWithAnOpenDiscrepancyStaysInTheOpenTabUntilTheCaseIsClosed() throws Exception {
+        long delivery = delivery(fullyReceived, "PX-201", LocalDateTime.of(2026, 9, 5, 9, 0), "CONFIRMED", staff,
+                manager);
+        result(delivery, pad, 10, 9, 0, 1, 0, "NOT_APPLICABLE");
+        discrepancy(delivery, pad, 0, 1, LocalDateTime.of(2026, 9, 5, 10, 0), null);
+
+        list(ownerToken)
+                .andExpect(jsonPath("$.items[*].id", contains(ids(newOrder, receivingOrder, lateOrder, fullyReceived))))
+                .andExpect(jsonPath("$.items[3].status").value("FULLY_RECEIVED"))
+                .andExpect(jsonPath("$.items[3].openDiscrepancies").value(1));
+        list(ownerToken, "view", "FULLY_RECEIVED", "createdFrom", "2026-09-01")
+                .andExpect(jsonPath("$.items", hasSize(0)));
+        list(ownerToken, "view", "ALL", "createdFrom", "2026-09-01")
+                .andExpect(jsonPath("$.items[*].id", hasItem((int) fullyReceived)));
+
+        jdbc.update("UPDATE discrepancy_case SET status = 'CLOSED', closure_type = 'ALL_SETTLED', closed_by = ?, "
+                + "closed_at = ? WHERE goods_receipt_note_id = ?", owner.getId(), LocalDateTime.of(2026, 9, 6, 9, 0),
+                delivery);
+        list(ownerToken).andExpect(jsonPath("$.items[*].id", contains(ids(newOrder, receivingOrder, lateOrder))));
+        list(ownerToken, "view", "FULLY_RECEIVED", "createdFrom", "2026-09-01")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
     }
 
     @Test
