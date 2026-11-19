@@ -436,13 +436,16 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 : discrepancies.findByGoodsReceiptNoteIdInOrderByIdAsc(deliveryIds);
         List<AuditLog> steps = auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(
                 PurchaseOrderHistory.ENTITY, id, PurchaseOrderHistory.ACTIONS);
+        List<AuditLog> receiptSteps = deliveryIds.isEmpty() ? List.of()
+                : auditLog.findByEntityTypeAndEntityIdInAndActionIn(PurchaseOrderHistory.RECEIPT_ENTITY, deliveryIds,
+                PurchaseOrderHistory.RECEIPT_ACTIONS);
 
         Set<Long> productIds = new HashSet<>(PurchaseOrderHistory.productIds(steps));
         lines.forEach(line -> productIds.add(line.getProductId()));
         results.forEach(line -> productIds.add(line.getProductId()));
         cases.forEach(found -> productIds.add(found.getProductId()));
         Map<Long, Product> parts = byId(products.findAllById(productIds), Product::getId);
-        Map<Long, String> names = names(order, deliveries, steps);
+        Map<Long, String> names = names(order, deliveries, cases, steps, receiptSteps);
         Supplier supplier = suppliers.findById(order.getSupplierId()).orElseThrow();
         String storeName = stores.findById(order.getStoreId()).map(Store::getStoreName).orElse(null);
 
@@ -501,8 +504,10 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 order.getCancelledBy(), names.get(order.getCancelledBy()), order.getCancelledAt(),
                 order.getCancellationReason(), owner ? orderedValue : null, openCases, changeable, changeable,
                 canCreateReceipt, canCreateReplacement, lineRows, receiptRows, caseRows,
-                steps.stream().map(step -> PurchaseOrderHistory.entry(step, names.get(step.getActorId()), parts, owner))
-                        .toList());
+                PurchaseOrderHistory.newestFirst(steps.stream()
+                                .map(step -> PurchaseOrderHistory.entry(step, names.get(step.getActorId()), parts, owner))
+                                .toList(),
+                        PurchaseOrderHistory.receivingSteps(deliveries, replacements, receiptSteps, cases, names)));
     }
 
     // UC-106, screen 6.2.1: what the receiver needs, without prices (BR-72).
@@ -543,15 +548,19 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     }
 
     /** Full names of everyone the detail mentions. */
-    private Map<Long, String> names(PurchaseOrder order, List<GoodsReceiptNote> deliveries, List<AuditLog> steps) {
+    private Map<Long, String> names(PurchaseOrder order, List<GoodsReceiptNote> deliveries,
+                                    List<DiscrepancyCase> cases, List<AuditLog> steps, List<AuditLog> receiptSteps) {
         Set<Long> ids = new HashSet<>();
         ids.add(order.getCreatedBy());
         ids.add(order.getCancelledBy());
         deliveries.forEach(r -> {
             ids.add(r.getRecordedBy());
             ids.add(r.getConfirmedBy());
+            ids.add(r.getExcessDecidedBy());
         });
+        cases.forEach(found -> ids.add(found.getClosedBy()));
         steps.forEach(step -> ids.add(step.getActorId()));
+        receiptSteps.forEach(step -> ids.add(step.getActorId()));
         ids.remove(null);
         return users.findAllById(ids).stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
     }

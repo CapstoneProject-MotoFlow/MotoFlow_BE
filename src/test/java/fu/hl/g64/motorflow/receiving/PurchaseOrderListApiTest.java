@@ -124,6 +124,36 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, fullyReceived))));
     }
 
+    /** Form sync 19/11 (item 10): who did each receiving step of the PO, and on which delivery or case. */
+    @Test
+    void theHistoryHasTheStepsOfTheDeliveriesAndDiscrepancies() throws Exception {
+        jdbc.update("INSERT INTO audit_log (entity_type, entity_id, action, actor_id, occurred_at, reason) VALUES "
+                        + "('GOODS_RECEIPT_NOTE', ?, 'GOODS_RECEIPT_CREATED', ?, ?, NULL), "
+                        + "('GOODS_RECEIPT_NOTE', ?, 'GOODS_RECEIPT_RECOUNT', ?, ?, 'Đếm lại đèn')",
+                uninspectedDelivery, manager.getId(), LocalDateTime.of(2026, 10, 13, 7, 30),
+                confirmedDelivery, manager.getId(), LocalDateTime.of(2026, 10, 12, 15, 30));
+
+        detail(managerToken, receivingOrder).andExpect(status().isOk())
+                .andExpect(jsonPath("$.history[1].action").value("RECEIPT_CREATED"))
+                .andExpect(jsonPath("$.history[1].receiptId").value(uninspectedDelivery))
+                .andExpect(jsonPath("$.history[1].actorName").value("Test bm"))
+                .andExpect(jsonPath("$.history[1].at").value("2026-10-13T07:30:00"))
+                .andExpect(jsonPath("$.history[2].action").value("DISCREPANCY_CLOSED"))
+                .andExpect(jsonPath("$.history[2].actorName").value("Test owner"))
+                .andExpect(jsonPath("$.history[2].receiptId").value(confirmedDelivery))
+                .andExpect(jsonPath("$.history[2].discrepancyId").isNumber())
+                .andExpect(jsonPath("$.history[3].action").value("DISCREPANCY_OPENED"))
+                .andExpect(jsonPath("$.history[3].actorId").doesNotExist())
+                .andExpect(jsonPath("$.history[5].action").value("RECEIPT_CONFIRMED"))
+                .andExpect(jsonPath("$.history[5].actorName").value("Test bm"))
+                .andExpect(jsonPath("$.history[6].action").value("RECEIPT_RECOUNT"))
+                .andExpect(jsonPath("$.history[6].reason").value("Đếm lại đèn"))
+                .andExpect(jsonPath("$.history[7].action").value("RECEIPT_SUBMITTED"))
+                .andExpect(jsonPath("$.history[7].actorName").value("Test staff"))
+                .andExpect(jsonPath("$.history[7].receiptId").value(confirmedDelivery))
+                .andExpect(jsonPath("$.history[7].discrepancyId").doesNotExist());
+    }
+
     @Test
     void theOtherTabsShowTheLast30DaysUnlessAnotherRangeIsChosen() throws Exception {
         list(ownerToken, "view", "ALL")
@@ -289,7 +319,9 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.discrepancies[0].openedAt").value("2026-10-12T16:00:00"))
                 .andExpect(jsonPath("$.discrepancies[0].closedAt").doesNotExist())
                 .andExpect(jsonPath("$.discrepancies[1].closedAt").value("2026-10-13T07:00:00"))
-                .andExpect(jsonPath("$.history[*].action", contains("CREATED")));
+                // Form sync 19/11 (item 10): the steps of its deliveries and cases, newest first.
+                .andExpect(jsonPath("$.history[*].action", contains("CREATED", "DISCREPANCY_CLOSED",
+                        "DISCREPANCY_OPENED", "DISCREPANCY_OPENED", "RECEIPT_CONFIRMED", "RECEIPT_SUBMITTED")));
 
         // A recorded result waiting for confirmation is shown, but nothing has come into stock yet.
         detail(ownerToken, newOrder)

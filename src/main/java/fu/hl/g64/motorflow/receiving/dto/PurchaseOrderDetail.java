@@ -69,10 +69,16 @@ public record PurchaseOrderDetail(
 
     /**
      * One step of the PO history, newest first: CREATED, UPDATED or CANCELLED, with the reason. An UPDATED step lists
-     * what changed: {@code delivery} is null when the delivery details stayed the same.
+     * what changed: {@code delivery} is null when the delivery details stayed the same. Form sync 19/11 (item 10): the
+     * steps of its deliveries and discrepancy cases come too, with {@code receiptId} or {@code discrepancyId}:
+     * RECEIPT_CREATED (REPLACEMENT_RECEIPT_CREATED for a replacement delivery), RECEIPT_SUBMITTED (inspection result
+     * sent), RECEIPT_RECOUNT (sent back, with the reason), RECEIPT_EXCESS_DECIDED, RECEIPT_CONFIRMED,
+     * DISCREPANCY_OPENED and DISCREPANCY_CLOSED (with the closure reason). A delivery sent back for recount keeps only
+     * its last submission.
      */
     public record HistoryEntry(String action, Long actorId, String actorName, LocalDateTime at, String reason,
-                               DeliveryChange delivery, List<LineChange> lineChanges) {
+                               DeliveryChange delivery, List<LineChange> lineChanges, Long receiptId,
+                               Long discrepancyId) {
     }
 
     public record DeliveryChange(LocalDate oldExpectedArrival, LocalDate newExpectedArrival, String oldNote,
