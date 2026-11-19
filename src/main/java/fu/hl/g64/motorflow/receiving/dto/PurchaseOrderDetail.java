@@ -73,7 +73,7 @@ public record PurchaseOrderDetail(
      * steps of its deliveries and discrepancy cases come too, with {@code receiptId} or {@code discrepancyId}:
      * RECEIPT_CREATED (REPLACEMENT_RECEIPT_CREATED for a replacement delivery), RECEIPT_SUBMITTED (inspection result
      * sent), RECEIPT_RECOUNT (sent back, with the reason), RECEIPT_EXCESS_DECIDED, RECEIPT_CONFIRMED,
-     * DISCREPANCY_OPENED and DISCREPANCY_CLOSED (with the closure reason). A delivery sent back for recount keeps only
+     * DISCREPANCY_OPENED (by whoever confirmed the delivery or rejected its excess) and DISCREPANCY_CLOSED (with the closure reason). A delivery sent back for recount keeps only
      * its last submission.
      */
     public record HistoryEntry(String action, Long actorId, String actorName, LocalDateTime at, String reason,

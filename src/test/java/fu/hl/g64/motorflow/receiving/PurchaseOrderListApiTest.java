@@ -143,7 +143,8 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.history[2].receiptId").value(confirmedDelivery))
                 .andExpect(jsonPath("$.history[2].discrepancyId").isNumber())
                 .andExpect(jsonPath("$.history[3].action").value("DISCREPANCY_OPENED"))
-                .andExpect(jsonPath("$.history[3].actorId").doesNotExist())
+                // Opened when the Branch Manager confirmed the delivery.
+                .andExpect(jsonPath("$.history[3].actorName").value("Test bm"))
                 .andExpect(jsonPath("$.history[5].action").value("RECEIPT_CONFIRMED"))
                 .andExpect(jsonPath("$.history[5].actorName").value("Test bm"))
                 .andExpect(jsonPath("$.history[6].action").value("RECEIPT_RECOUNT"))

@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -112,10 +113,12 @@ public final class PurchaseOrderHistory {
                                                     List<AuditLog> receiptSteps, List<DiscrepancyCase> cases,
                                                     Map<Long, String> names) {
         List<HistoryEntry> steps = new ArrayList<>();
+        Map<Long, GoodsReceiptNote> byId = new HashMap<>();
+        deliveries.forEach(delivery -> byId.put(delivery.getId(), delivery));
         // A case opens when its delivery is confirmed: listed first, it shows above that step at the same time.
         for (DiscrepancyCase found : cases) {
-            steps.add(step("DISCREPANCY_OPENED", null, names, found.getOpenedAt(), null, found.getGoodsReceiptNoteId(),
-                    found.getId()));
+            steps.add(step("DISCREPANCY_OPENED", openedBy(found, byId.get(found.getGoodsReceiptNoteId())), names,
+                    found.getOpenedAt(), null, found.getGoodsReceiptNoteId(), found.getId()));
             if (found.getClosedAt() != null) {
                 steps.add(step("DISCREPANCY_CLOSED", found.getClosedBy(), names, found.getClosedAt(),
                         found.getClosureReason(), found.getGoodsReceiptNoteId(), found.getId()));
@@ -143,6 +146,20 @@ public final class PurchaseOrderHistory {
             }
         }
         return steps;
+    }
+
+    /**
+     * Who opened a case: it has no column of its own, but a case opens in the same transaction, at the same time, as
+     * the confirmation of its delivery (Branch Manager) or Owner's rejection of excess. Null if neither matches.
+     */
+    private static Long openedBy(DiscrepancyCase found, GoodsReceiptNote delivery) {
+        if (delivery == null) {
+            return null;
+        }
+        if (found.getOpenedAt().equals(delivery.getConfirmedAt())) {
+            return delivery.getConfirmedBy();
+        }
+        return found.getOpenedAt().equals(delivery.getExcessDecidedAt()) ? delivery.getExcessDecidedBy() : null;
     }
 
     /** The PO's own steps and its receiving steps together, newest first. */
