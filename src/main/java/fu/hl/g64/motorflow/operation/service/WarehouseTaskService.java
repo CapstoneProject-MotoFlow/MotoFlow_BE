@@ -64,8 +64,8 @@ public interface WarehouseTaskService {
     long returnForRecount(TaskType type, long documentId);
 
     /**
-     * The result was confirmed: the task is done. BR-26: the picker never confirms their own result (MSG124); a
-     * Branch Manager who took another task may confirm it and the Owner is notified. A result already confirmed can be
+     * The result was confirmed: the task is done. BR-26, K1: a Branch Manager who took the task, picking
+     * included (PM 19/11), may confirm it and the Owner is notified. A result already confirmed can be
      * confirmed again when the document changed without
      * a new result (a sales order whose price or delivered quantities were revised, UC-55, UC-58): the same check
      * applies and the task stays done.

@@ -217,8 +217,8 @@ class WarehouseTaskApiTest extends ApiTestUsers {
     }
 
     @Test
-    void aManagerCanTakeTheTaskThemselfButSomeoneElseConfirmsTheResult() throws Exception {
-        UserAccount peer = createUser("bm3", Role.BRANCH_MANAGER, store);
+    void aManagerCanTakeTheTaskThemselfAndConfirmTheResult() throws Exception {
+        createUser("bm3", Role.BRANCH_MANAGER, store);
         long order = order("AWAITING_PICKING");
         long receipt = supplierReceipt(store, "AWAITING_INSPECTION");
 
@@ -226,7 +226,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.current.assigneeId").value(manager.getId()))
                 .andExpect(jsonPath("$.current.selfAssigned").value(true))
-                .andExpect(jsonPath("$.noticeCode").doesNotExist())
+                .andExpect(jsonPath("$.noticeCode").value("MSG40"))
                 .andExpect(jsonPath("$.eligibleAssignees[2].self").value(true))
                 .andExpect(jsonPath("$.eligibleAssignees[2].openTasks").value(1));
         // MSG40 speaks to the manager who took the task; another manager of the store sees who holds it.
@@ -238,14 +238,15 @@ class WarehouseTaskApiTest extends ApiTestUsers {
         // Nobody is notified of a task they took themself.
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification", Long.class)).isZero();
 
-        // The manager records like the Staff member would, but cannot confirm their own result (BR-26).
+        // The manager records like the Staff member would and confirms their own picking; the Owner is told (K1,
+        // PM 19/11).
         warehouseTasks.requireAssignee(principal(manager), TaskType.PICKING, order);
         warehouseTasks.submitResult(principal(manager), TaskType.PICKING, order);
-        assertThatThrownBy(() -> warehouseTasks.confirmResult(principal(manager), TaskType.PICKING, order))
-                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG124"));
-        warehouseTasks.confirmResult(principal(peer), TaskType.PICKING, order);
+        warehouseTasks.confirmResult(principal(manager), TaskType.PICKING, order);
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE sales_order_id = ?", String.class,
                 order)).isEqualTo("DONE");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
+                Long.class)).isEqualTo(1);
 
         assign(token, TaskType.INSPECTION, receipt, manager.getId())
                 .andExpect(status().isOk())
@@ -255,7 +256,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
         assertThat(jdbc.queryForObject("SELECT status FROM warehouse_task WHERE goods_receipt_note_id = ?", String.class,
                 receipt)).isEqualTo("DONE");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = 'TASK_SELF_CONFIRMED'",
-                Long.class)).isEqualTo(1);
+                Long.class)).isEqualTo(2);
     }
 
     @Test

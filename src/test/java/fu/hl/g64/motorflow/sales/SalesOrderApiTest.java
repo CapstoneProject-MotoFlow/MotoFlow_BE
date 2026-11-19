@@ -406,18 +406,26 @@ class SalesOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void aBranchManagerSellingAloneConfirmsWhatTheyPicked() throws Exception {
+        // K1 (PM 19/11): a Branch Manager selling alone picks the goods themself and may confirm; the Owner is told.
+        long order = createOrder(pad, 1);
+        assign(managerToken, "PICKING", order, manager).andExpect(status().isOk());
+        pick(managerToken, order, 1, pad, 1, null).andExpect(status().isOk());
+        detail(managerToken, order).andExpect(jsonPath("$.actions.canConfirm").value(true));
+        list(managerToken).andExpect(jsonPath("$.items[0].nextAction").value("CONFIRM"));
+        confirm(managerToken, order, 1, pad, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = "
+                + "'TASK_SELF_CONFIRMED' AND ref_id = ?", Long.class, order)).isEqualTo(1);
+    }
+
+    @Test
     void confirmationChecksStockMarginAndWhoPicked() throws Exception {
-        // The Branch Manager picks the goods themself: someone else confirms (BR-26).
+        // The Owner may confirm what the Branch Manager picked.
         long order = createOrder(pad, 4);
         assign(managerToken, "PICKING", order, manager).andExpect(status().isOk());
         pick(managerToken, order, 1, pad, 4, null).andExpect(status().isOk());
-        // Their screens offer no confirmation; the Owner's do.
-        detail(managerToken, order).andExpect(jsonPath("$.actions.canConfirm").value(false));
-        list(managerToken).andExpect(jsonPath("$.items[0].nextAction").doesNotExist());
         detail(ownerToken, order).andExpect(jsonPath("$.actions.canConfirm").value(true));
-        list(ownerToken).andExpect(jsonPath("$.items[0].nextAction").value("CONFIRM"));
-        confirm(managerToken, order, 1, pad, 4)
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG124"));
 
         // Only 3 sellable units left: the lot without expiry was used elsewhere.
         jdbc.update("UPDATE lot_balance SET quantity = 0 WHERE lot_id = ?", padNoExpiry);

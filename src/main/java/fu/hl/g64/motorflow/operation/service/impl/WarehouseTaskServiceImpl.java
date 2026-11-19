@@ -202,10 +202,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                         .filter(latest -> latest.getStatus() == WarehouseTaskStatus.DONE))
                 .orElseThrow(() -> new IllegalStateException("no " + type + " result to confirm for " + documentId));
         if (task.getAssignedTo() == confirmer.id()) {
-            if (type == TaskType.PICKING) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG124");
-            }
-            // K1, BR-26: a Branch Manager who took the task may confirm it; the Owner is told.
+            // K1, BR-26: a Branch Manager who took the task may confirm it; the Owner is told. Picking too since PM
+            // 19/11: a Branch Manager selling alone picks the goods themself and confirms the order.
             if (open.isPresent()) {
                 notifications.notifyOwners("TASK_SELF_CONFIRMED",
                         "Branch Manager %s đã tự xác nhận kết quả %s do chính mình thực hiện."
@@ -391,9 +389,7 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                 .findFirst();
         String blocked = blockedCode(document, open);
         // MSG40 speaks to the Branch Manager who took the task, so only they get it.
-        // Picking still cannot be confirmed by the person who took it (MSG124), so MSG40 would be untrue.
-        String notice = type != TaskType.PICKING && open.filter(task -> task.getAssignedTo() == manager.id()).isPresent()
-                ? "MSG40" : null;
+        String notice = open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
 
         Collator byName = Collator.getInstance(VIETNAMESE);
         List<UserAccount> staff = users.findByRoleAndStoreIdAndStatus(Role.STAFF, document.storeId(),
