@@ -2,12 +2,17 @@ package fu.hl.g64.motorflow.receiving.helper;
 
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
+import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.DeliveryChange;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.HistoryEntry;
 import fu.hl.g64.motorflow.receiving.dto.PurchaseOrderDetail.LineChange;
+import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,7 +22,8 @@ import java.util.Set;
 
 /**
  * The PO history (UC-42 "changes are kept in history") lives in audit_log: one row per step, with the delivery details
- * and lines before ({@code old_data}) and after ({@code new_data}) a change.
+ * and lines before ({@code old_data}) and after ({@code new_data}) a change. The steps of its deliveries and
+ * discrepancy cases are added from their own rows (form sync 19/11).
  */
 public final class PurchaseOrderHistory {
 
@@ -28,6 +34,10 @@ public final class PurchaseOrderHistory {
     public static final List<String> ACTIONS = List.of(CREATED, UPDATED, CANCELLED);
 
     private static final String PREFIX = "PURCHASE_ORDER_";
+
+    /** The audit_log steps of a delivery (written by GoodsReceiptServiceImpl) shown in its PO history. */
+    public static final String RECEIPT_ENTITY = "GOODS_RECEIPT_NOTE";
+    public static final List<String> RECEIPT_ACTIONS = List.of("GOODS_RECEIPT_CREATED", "GOODS_RECEIPT_RECOUNT");
 
     private PurchaseOrderHistory() {
     }
@@ -65,7 +75,7 @@ public final class PurchaseOrderHistory {
                 : step.getAction();
         if (!UPDATED.equals(step.getAction())) {
             return new HistoryEntry(action, step.getActorId(), actorName, step.getOccurredAt(), step.getReason(), null,
-                    List.of());
+                    List.of(), null, null);
         }
         Map<String, Object> before = step.getOldData() == null ? Map.of() : step.getOldData();
         Map<String, Object> after = step.getNewData() == null ? Map.of() : step.getNewData();
@@ -92,7 +102,78 @@ public final class PurchaseOrderHistory {
             }
         });
         return new HistoryEntry(action, step.getActorId(), actorName, step.getOccurredAt(), step.getReason(), delivery,
-                changes);
+                changes, null, null);
+    }
+
+    /**
+     * Form sync 19/11 (item 10): the steps of the PO's deliveries and discrepancy cases. {@code receiptSteps} are the
+     * deliveries' audit_log rows ({@link #RECEIPT_ACTIONS}); the other steps come from the deliveries and cases.
+     */
+    public static List<HistoryEntry> receivingSteps(List<GoodsReceiptNote> deliveries, Set<Long> replacements,
+                                                    List<AuditLog> receiptSteps, List<DiscrepancyCase> cases,
+                                                    Map<Long, String> names) {
+        List<HistoryEntry> steps = new ArrayList<>();
+        Map<Long, GoodsReceiptNote> byId = new HashMap<>();
+        deliveries.forEach(delivery -> byId.put(delivery.getId(), delivery));
+        // A case opens when its delivery is confirmed: listed first, it shows above that step at the same time.
+        for (DiscrepancyCase found : cases) {
+            steps.add(step("DISCREPANCY_OPENED", openedBy(found, byId.get(found.getGoodsReceiptNoteId())), names,
+                    found.getOpenedAt(), null, found.getGoodsReceiptNoteId(), found.getId()));
+            if (found.getClosedAt() != null) {
+                steps.add(step("DISCREPANCY_CLOSED", found.getClosedBy(), names, found.getClosedAt(),
+                        found.getClosureReason(), found.getGoodsReceiptNoteId(), found.getId()));
+            }
+        }
+        for (AuditLog step : receiptSteps) {
+            boolean created = "GOODS_RECEIPT_CREATED".equals(step.getAction());
+            String action = !created ? "RECEIPT_RECOUNT"
+                    : replacements.contains(step.getEntityId()) ? "REPLACEMENT_RECEIPT_CREATED" : "RECEIPT_CREATED";
+            steps.add(step(action, step.getActorId(), names, step.getOccurredAt(), step.getReason(),
+                    step.getEntityId(), null));
+        }
+        for (GoodsReceiptNote delivery : deliveries) {
+            if (delivery.getSubmittedAt() != null) {
+                steps.add(step("RECEIPT_SUBMITTED", delivery.getRecordedBy(), names, delivery.getSubmittedAt(), null,
+                        delivery.getId(), null));
+            }
+            if (delivery.getExcessDecidedAt() != null) {
+                steps.add(step("RECEIPT_EXCESS_DECIDED", delivery.getExcessDecidedBy(), names,
+                        delivery.getExcessDecidedAt(), null, delivery.getId(), null));
+            }
+            if (delivery.getConfirmedAt() != null) {
+                steps.add(step("RECEIPT_CONFIRMED", delivery.getConfirmedBy(), names, delivery.getConfirmedAt(), null,
+                        delivery.getId(), null));
+            }
+        }
+        return steps;
+    }
+
+    /**
+     * Who opened a case: it has no column of its own, but a case opens in the same transaction, at the same time, as
+     * the confirmation of its delivery (Branch Manager) or Owner's rejection of excess. Null if neither matches.
+     */
+    private static Long openedBy(DiscrepancyCase found, GoodsReceiptNote delivery) {
+        if (delivery == null) {
+            return null;
+        }
+        if (found.getOpenedAt().equals(delivery.getConfirmedAt())) {
+            return delivery.getConfirmedBy();
+        }
+        return found.getOpenedAt().equals(delivery.getExcessDecidedAt()) ? delivery.getExcessDecidedBy() : null;
+    }
+
+    /** The PO's own steps and its receiving steps together, newest first. */
+    public static List<HistoryEntry> newestFirst(List<HistoryEntry> own, List<HistoryEntry> receiving) {
+        List<HistoryEntry> all = new ArrayList<>(own);
+        all.addAll(receiving);
+        all.sort(Comparator.comparing(HistoryEntry::at).reversed());
+        return all;
+    }
+
+    private static HistoryEntry step(String action, Long actorId, Map<Long, String> names, LocalDateTime at,
+                                     String reason, Long receiptId, Long discrepancyId) {
+        return new HistoryEntry(action, actorId, actorId == null ? null : names.get(actorId), at, reason, null,
+                List.of(), receiptId, discrepancyId);
     }
 
     private static LineChange change(long productId, LineValues old, LineValues now, Product part,
