@@ -19,12 +19,17 @@ import fu.hl.g64.motorflow.support.QueryCounter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -41,6 +46,8 @@ class ReferenceDataCacheTest extends ApiTestUsers {
     private PricingRules rules;
     @Autowired
     private QueryCounter queries;
+    @Autowired
+    private PlatformTransactionManager transactions;
 
     private AuthenticatedUser owner;
 
@@ -104,5 +111,46 @@ class ReferenceDataCacheTest extends ApiTestUsers {
         pricingRules.setSalesLimit(owner,
                 new SalesLimitRequest(SalesLimitType.DISCOUNT_THRESHOLD, new BigDecimal("12"), LocalDate.now(clock)));
         assertThat(rules.rateInEffect(PolicyType.DISCOUNT_THRESHOLD, LocalDateTime.now(clock))).isEqualByComparingTo("12");
+    }
+
+    @Test
+    void aReaderThatSawTheOldRowsCannotPutThemBackAfterTheWriterCommits() throws Exception {
+        categories.create(owner, new PartCategoryRequest("Động cơ", VehicleType.MOTORCYCLE, null, null));
+        TransactionTemplate tx = new TransactionTemplate(transactions);
+        CountDownLatch readerHasRead = new CountDownLatch(1);
+        CountDownLatch writerCommitted = new CountDownLatch(1);
+
+        // The reader reads while the writer has not committed, and its transaction ends only after the writer's.
+        CompletableFuture<Integer> reader = new CompletableFuture<>();
+        Thread readerThread = new Thread(() -> {
+            try {
+                reader.complete(tx.execute(status -> {
+                    int seen = categories.tree(null).size();
+                    readerHasRead.countDown();
+                    await(writerCommitted);
+                    return seen;
+                }));
+            } catch (RuntimeException e) {
+                reader.completeExceptionally(e);
+            }
+        });
+        tx.executeWithoutResult(status -> {
+            categories.create(owner, new PartCategoryRequest("Điện", VehicleType.MOTORCYCLE, null, null));
+            readerThread.start();
+            await(readerHasRead);
+        });
+        writerCommitted.countDown();
+
+        assertThat(reader.get(10, TimeUnit.SECONDS)).isEqualTo(1);
+        assertThat(categories.tree(null)).extracting("categoryName").containsExactlyInAnyOrder("Động cơ", "Điện");
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 }
