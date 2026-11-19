@@ -10,7 +10,7 @@ public enum StockSource {
     PURCHASE_RECEIPT(Set.of(MovementType.RECEIPT_CONFIRMED, MovementType.EXCESS_ACCEPTED,
             MovementType.EXCESS_REJECTED)),
     /** Goods held for or returned to a supplier. */
-    SUPPLIER_RETURN(Set.of(MovementType.RETURN_HOLD, MovementType.SUPPLIER_RETURN)),
+    SUPPLIER_RETURN(Set.of(MovementType.RETURN_HOLD, MovementType.RETURN_RELEASE, MovementType.SUPPLIER_RETURN)),
     SALE(Set.of(MovementType.SALE_ISSUE)),
     /** Dispatched out of this warehouse, or sent to it (in transit from dispatch, then received). */
     TRANSFER(Set.of(MovementType.TRANSFER_DISPATCH, MovementType.TRANSFER_EXTRA_DISPATCH,

@@ -87,12 +87,12 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.outstandingReturnQty").value(2))
                 .andExpect(jsonPath("$.excessAwaitingDecision").value(false));
 
-        // UC-46 Step 5_Invalid or stale quantities: goods already awaiting return stay to be returned.
+        // UC-46 Step 5_Invalid or stale quantities: the excess Owner rejected stays to be returned.
         handle(managerToken, grn, found, 1)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG134"))
                 .andExpect(jsonPath("$.message").value("Số lượng sẽ trả lại của dòng 1 không được nhỏ hơn 2, là số đã "
-                        + "chuyển sang chờ trả nhà cung cấp."));
+                        + "trả nhà cung cấp hoặc hàng thừa đã từ chối nhận."));
         handle(managerToken, grn, found, 4)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG35"))
@@ -131,7 +131,8 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$[0].outstandingReturnQty").value(3))
                 .andExpect(jsonPath("$[0].openReplacementQty").value(0))
                 .andExpect(jsonPath("$[0].heldUndecidedQty").value(0))
-                .andExpect(jsonPath("$[0].canHandle").value(false))
+                // The damaged pad may still be kept instead (test report 20/11).
+                .andExpect(jsonPath("$[0].canHandle").value(true))
                 .andExpect(jsonPath("$[0].canRecordReturn").value(true))
                 .andExpect(jsonPath("$[0].canCreateReplacement").value(false))
                 .andExpect(jsonPath("$[0].canWaiveReplacement").value(false))
@@ -205,6 +206,52 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.canCreateReplacement").value(false));
     }
 
+    /** Test report 20/11: until goods are handed back, the store may keep them after all and still get replacements. */
+    @Test
+    void theStoreKeepsDamagedGoodsItHadAgreedToReturn() throws Exception {
+        long grn = receive("PX-001");
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 2),
+                counted(lineOf(grn, oil), 24, 24, 0, 0))).andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        long found = caseOf(grn, pad);
+        handle(managerToken, grn, List.of(handling(found, 2, 2))).andExpect(status().isOk());
+        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isEqualTo(2);
+
+        // Nothing went back yet, so both pads return to the damaged stock and both are still replaced.
+        handle(managerToken, grn, List.of(handling(found, 0, 2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].returnRequiredQty").value(0))
+                .andExpect(jsonPath("$[0].replacementRequiredQty").value(2))
+                .andExpect(jsonPath("$[0].outstandingReturnQty").value(0))
+                .andExpect(jsonPath("$[0].heldUndecidedQty").value(2))
+                .andExpect(jsonPath("$[0].canRecordReturn").value(false))
+                .andExpect(jsonPath("$[0].events[*].type",
+                        contains("MOVED_TO_AWAITING_RETURN", "RELEASED_FROM_AWAITING_RETURN")))
+                .andExpect(jsonPath("$[0].events[1].quantity").value(2));
+        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isZero();
+        assertThat(stock(giaLam, pad, "DAMAGED")).isEqualTo(2);
+        assertThat(movementsOf(pad)).endsWith(List.of("RETURN_RELEASE", "AWAITING_SUPPLIER_RETURN", -2),
+                List.of("RETURN_RELEASE", "DAMAGED", 2));
+
+        // Once one pad went back, the return cannot come below it.
+        handle(managerToken, grn, List.of(handling(found, 2, 2))).andExpect(status().isOk());
+        supplierReturn(managerToken, found, Map.of("quantity", 1, "evidence", List.of(Map.of("storageKey",
+                "motoflow/attachments/bien-ban", "fileName", "bien-ban.pdf", "contentType", "application/pdf",
+                "fileSize", 50_000)))).andExpect(status().isOk());
+        handle(managerToken, grn, List.of(handling(found, 0, 2)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG134"))
+                .andExpect(jsonPath("$.message").value("Số lượng sẽ trả lại của dòng 1 không được nhỏ hơn 1, là số đã "
+                        + "trả nhà cung cấp hoặc hàng thừa đã từ chối nhận."));
+        handle(managerToken, grn, List.of(handling(found, 1, 2)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].outstandingReturnQty").value(0));
+        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isZero();
+        assertThat(stock(giaLam, pad, "DAMAGED")).isEqualTo(1);
+        assertStockAgrees(giaLam, pad);
+    }
+
     @Test
     void aDamagedPartIsReplacedWithoutGoingBack() throws Exception {
         long grn = receive("PX-001");
@@ -275,7 +322,8 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].returnRequiredQty").value(2))
                 .andExpect(jsonPath("$[0].replacementRequiredQty").value(2))
-                .andExpect(jsonPath("$[0].canHandle").value(false));
+                // Until they are handed back, the store may still keep them (test report 20/11).
+                .andExpect(jsonPath("$[0].canHandle").value(true));
         supplierReturn(managerToken, found, Map.of("quantity", 1))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.returnedQty").value(1))

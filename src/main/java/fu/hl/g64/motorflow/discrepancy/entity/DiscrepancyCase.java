@@ -163,12 +163,15 @@ public class DiscrepancyCase {
         return Math.min(replacementRequiredQty + Math.max(returnRequired - returnRequiredQty, 0), replacementLimit());
     }
 
-    /** UC-46 step 6, BR-27: the return (rejected excess included) and the replacement agreed with the supplier, kept apart. */
+    /**
+     * UC-46 step 6, BR-27: the return (rejected excess included) and the replacement agreed with the supplier, kept
+     * apart. The return may come down again (test report 20/11); the service keeps it above what went back already.
+     */
     public void agree(int returnRequired, int replacementRequired) {
         requireOpen();
-        if (returnRequired < returnRequiredQty || returnRequired > heldQty()) {
+        if (returnRequired < rejectedExcessQty || returnRequired > heldQty()) {
             throw new IllegalArgumentException("return required " + returnRequired + " is outside "
-                    + returnRequiredQty + ".." + heldQty());
+                    + rejectedExcessQty + ".." + heldQty());
         }
         // Only Owner settles a shortage without replacement, by a waiver that leaves the requirement as it is.
         if (replacementRequired < shortQty || replacementRequired > replacementLimit()) {
