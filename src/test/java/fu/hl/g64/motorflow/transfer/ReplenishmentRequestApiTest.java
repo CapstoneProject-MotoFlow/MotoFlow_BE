@@ -322,12 +322,24 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
         created("owner", central);
         String code = String.format("YBS-%04d", wanted);
 
-        for (String q : List.of(code, code.toLowerCase(), String.valueOf(wanted), " " + code + " ")) {
+        for (String q : List.of(code, code.toLowerCase(), String.valueOf(wanted), " " + code + " ",
+                "YBS " + wanted, "ybs - 0" + wanted, "YBS" + wanted)) {
             list("owner", "q", q).andExpect(status().isOk())
                     .andExpect(jsonPath("$.items[*].id", contains((int) wanted)))
                     .andExpect(jsonPath("$.totalItems").value(1));
         }
         list("owner", "q", "99999999999999999999999").andExpect(jsonPath("$.totalItems").value(0));
+    }
+
+    @Test
+    void aCodeStillBeingTypedFiltersNothing() throws Exception {
+        long first = created("bm", null);
+        long second = created("owner", central);
+
+        for (String q : List.of("YBS", "ybs-", "YBS - ", "YBS-00")) {
+            list("owner", "q", q).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items[*].id", contains((int) second, (int) first)));
+        }
     }
 
     @Test

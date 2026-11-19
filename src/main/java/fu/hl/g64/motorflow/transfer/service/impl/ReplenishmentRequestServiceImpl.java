@@ -59,7 +59,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestService {
 
-    private static final Pattern CODE = Pattern.compile("(?i)ybs-?0*(\\d+)");
+    /** A request code as people type it: "YBS-0012", "ybs 12", "YBS - 012". */
+    private static final Pattern CODE = Pattern.compile("(?i)ybs[-\\s]*0*(\\d+)");
+    /** A code still being typed ("YBS", "ybs-", "YBS-00"): every request may still match, so it filters nothing. */
+    private static final Pattern CODE_PREFIX = Pattern.compile("(?i)ybs[-\\s]*0*");
     private static final Pattern DIGITS = Pattern.compile("\\d+");
 
     private final ReplenishmentRequestRepository requests;
@@ -122,6 +125,9 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                 return new TextQuery(false, null, "");
             }
             String text = raw.trim();
+            if (CODE_PREFIX.matcher(text).matches()) {
+                return new TextQuery(false, null, "");
+            }
             Matcher code = CODE.matcher(text);
             String digits = code.matches() ? code.group(1) : DIGITS.matcher(text).matches() ? text : null;
             Long id = null;
