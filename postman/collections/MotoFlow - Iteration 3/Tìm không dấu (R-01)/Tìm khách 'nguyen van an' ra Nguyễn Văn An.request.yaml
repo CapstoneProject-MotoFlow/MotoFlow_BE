@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/customers?q=nguyen van an"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có Anh Nguyễn Văn An', () => pm.expect(b.items.map(i => i.customerName)).to.include('Anh Nguyễn Văn An'));
+    language: text/javascript
+order: 1000

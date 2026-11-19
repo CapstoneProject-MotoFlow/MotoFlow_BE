@@ -812,6 +812,197 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Tìm không dấu (R-01)",
+      "item": [
+        {
+          "name": "Tìm khách 'nguyen van an' ra Nguyễn Văn An",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/customers?q=nguyen van an",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có Anh Nguyễn Văn An', () => pm.expect(b.items.map(i => i.customerName)).to.include('Anh Nguyễn Văn An'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm NCC 'phu tung minh phat'",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/suppliers?q=phu tung minh phat",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có Công ty TNHH Phụ tùng Minh Phát', () => pm.expect(b.items.map(i => i.supplierName)).to.include('Công ty TNHH Phụ tùng Minh Phát'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm phụ tùng 'loc gio vision'",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/products?q=loc gio vision",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có Lọc gió Vision', () => pm.expect(b.items.map(i => i.partName)).to.include('Lọc gió Vision'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm giá bán lẻ 'LOC GIO AIR BLADE'",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/pricing/retail-prices?q=LOC GIO AIR BLADE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có Lọc gió Air Blade 125', () => pm.expect(b.items.map(i => i.partName)).to.include('Lọc gió Air Blade 125'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm tồn kho 'loc gio wave'",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/inventory/stock?q=loc gio wave",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có Lọc gió Wave Alpha', () => pm.expect(b.items.map(i => i.partName)).to.include('Lọc gió Wave Alpha'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tìm cửa hàng 'kho tong'",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/stores?q=kho tong",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Có Kho tổng Nga Minh', () => pm.expect(b.map(i => i.storeName)).to.include('Kho tổng Nga Minh'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [

@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/pricing/retail-prices?q=LOC GIO AIR BLADE"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Có Lọc gió Air Blade 125', () => pm.expect(b.items.map(i => i.partName)).to.include('Lọc gió Air Blade 125'));
+    language: text/javascript
+order: 4000
