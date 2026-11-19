@@ -14,7 +14,9 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.everyItem;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
@@ -588,16 +590,16 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         assertStockAgrees(giaLam, pad);
     }
 
-    /** FE review PR #43 R-01 (PM 15/11): the delivery-document quantities are entered with the GRN and kept. */
+    /**
+     * UC-106 step 3: delivery-document quantities given with the GRN are still checked (MSG277) and kept when the
+     * inspection result gives none; without them every expected part starts at 0 (PM 20/11).
+     */
     @Test
-    void theDeliveryDocumentQuantitiesAreEnteredWithTheReceiptAndKeptByTheInspection() throws Exception {
+    void documentQuantitiesGivenWithTheReceiptAreCheckedAndKeptWhenTheInspectionGivesNone() throws Exception {
         Map<String, Object> body = deliveryNote("PX-DOC");
-        body.put("documentLines", List.of());
-        createReceipt(managerToken, order, body).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG278"));
         body.put("documentLines", List.of(Map.of("productId", pad, "documentQty", 10),
                 Map.of("productId", pad, "documentQty", 9)));
-        createReceiptAs(managerToken, order, body).andExpect(status().isBadRequest())
+        createReceipt(managerToken, order, body).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG277"));
         body.put("documentLines", List.of(Map.of("productId", 999_999L, "documentQty", 1)));
         createReceiptAs(managerToken, order, body).andExpect(status().isBadRequest())
@@ -611,15 +613,83 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         long grn = ((Number) JsonPath.read(created, "$.id")).longValue();
         assign(grn, staff);
 
-        // The inspector sends only what arrived; a document quantity in the result is ignored.
-        Map<String, Object> pads = counted(lineOf(grn, pad), null, 8, 0, 0);
-        Map<String, Object> oils = counted(lineOf(grn, oil), null, 0, 0, 0);
-        oils.put("documentQty", 24);
-        Map<String, Object> result = findings(pads, oils);
+        // An older client sends no document quantity in the result: the GRN keeps the one it was recorded with.
+        Map<String, Object> result = findings(counted(lineOf(grn, pad), null, 8, 0, 0),
+                counted(lineOf(grn, oil), null, 0, 0, 0));
         result.put("inspectionNote", "Thiếu 2 má phanh.");
         recordAsIs(staffToken, grn, result).andExpect(status().isOk());
         assertThat(jdbc.queryForList("SELECT document_qty FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? "
                 + "ORDER BY id", Integer.class, grn)).containsExactly(10, 0);
         receipt(managerToken, grn).andExpect(jsonPath("$.lines[0].shortQty").value(2));
+    }
+
+    /** PM 20/11: the inspector enters the delivery-document quantity; the GRN is recorded without it. */
+    @Test
+    void theInspectorEntersTheDeliveryDocumentQuantities() throws Exception {
+        String created = createReceipt(managerToken, order, deliveryNote("PX-DOC")).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.lines[*].documentQty", contains(0, 0)))
+                .andReturn().getResponse().getContentAsString();
+        long grn = ((Number) JsonPath.read(created, "$.id")).longValue();
+        assign(grn, staff);
+
+        Map<String, Object> result = findings(counted(lineOf(grn, pad), 10, 8, 0, 0),
+                counted(lineOf(grn, oil), 24, 24, 0, 0));
+        result.put("inspectionNote", "Thiếu 2 má phanh.");
+        recordAsIs(staffToken, grn, result).andExpect(status().isOk());
+        assertThat(jdbc.queryForList("SELECT document_qty FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? "
+                + "ORDER BY id", Integer.class, grn)).containsExactly(10, 24);
+        receipt(managerToken, grn).andExpect(jsonPath("$.lines[*].shortQty", contains(2, 0)));
+    }
+
+    /**
+     * BR-22 (PM 20/11): a PO of 140 is received in several deliveries until their documents list 140. A delivery
+     * short of its document opens a case and the PO still expects the rest of what was ordered; once the documents
+     * cover the PO it is fully received, and it stays in the open tab until its cases are closed.
+     */
+    @Test
+    void aPurchaseOrderIsReceivedInSeveralDeliveriesUntilTheirDocumentsCoverIt() throws Exception {
+        long big = created(order(honda, giaLam, TODAY, null, line(pad, 140, 120_000)));
+
+        long first = deliver(big, "PX-140-1", 50, 50);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_case WHERE goods_receipt_note_id = ?",
+                Long.class, first)).isZero();
+        detail(ownerToken, big)
+                .andExpect(jsonPath("$.status").value("RECEIVING"))
+                .andExpect(jsonPath("$.lines[0].outstandingQty").value(90))
+                .andExpect(jsonPath("$.openDiscrepancies").value(0));
+
+        long second = deliver(big, "PX-140-2", 50, 40);
+        assertThat(jdbc.queryForObject("SELECT short_qty FROM discrepancy_case WHERE goods_receipt_note_id = ?",
+                Integer.class, second)).isEqualTo(10);
+        detail(ownerToken, big)
+                .andExpect(jsonPath("$.status").value("RECEIVING"))
+                .andExpect(jsonPath("$.lines[0].outstandingQty").value(40))
+                .andExpect(jsonPath("$.openDiscrepancies").value(1));
+
+        deliver(big, "PX-140-3", 40, 40);
+        detail(ownerToken, big)
+                .andExpect(jsonPath("$.status").value("FULLY_RECEIVED"))
+                .andExpect(jsonPath("$.lines[0].outstandingQty").value(0));
+        createReceipt(managerToken, big, deliveryNote("PX-140-4")).andExpect(status().isConflict());
+        list(managerToken).andExpect(jsonPath("$.items[*].id", hasItem((int) big)))
+                .andExpect(jsonPath("$.items[?(@.id == " + big + ")].openDiscrepancies", contains(1)));
+        list(managerToken, "view", "FULLY_RECEIVED").andExpect(jsonPath("$.items[*].id", not(hasItem((int) big))));
+
+        jdbc.update("UPDATE discrepancy_case SET status = 'CLOSED', closure_type = 'ALL_SETTLED', closed_by = ?, "
+                + "closed_at = now() WHERE goods_receipt_note_id = ?", owner.getId(), second);
+        list(managerToken).andExpect(jsonPath("$.items[*].id", not(hasItem((int) big))));
+        list(managerToken, "view", "FULLY_RECEIVED").andExpect(jsonPath("$.items[*].id", hasItem((int) big)));
+    }
+
+    /** One delivery of the PO's pads, inspected by staff and confirmed by the Branch Manager; the GRN number. */
+    private long deliver(long purchaseOrder, String documentNo, int documentQty, int deliveredQty) throws Exception {
+        String created = createReceipt(managerToken, purchaseOrder, deliveryNote(documentNo))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        long grn = ((Number) JsonPath.read(created, "$.id")).longValue();
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), documentQty, deliveredQty, 0, 0)))
+                .andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        return grn;
     }
 }
