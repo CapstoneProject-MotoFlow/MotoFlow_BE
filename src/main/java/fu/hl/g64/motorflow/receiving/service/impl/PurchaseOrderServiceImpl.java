@@ -132,7 +132,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         PurchaseOrderView view = search.view() == null ? PurchaseOrderView.OPEN : search.view();
         LocalDate from = search.createdFrom();
         LocalDate to = search.createdTo();
-        if (view != PurchaseOrderView.OPEN && view != PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT) {
+        if (!view.unfinished()) {
             to = to != null ? to : today;
             from = from != null ? from : to.minusDays(DEFAULT_DAYS - 1);
         }
@@ -573,6 +573,15 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                         cb.equal(task.get("taskType"), TaskType.SUPPLIER_RECEIVING),
                         cb.equal(task.get("status"), WarehouseTaskStatus.ASSIGNED));
                 where.add(cb.not(cb.exists(held)));
+            }
+            if (view.openDiscrepancies() != null) {
+                Subquery<Long> open = query.subquery(Long.class);
+                Root<DiscrepancyCase> found = open.from(DiscrepancyCase.class);
+                Root<GoodsReceiptNote> delivery = open.from(GoodsReceiptNote.class);
+                open.select(found.get("id")).where(cb.equal(found.get("goodsReceiptNoteId"), delivery.get("id")),
+                        cb.equal(delivery.get("purchaseOrderId"), root.get("id")),
+                        cb.equal(found.get("status"), DiscrepancyCaseStatus.OPEN));
+                where.add(view.openDiscrepancies() ? cb.exists(open) : cb.not(cb.exists(open)));
             }
             if (storeId != null) {
                 where.add(cb.equal(root.get("storeId"), storeId));
