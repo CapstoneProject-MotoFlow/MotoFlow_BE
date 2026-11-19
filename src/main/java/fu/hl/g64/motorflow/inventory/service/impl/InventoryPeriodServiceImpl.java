@@ -9,6 +9,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.inventory.dto.ClosingPreviewResponse;
 import fu.hl.g64.motorflow.inventory.dto.InventoryPeriodResponse;
 import fu.hl.g64.motorflow.inventory.dto.PeriodBalanceResponse;
@@ -41,7 +42,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -92,7 +92,7 @@ public class InventoryPeriodServiceImpl implements InventoryPeriodService {
         Map<Long, Store> storesById = stores.findAllById(lines.stream().map(Line::storeId)
                 .collect(Collectors.toSet())).stream().collect(Collectors.toMap(Store::getId, Function.identity()));
         Set<Long> inCategory = categoryId == null ? null : new HashSet<>(categories.withDescendants(categoryId));
-        String text = StringUtils.hasText(q) ? q.strip().toLowerCase(Locale.ROOT) : null;
+        String text = StringUtils.hasText(q) ? SearchText.fold(q.strip()) : null;
 
         List<PeriodBalanceRow> rows = lines.stream()
                 .filter(l -> matches(partsById.get(l.productId()), text, inCategory))
@@ -185,8 +185,7 @@ public class InventoryPeriodServiceImpl implements InventoryPeriodService {
         if (inCategory != null && !inCategory.contains(part.getCategoryId())) {
             return false;
         }
-        return text == null || part.getSku().toLowerCase(Locale.ROOT).contains(text)
-                || part.getPartName().toLowerCase(Locale.ROOT).contains(text);
+        return text == null || SearchText.contains(part.getSku(), text) || SearchText.contains(part.getPartName(), text);
     }
 
     private static PeriodBalanceRow row(Line l, Store store, Product part) {

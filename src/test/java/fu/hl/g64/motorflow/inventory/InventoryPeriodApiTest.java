@@ -137,6 +137,7 @@ class InventoryPeriodApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.totals.inValue").value(1_100_000));
         call("owner", balances + "?storeId=" + longBien).andExpect(jsonPath("$.page.totalItems").value(2));
         call("owner", balances + "?q=má PHANH").andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));
+        call("owner", balances + "?q=ma phanh truoc").andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));
         call("owner", balances + "?categoryId=" + brakes).andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")));
         call("owner", balances + "?size=2&page=1").andExpect(jsonPath("$.page.totalItems").value(3))
                 .andExpect(jsonPath("$.page.items[*].sku", contains("BBB-1")))

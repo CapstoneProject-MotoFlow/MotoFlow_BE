@@ -154,6 +154,7 @@ class LotApiTest extends ApiTestUsers {
         lots("bm", "?tab=IN_STOCK&q=" + d).andExpect(jsonPath("$.page.items[*].lotId", contains((int) d)));
         lots("bm", "?tab=DEPLETED&q=xich-").andExpect(jsonPath("$.page.items[*].lotId", contains((int) e)));
         lots("bm", "?tab=DEPLETED&q=XÍCH").andExpect(jsonPath("$.page.items[*].lotId", contains((int) e)));
+        lots("bm", "?tab=DEPLETED&q=xich tai").andExpect(jsonPath("$.page.items[*].lotId", contains((int) e)));
         lots("bm", "?tab=IN_STOCK&q=nsx-alpha").andExpect(jsonPath("$.page.items[*].lotId", contains((int) a)));
         lots("bm", "?tab=IN_STOCK&supplierId=" + yamaha).andExpect(jsonPath("$.page.items[*].lotId", contains((int) c)));
         lots("bm", "?tab=IN_STOCK&source=OPENING")

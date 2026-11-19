@@ -202,6 +202,8 @@ class InventoryApiTest extends ApiTestUsers {
                 + "(?, 'OEM', '45121-KVB-900'), (?, 'BARCODE', '8931234567890')", chain, chain);
         place(branch, brake, "Kệ A", "A-03");
         stock("owner", "?q=kvb-9").andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
+        stock("owner", "?q=xich 428").andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
+        stock("owner", "?q=_").andExpect(jsonPath("$.totalItems").value(0));
         stock("owner", "?q=8931234").andExpect(jsonPath("$.totalItems").value(0));
         stock("owner", "?q=a-03").andExpect(jsonPath("$.items[*].storeName", contains("Long Biên")));
     }
