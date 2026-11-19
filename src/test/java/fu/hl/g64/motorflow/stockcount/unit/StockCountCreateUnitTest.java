@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.stockcount.unit;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.entity.StockCount;
 import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequest;
@@ -25,6 +26,7 @@ import static fu.hl.g64.motorflow.support.unit.UnitFixtures.assertBusiness;
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.auth;
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.withId;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
@@ -180,6 +182,19 @@ class StockCountCreateUnitTest extends StockCountUnitTestBase {
         assertBusiness(() -> service.create(bmStore2, whole()), HttpStatus.CONFLICT, "MSG230");
         verify(lines).findPartsOnCounts(eq(2L), eq(List.of(StockCountStatus.DRAFT, StockCountStatus.COUNTING,
                 StockCountStatus.AWAITING_APPROVAL)), eq(List.of(P1)));
+        assertNotCreated();
+    }
+
+    @Test
+    @DisplayName("UTCID11b A: P1 on count #5 and P2 on count #7 -> MSG230 names only P1 and #5")
+    void utcid11b() {
+        when(countSheets.partsInScope(eq(2L), any(), any(), any(), anyList())).thenReturn(List.of(P1, P2));
+        when(lines.findPartsOnCounts(eq(2L), any(), any()))
+                .thenReturn(List.of(new Object[] {P1, 5L}, new Object[] {P2, 7L}));
+        BusinessException refused = catchThrowableOfType(BusinessException.class,
+                () -> service.create(bmStore2, whole()));
+        assertThat(refused.getCode()).isEqualTo("MSG230");
+        assertThat(refused.getArgs()).containsExactly("P1", "#5");
         assertNotCreated();
     }
 

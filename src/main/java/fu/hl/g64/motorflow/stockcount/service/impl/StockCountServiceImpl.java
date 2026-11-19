@@ -193,7 +193,7 @@ public class StockCountServiceImpl implements StockCountService {
 
     /**
      * SC-1 (PM 19/11): several counts of a warehouse may be unfinished at once, but a part is on one of them only;
-     * otherwise approving both would adjust its stock twice. MSG230 names up to 3 SKUs and the first such count.
+     * otherwise approving both would adjust its stock twice. MSG230 names the first such count and up to 3 of its SKUs.
      */
     private void requireNoPartOnAnotherCount(long storeId, List<Long> parts) {
         if (parts.isEmpty()) {
@@ -204,7 +204,9 @@ public class StockCountServiceImpl implements StockCountService {
             return;
         }
         long countId = ((Number) taken.getFirst()[1]).longValue();
-        List<Long> partIds = taken.stream().map(row -> ((Number) row[0]).longValue()).distinct().toList();
+        // Only the parts on that count, so that MSG230 never names a part under a count that does not hold it.
+        List<Long> partIds = taken.stream().filter(row -> ((Number) row[1]).longValue() == countId)
+                .map(row -> ((Number) row[0]).longValue()).toList();
         Map<Long, String> skus = products.findAllById(partIds.subList(0, Math.min(3, partIds.size()))).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getSku));
         String named = partIds.stream().limit(3).map(skus::get).collect(Collectors.joining(", "));
