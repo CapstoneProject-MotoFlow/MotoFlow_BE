@@ -466,6 +466,7 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items[0].storeName").value("Long Biên"));
         list(managerToken, "q", "0987").andExpect(jsonPath("$.items", hasSize(1)));
         list(managerToken, "q", "tuấn").andExpect(jsonPath("$.items[0].id").value(first));
+        list(managerToken, "q", "TUAN").andExpect(jsonPath("$.items[0].id").value(first));
         list(managerToken, "q", "#" + first).andExpect(jsonPath("$.items[0].id").value(first));
 
         jdbc.update("UPDATE sales_order SET status = 'CANCELLED', cancellation_reason = 'x', created_at = ? WHERE id = ?",

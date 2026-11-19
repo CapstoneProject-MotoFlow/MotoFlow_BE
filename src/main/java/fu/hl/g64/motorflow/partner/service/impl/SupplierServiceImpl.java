@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
@@ -41,7 +42,6 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -178,13 +178,12 @@ public class SupplierServiceImpl implements SupplierService {
         return (root, query, cb) -> {
             List<Predicate> where = new ArrayList<>();
             if (StringUtils.hasText(q)) {
-                String needle = q.strip().toLowerCase(Locale.ROOT);
-                String like = "%" + needle + "%";
+                String like = SearchText.likePattern(q);
                 where.add(cb.or(
-                        cb.like(cb.lower(root.get("supplierCode")), like),
-                        cb.like(cb.lower(root.get("supplierName")), like),
+                        SearchText.like(cb, root.get("supplierCode"), like),
+                        SearchText.like(cb, root.get("supplierName"), like),
                         cb.like(cb.function("replace", String.class, root.get("phone"), cb.literal(" "), cb.literal("")),
-                                "%" + needle.replace(" ", "") + "%")));
+                                SearchText.likePattern(q.replace(" ", "")), '\\')));
             }
             if (status != null) {
                 where.add(cb.equal(root.get("status"), status));

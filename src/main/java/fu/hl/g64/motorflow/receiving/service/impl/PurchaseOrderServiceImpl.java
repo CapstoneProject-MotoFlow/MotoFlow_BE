@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.receiving.service.impl;
 
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
@@ -597,12 +598,12 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 return cb.conjunction();
             }
             String needle = q.strip().toLowerCase(Locale.ROOT);
-            String like = "%" + needle + "%";
+            String like = SearchText.likePattern(q);
             Subquery<Long> bySupplier = query.subquery(Long.class);
             Root<Supplier> supplier = bySupplier.from(Supplier.class);
             bySupplier.select(supplier.get("id")).where(cb.or(
-                    cb.like(cb.lower(supplier.get("supplierName")), like),
-                    cb.like(cb.lower(supplier.get("supplierCode")), like)));
+                    SearchText.like(cb, supplier.get("supplierName"), like),
+                    SearchText.like(cb, supplier.get("supplierCode"), like)));
             Predicate supplierMatches = root.get("supplierId").in(bySupplier);
             Long number = orderNumber(needle);
             return number == null ? supplierMatches : cb.or(cb.equal(root.get("id"), number), supplierMatches);
