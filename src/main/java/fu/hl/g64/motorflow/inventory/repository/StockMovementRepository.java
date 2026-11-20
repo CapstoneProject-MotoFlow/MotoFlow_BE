@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Query;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface StockMovementRepository extends JpaRepository<StockMovement, Long>, JpaSpecificationExecutor<StockMovement> {
 
@@ -55,6 +56,9 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, Lo
 
     /** UC-98: has this lot ever moved in this warehouse? */
     boolean existsByLotIdAndStoreId(Long lotId, Long storeId);
+
+    /** GVHD 20/11: the first movement into a lot, which names its source document. */
+    Optional<StockMovement> findFirstByLotIdAndQuantityChangeGreaterThanOrderByIdAsc(Long lotId, int quantity);
 
     /** UC-98: the latest movements of a lot in one warehouse. */
     List<StockMovement> findTop10ByLotIdAndStoreIdOrderByOccurredAtDescIdDesc(Long lotId, Long storeId);

@@ -3,16 +3,26 @@ package fu.hl.g64.motorflow.discrepancy.service.impl;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
+import fu.hl.g64.motorflow.catalog.entity.ProductIdentifier;
+import fu.hl.g64.motorflow.catalog.entity.ProductVehicleModel;
+import fu.hl.g64.motorflow.catalog.entity.enums.IdentifierType;
+import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
+import fu.hl.g64.motorflow.catalog.repository.ProductIdentifierRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
+import fu.hl.g64.motorflow.catalog.repository.ProductVehicleModelRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.common.text.SearchText;
+import fu.hl.g64.motorflow.discrepancy.dto.AcceptAsVariantRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.AcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse.Event;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancySearch;
+import fu.hl.g64.motorflow.discrepancy.dto.ReceiveWrongItemsRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.RejectAcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.SupplierReturnRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.WaiveReplacementRequest;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
@@ -27,23 +37,32 @@ import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepo
 import fu.hl.g64.motorflow.discrepancy.service.DiscrepancyService;
 import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
+import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
+import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.helper.DefectiveArea;
 import fu.hl.g64.motorflow.inventory.repository.LotRepository;
+import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.service.AttachmentService;
+import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
+import fu.hl.g64.motorflow.pricing.dto.RetailPriceRequest;
+import fu.hl.g64.motorflow.pricing.repository.PricingPolicyRepository;
+import fu.hl.g64.motorflow.pricing.service.RetailPriceService;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNoteLine;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision;
 import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
+import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderCode;
 import fu.hl.g64.motorflow.receiving.helper.ReceivingLedger;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
@@ -75,6 +94,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -86,6 +106,13 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
     /** audit_log.entity_type and action of a saved handling (UC-46 step 7). */
     private static final String AUDIT_ENTITY = "DISCREPANCY_CASE";
     private static final String HANDLING_SAVED = "DISCREPANCY_HANDLING_SAVED";
+    /** GVHD 20/11 (PR 5): the request to take held goods into stock and Owner's answer, kept in audit_log. */
+    private static final String ACCEPTANCE_REQUESTED = "DISCREPANCY_ACCEPTANCE_REQUESTED";
+    private static final String ACCEPTANCE_REJECTED = "DISCREPANCY_ACCEPTANCE_REJECTED";
+    private static final String ACCEPTANCE_APPROVED = "DISCREPANCY_ACCEPTANCE_APPROVED";
+    private static final List<String> ACCEPTANCE_ACTIONS = List.of(ACCEPTANCE_REQUESTED, ACCEPTANCE_REJECTED,
+            ACCEPTANCE_APPROVED);
+    private static final String REF_TYPE = "DISCREPANCY_CASE";
 
     private final DiscrepancyCaseRepository discrepancies;
     private final DiscrepancyResolutionEventRepository events;
@@ -102,6 +129,12 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
     private final AuditLogRepository auditLog;
     private final ReceivingLedger ledger;
     private final DiscrepancySettlement settlement;
+    private final ProductIdentifierRepository identifiers;
+    private final ProductVehicleModelRepository vehicles;
+    private final RetailPriceService retailPrices;
+    private final PricingPolicyRepository pricingPolicies;
+    private final StockBalanceRepository balances;
+    private final NotificationService notifications;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -158,7 +191,9 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
             // UC-46 Step 5_Invalid or stale quantities. Test report 20/11: the return may come down again (the store
             // keeps the goods) but never below what went back already or the excess Owner rejected.
-            if (line.returnRequiredQty() > found.heldQty()) {
+            Progress done = progress.getOrDefault(found.getId(), Progress.NONE);
+            // GVHD 20/11: goods Owner took into stock as another part are no longer held.
+            if (line.returnRequiredQty() > found.heldQty() - done.acceptedDamaged() - done.acceptedWrong()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
             }
             int returnFloor = returnFloor(found, progress.getOrDefault(found.getId(), Progress.NONE));
@@ -277,6 +312,239 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         return responses(owner, List.of(found), true).getFirst();
     }
 
+    // GVHD 20/11 (PR 5): a Branch Manager asks Owner to take held goods into stock
+    @Transactional
+    @Override
+    public DiscrepancyCaseResponse requestAcceptance(AuthenticatedUser user, long id, AcceptanceRequest request) {
+        long receiptId = discrepancies.findReceiptIdOf(id).orElseThrow(DiscrepancyServiceImpl::notFound);
+        PurchaseOrder order = orderOf(receiptId);
+        requireHandler(user, order);
+        DiscrepancyCase found = discrepancies.findAllByIdForUpdate(List.of(id)).getFirst();
+        if (!found.isOpen()) {
+            throw changed();
+        }
+        Standing standing = settlement.standing(found);
+        boolean damaged = request.type() == AcceptanceRequest.Type.DAMAGED;
+        int undecided = damaged ? standing.damagedUndecided() : standing.wrongUndecided();
+        if (request.quantity() > undecided) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG309", undecided);
+        }
+        Product received = null;
+        if (!damaged && request.productId() != null) {
+            received = receivedPart(found, request.productId());
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("type", request.type().name());
+        data.put("product_id", received == null ? null : received.getId());
+        data.put("quantity", request.quantity());
+        data.put("note", text(request.note()));
+        auditLog.save(AuditLog.record(AUDIT_ENTITY, id, ACCEPTANCE_REQUESTED, user.id(), text(request.note()), null,
+                data, now));
+        Product part = products.findById(found.getProductId()).orElseThrow();
+        String what = damaged ? "%d %s bị móp làm hàng móp".formatted(request.quantity(), part.getSku())
+                : "%d hàng giao sai thay cho %s%s".formatted(request.quantity(), part.getSku(),
+                received == null ? "" : " là " + received.getSku());
+        notifications.notifyOwners("DISCREPANCY_ACCEPTANCE_REQUESTED",
+                "Sai lệch #%d của đơn nhập hàng %s: đề nghị nhận %s vào kho.".formatted(id,
+                        PurchaseOrderCode.of(order.getId()), what), REF_TYPE, id);
+        return responses(user, List.of(found), true).getFirst();
+    }
+
+    // GVHD 20/11 (PR 5)
+    @Transactional
+    @Override
+    public DiscrepancyCaseResponse rejectAcceptance(AuthenticatedUser owner, long id, RejectAcceptanceRequest request) {
+        requireOwner(owner);
+        long receiptId = discrepancies.findReceiptIdOf(id).orElseThrow(DiscrepancyServiceImpl::notFound);
+        PurchaseOrder order = orderOf(receiptId);
+        DiscrepancyCase found = discrepancies.findAllByIdForUpdate(List.of(id)).getFirst();
+        if (!found.isOpen() || !pendingRequests(List.of(id)).containsKey(id)) {
+            throw changed();
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        String reason = request.reason().strip();
+        auditLog.save(AuditLog.record(AUDIT_ENTITY, id, ACCEPTANCE_REJECTED, owner.id(), reason, null,
+                Map.of("reason", reason), now));
+        notifications.notifyStoreManagers(order.getStoreId(), "DISCREPANCY_ACCEPTANCE_REJECTED",
+                "Owner không nhận hàng của sai lệch #%d vào kho: %s. Vui lòng trả nhà cung cấp hoặc đề nghị ghi giảm."
+                        .formatted(id, reason), REF_TYPE, id);
+        return responses(owner, List.of(found), true).getFirst();
+    }
+
+    // GVHD 20/11 (PR 5)
+    @Transactional
+    @Override
+    public DiscrepancyCaseResponse acceptAsVariant(AuthenticatedUser owner, long id, AcceptAsVariantRequest request) {
+        requireOwner(owner);
+        long receiptId = discrepancies.findReceiptIdOf(id).orElseThrow(DiscrepancyServiceImpl::notFound);
+        PurchaseOrder order = orderOf(receiptId);
+        DiscrepancyCase found = discrepancies.findAllByIdForUpdate(List.of(id)).getFirst();
+        if (!found.isOpen()) {
+            throw changed();
+        }
+        int undecided = settlement.standing(found).damagedUndecided();
+        if (request.quantity() > undecided) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG309", undecided);
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        Product original = products.findById(found.getProductId()).orElseThrow();
+        Product variant = variantOf(original, owner.id(), now);
+        if (request.salePrice() != null) {
+            retailPrices.update(owner, new RetailPriceRequest(variant.getId(), request.salePrice(),
+                    now.toLocalDate(), "Giá hàng móp, sai lệch #" + id, false));
+        } else if (pricingPolicies.findRetailPricesInEffect(List.of(variant.getId()), now).isEmpty()) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG311", original.getSku());
+        }
+        long lotId = lotOf(receiptId, found.getProductId());
+        Lot lot = lots.findById(lotId).orElseThrow();
+        String note = "Nhận hàng móp thành " + variant.getSku();
+        DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.done(id,
+                ResolutionType.ACCEPTED_AS_VARIANT, request.quantity(), note, owner.id(), now));
+        SourceRef source = SourceRef.discrepancyResolutionEvent(event.getId());
+        posting.takeOut(new OutPosting(order.getStoreId(), original.getId(), StockStatus.DAMAGED, request.quantity(),
+                List.of(new LotQuantity(lotId, request.quantity())), MovementType.DAMAGED_TO_VARIANT, source,
+                owner.id(), note));
+        posting.receiveNewLot(new NewLotPosting(order.getStoreId(), variant.getId(), LotSourceType.DISCREPANCY, null,
+                order.getSupplierId(), now.toLocalDate(), request.unitCost(), lot.getManufacturerLotNo(),
+                lot.getManufactureDate(), lot.getExpiryDate(), Map.of(StockStatus.AVAILABLE, request.quantity()),
+                MovementType.DAMAGED_TO_VARIANT, source, owner.id(), note));
+        // The variant is shelved in the defective goods area.
+        balances.findByStoreForUpdate(order.getStoreId(), List.of(variant.getId())).forEach(balance -> {
+            if (balance.getStorageArea() == null) {
+                balance.moveTo(DefectiveArea.NAME, balance.getBinLocation(), now);
+            }
+        });
+        approved(owner, found, "DAMAGED", variant.getId(), request.quantity(), now);
+        settlement.closeIfSettled(found, owner.id(), now);
+        return responses(owner, List.of(found), true).getFirst();
+    }
+
+    // GVHD 20/11 (PR 5)
+    @Transactional
+    @Override
+    public DiscrepancyCaseResponse receiveWrongItems(AuthenticatedUser owner, long id,
+                                                     ReceiveWrongItemsRequest request) {
+        requireOwner(owner);
+        long receiptId = discrepancies.findReceiptIdOf(id).orElseThrow(DiscrepancyServiceImpl::notFound);
+        PurchaseOrder order = orderOf(receiptId);
+        DiscrepancyCase found = discrepancies.findAllByIdForUpdate(List.of(id)).getFirst();
+        if (!found.isOpen()) {
+            throw changed();
+        }
+        int undecided = settlement.standing(found).wrongUndecided();
+        if (request.quantity() > undecided) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG309", undecided);
+        }
+        Product received = receivedPart(found, request.productId());
+        LocalDateTime now = LocalDateTime.now(clock);
+        long lotId = lotOf(receiptId, found.getProductId());
+        String note = "Nhận hàng giao sai thành " + received.getSku();
+        DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.done(id,
+                ResolutionType.RECEIVED_AS_OTHER_PRODUCT, request.quantity(), note, owner.id(), now));
+        SourceRef source = SourceRef.discrepancyResolutionEvent(event.getId());
+        posting.takeOut(new OutPosting(order.getStoreId(), found.getProductId(), StockStatus.WRONG_ITEM,
+                request.quantity(), List.of(new LotQuantity(lotId, request.quantity())),
+                MovementType.WRONG_ITEM_RECLASSIFIED, source, owner.id(), note));
+        posting.receiveNewLot(new NewLotPosting(order.getStoreId(), received.getId(), LotSourceType.DISCREPANCY, null,
+                order.getSupplierId(), now.toLocalDate(), request.unitCost(), null, null, null,
+                Map.of(StockStatus.AVAILABLE, request.quantity()), MovementType.WRONG_ITEM_RECLASSIFIED, source,
+                owner.id(), note));
+        if (!request.replacementNeeded()) {
+            // As the Owner's waiver: the replacement still owed for these units is not to come.
+            int waived = Math.min(request.quantity(), settlement.standing(found).openReplacement());
+            if (waived > 0) {
+                events.save(DiscrepancyResolutionEvent.done(id, ResolutionType.CLOSED_BY_AGREEMENT, waived,
+                        "Đã nhận hàng giao sai, không cần giao bù", owner.id(), now));
+            }
+        }
+        approved(owner, found, "WRONG_ITEM", received.getId(), request.quantity(), now);
+        settlement.closeIfSettled(found, owner.id(), now);
+        return responses(owner, List.of(found), true).getFirst();
+    }
+
+    /** The part goods delivered by mistake really are: on sale (MSG313) and not the part ordered (MSG310). */
+    private Product receivedPart(DiscrepancyCase found, long productId) {
+        Product received = products.findById(productId)
+                .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG57"));
+        if (received.getId().equals(found.getProductId())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG310",
+                    products.findById(found.getProductId()).orElseThrow().getSku());
+        }
+        if (received.getStatus() != ProductStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG313", received.getSku());
+        }
+        return received;
+    }
+
+    /**
+     * The dented-goods variant of {@code original}, made the first time (BR GVHD 20/11): SKU "<SKU>-M" (MSG312 when
+     * another part has it), name "<name> (hàng móp)", the original's details, its OEM codes and vehicles, no barcode
+     * so that a scan never finds it instead of the original.
+     */
+    private Product variantOf(Product original, long by, LocalDateTime now) {
+        Optional<Product> existing = products.findByVariantOfProductId(original.getId());
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        String sku = original.getSku() + Product.VARIANT_SKU_SUFFIX;
+        if (products.existsBySku(sku)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG312", sku);
+        }
+        Product variant = products.saveAndFlush(Product.damagedVariantOf(original, by, now));
+        identifiers.saveAll(identifiers.findByProductIdIn(List.of(original.getId())).stream()
+                .filter(code -> code.getIdentifierType() == IdentifierType.OEM)
+                .map(code -> ProductIdentifier.of(variant.getId(), IdentifierType.OEM, code.getIdentifierValue()))
+                .toList());
+        vehicles.saveAll(vehicles.findByProductIdIn(List.of(original.getId())).stream()
+                .map(link -> ProductVehicleModel.of(variant.getId(), link.getVehicleModelId())).toList());
+        auditLog.save(AuditLog.record("PRODUCT", variant.getId(), "PRODUCT_CREATED", by,
+                "Hàng móp của " + original.getSku(), now));
+        return variant;
+    }
+
+    /** The request waiting for Owner is answered: Owner took the goods. */
+    private void approved(AuthenticatedUser owner, DiscrepancyCase found, String type, long productId, int quantity,
+                          LocalDateTime now) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("type", type);
+        data.put("product_id", productId);
+        data.put("quantity", quantity);
+        auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), ACCEPTANCE_APPROVED, owner.id(), null, null, data,
+                now));
+    }
+
+    private static DiscrepancyCaseResponse.PendingRequest pendingRequest(AuditLog step, Map<Long, Product> parts,
+                                                                         Map<Long, String> names) {
+        if (step == null) {
+            return null;
+        }
+        Map<String, Object> data = step.getNewData();
+        Long productId = data.get("product_id") == null ? null : ((Number) data.get("product_id")).longValue();
+        Product part = productId == null ? null : parts.get(productId);
+        return new DiscrepancyCaseResponse.PendingRequest((String) data.get("type"), productId,
+                part == null ? null : part.getSku(), part == null ? null : part.getPartName(),
+                ((Number) data.get("quantity")).intValue(), (String) data.get("note"), step.getActorId(),
+                names.get(step.getActorId()), step.getOccurredAt());
+    }
+
+    /** [case id → its latest acceptance request] of the cases whose latest acceptance step is a request. */
+    private Map<Long, AuditLog> pendingRequests(Collection<Long> caseIds) {
+        Map<Long, AuditLog> latest = new HashMap<>();
+        auditLog.findByEntityTypeAndEntityIdInAndActionIn(AUDIT_ENTITY, caseIds, ACCEPTANCE_ACTIONS)
+                .forEach(step -> latest.merge(step.getEntityId(), step, (a, b) ->
+                        Comparator.comparing(AuditLog::getOccurredAt).thenComparing(AuditLog::getId)
+                                .compare(a, b) >= 0 ? a : b));
+        latest.values().removeIf(step -> !ACCEPTANCE_REQUESTED.equals(step.getAction()));
+        return latest;
+    }
+
+    private static void requireOwner(AuthenticatedUser user) {
+        if (user.role() != Role.OWNER) {
+            throw forbidden();
+        }
+    }
+
     /**
      * Moves goods of the case to awaiting return to supplier ({@code quantity} above 0), or back from it to the status
      * they were held from (below 0), with the event the movements point to.
@@ -353,8 +621,13 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         Map<Long, List<AttachmentResponse>> evidence = eventsByCase.isEmpty() ? Map.of()
                 : attachments.list(OwnerType.DISCREPANCY_RESOLUTION_EVENT, eventsByCase.values().stream()
                 .flatMap(List::stream).map(DiscrepancyResolutionEvent::getId).toList());
+        Map<Long, AuditLog> pending = pendingRequests(caseIds);
+        Map<Long, Product> requestedParts = byId(products.findAllById(pending.values().stream()
+                .map(step -> step.getNewData().get("product_id")).filter(Objects::nonNull)
+                .map(value -> ((Number) value).longValue()).collect(Collectors.toSet())), Product::getId);
         Set<Long> people = new HashSet<>();
         cases.forEach(found -> people.add(found.getClosedBy()));
+        pending.values().forEach(step -> people.add(step.getActorId()));
         eventsByCase.values().forEach(list -> list.forEach(event -> people.add(event.getRecordedBy())));
         people.remove(null);
         // A HashMap, so that the closer of a case still open (a null id) gives a null name.
@@ -397,7 +670,12 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                             || found.replacementLimit() > replacementFloor(found, done)),
                     open && manager && standing.outstandingReturn() > 0,
                     open && owner && standing.openReplacement() > 0,
-                    open && manager && standing.openReplacement() > 0, history));
+                    open && manager && standing.openReplacement() > 0, history,
+                    standing.damagedUndecided(), standing.wrongUndecided(),
+                    open && (owner || manager) && !pending.containsKey(found.getId())
+                            && standing.damagedUndecided() + standing.wrongUndecided() > 0,
+                    open && owner && standing.damagedUndecided() + standing.wrongUndecided() > 0,
+                    open ? pendingRequest(pending.get(found.getId()), requestedParts, names) : null));
         }
         return rows;
     }

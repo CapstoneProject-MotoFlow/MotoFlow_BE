@@ -105,6 +105,8 @@ public class InventoryServiceImpl implements InventoryService {
             MovementType.EXCESS_ACCEPTED);
     private static final Set<MovementType> COUNT_MOVEMENTS = Set.of(MovementType.OPENING_BALANCE,
             MovementType.COUNT_ADJUSTMENT);
+    private static final Set<MovementType> DISCREPANCY_MOVEMENTS = Set.of(MovementType.DAMAGED_TO_VARIANT,
+            MovementType.WRONG_ITEM_RECLASSIFIED);
     private static final int ISSUE_ORDER_LINES = 20;
 
     private final StockBalanceRepository balances;
@@ -396,7 +398,9 @@ public class InventoryServiceImpl implements InventoryService {
                 sourceDocument(lot), lot.getStoreId(), stores.findById(lot.getStoreId()).orElseThrow().getStoreName(),
                 lot.getReceivedDate(), lot.getManufacturerLotNo(), lot.getManufactureDate(), lot.getExpiryDate(),
                 movements.sumIncoming(lotId, lot.getStoreId(), lot.getStockCountId(),
-                        lot.getSourceType() == LotSourceType.RECEIPT ? RECEIPT_MOVEMENTS : COUNT_MOVEMENTS),
+                        lot.getSourceType() == LotSourceType.RECEIPT ? RECEIPT_MOVEMENTS
+                                : lot.getSourceType() == LotSourceType.DISCREPANCY ? DISCREPANCY_MOVEMENTS
+                                : COUNT_MOVEMENTS),
                 viewStoreId, remaining,
                 held.stream().filter(b -> b.getQuantity() > 0)
                         .map(b -> new StatusQty(b.getStockStatus(), b.getQuantity())).toList(),
@@ -583,6 +587,12 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     private SourceDocument sourceDocument(Lot lot) {
+        if (lot.getSourceType() == LotSourceType.DISCREPANCY) {
+            // GVHD 20/11: the discrepancy event whose movement brought the goods into the lot.
+            return new SourceDocument("DISCREPANCY_RESOLUTION_EVENT", movements
+                    .findFirstByLotIdAndQuantityChangeGreaterThanOrderByIdAsc(lot.getId(), 0)
+                    .map(StockMovement::getDiscrepancyResolutionEventId).orElseThrow());
+        }
         return lot.getSourceType() == LotSourceType.RECEIPT
                 ? new SourceDocument("GOODS_RECEIPT_NOTE",
                         receiptLines.findById(lot.getGoodsReceiptNoteLineId()).orElseThrow().getGoodsReceiptNoteId())

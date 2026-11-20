@@ -6,9 +6,12 @@ import java.util.Set;
 
 /** Where stock came from or went to in the Inventory Operations Report (UC-88), grouping movement types. */
 public enum StockSource {
-    /** Goods received from suppliers, including accepted or rejected excess. */
+    /**
+     * Goods received from suppliers, including accepted or rejected excess, and discrepancy goods taken as another
+     * part (GVHD 20/11).
+     */
     PURCHASE_RECEIPT(Set.of(MovementType.RECEIPT_CONFIRMED, MovementType.EXCESS_ACCEPTED,
-            MovementType.EXCESS_REJECTED)),
+            MovementType.EXCESS_REJECTED, MovementType.DAMAGED_TO_VARIANT, MovementType.WRONG_ITEM_RECLASSIFIED)),
     /** Goods held for or returned to a supplier. */
     SUPPLIER_RETURN(Set.of(MovementType.RETURN_HOLD, MovementType.RETURN_RELEASE, MovementType.SUPPLIER_RETURN)),
     SALE(Set.of(MovementType.SALE_ISSUE)),

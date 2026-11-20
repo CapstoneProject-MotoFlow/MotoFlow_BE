@@ -25,6 +25,10 @@ import java.util.List;
  * </ul>
  * The {@code can...} flags tell what the signed-in user may do now: {@code canHandle} while more goods may go back
  * or the replacement may still change; {@code events} is filled on the detail only.
+ * <p>GVHD 20/11 (PR 5): {@code damagedUndecidedQty} and {@code wrongUndecidedQty} are the held damaged and wrong goods
+ * not decided yet, which Owner may take into stock; {@code canRequestAcceptance} (Branch Manager of the store or
+ * Owner) asks for it, {@code canApproveAcceptance} (Owner) does it; {@code pendingRequest} is the request waiting for
+ * Owner, or null.</p>
  */
 public record DiscrepancyCaseResponse(
         long id, long goodsReceiptNoteId, boolean replacementDelivery, long purchaseOrderId,
@@ -38,7 +42,13 @@ public record DiscrepancyCaseResponse(
         DiscrepancyCaseStatus status, LocalDateTime openedAt, ClosureType closureType, String closureReason,
         Long closedById, String closedByName, LocalDateTime closedAt,
         boolean canHandle, boolean canRecordReturn, boolean canWaiveReplacement, boolean canCreateReplacement,
-        List<Event> events) {
+        List<Event> events, int damagedUndecidedQty, int wrongUndecidedQty, boolean canRequestAcceptance,
+        boolean canApproveAcceptance, PendingRequest pendingRequest) {
+
+    /** GVHD 20/11 (PR 5): a request to take held goods into stock, waiting for Owner. */
+    public record PendingRequest(String type, Long productId, String sku, String partName, int quantity, String note,
+                                 long requestedById, String requestedByName, LocalDateTime requestedAt) {
+    }
 
     /**
      * One action on the case, oldest first. A replacement is {@code confirmed} once its GRN is confirmed; its

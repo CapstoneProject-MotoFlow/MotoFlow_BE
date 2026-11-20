@@ -1,8 +1,12 @@
 package fu.hl.g64.motorflow.discrepancy.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
+import fu.hl.g64.motorflow.discrepancy.dto.AcceptAsVariantRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.AcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancySearch;
+import fu.hl.g64.motorflow.discrepancy.dto.ReceiveWrongItemsRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.RejectAcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.SupplierReturnRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.WaiveReplacementRequest;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
@@ -80,5 +84,49 @@ public class DiscrepancyController {
                                                     @PathVariable long id,
                                                     @Valid @RequestBody WaiveReplacementRequest request) {
         return discrepancies.waiveReplacement(owner, id, request);
+    }
+
+    @Operation(summary = "Ask Owner to take held damaged or wrong goods into stock (GVHD 20/11)",
+            description = "Branch Manager of the receiving store or Owner. type DAMAGED (as the \"-M\" variant) or "
+                    + "WRONG_ITEM (productId: the part they really are, optional). MSG309: more than is held and not "
+                    + "decided of that kind. Owner is notified; the case shows it as pendingRequest.")
+    @PostMapping("/{id}/acceptance-requests")
+    @PreAuthorize("hasAnyRole('BRANCH_MANAGER', 'OWNER')")
+    public DiscrepancyCaseResponse requestAcceptance(@AuthenticationPrincipal AuthenticatedUser user,
+                                                     @PathVariable long id,
+                                                     @Valid @RequestBody AcceptanceRequest request) {
+        return discrepancies.requestAcceptance(user, id, request);
+    }
+
+    @Operation(summary = "Refuse the pending request to take goods into stock (GVHD 20/11)",
+            description = "Owner only. MSG29 when nothing is pending. The goods stay held; the store's managers are told.")
+    @PostMapping("/{id}/acceptance-requests/reject")
+    @PreAuthorize("hasRole('OWNER')")
+    public DiscrepancyCaseResponse rejectAcceptance(@AuthenticationPrincipal AuthenticatedUser owner,
+                                                    @PathVariable long id,
+                                                    @Valid @RequestBody RejectAcceptanceRequest request) {
+        return discrepancies.rejectAcceptance(owner, id, request);
+    }
+
+    @Operation(summary = "Take dented goods into stock as the part's dented-goods variant (GVHD 20/11)",
+            description = "Owner only. The variant \"<SKU>-M\" is made the first time and shelved in \"Khu hàng lỗi\". "
+                    + "salePrice sets its retail price from today (required while it has none: MSG311). MSG309, MSG312.")
+    @PostMapping("/{id}/damaged/accept-as-variant")
+    @PreAuthorize("hasRole('OWNER')")
+    public DiscrepancyCaseResponse acceptAsVariant(@AuthenticationPrincipal AuthenticatedUser owner,
+                                                   @PathVariable long id,
+                                                   @Valid @RequestBody AcceptAsVariantRequest request) {
+        return discrepancies.acceptAsVariant(owner, id, request);
+    }
+
+    @Operation(summary = "Take wrong items into stock as the part they really are (GVHD 20/11)",
+            description = "Owner only. replacementNeeded false waives the replacement owed for them. MSG309, MSG310, "
+                    + "MSG313.")
+    @PostMapping("/{id}/wrong-items/receive")
+    @PreAuthorize("hasRole('OWNER')")
+    public DiscrepancyCaseResponse receiveWrongItems(@AuthenticationPrincipal AuthenticatedUser owner,
+                                                     @PathVariable long id,
+                                                     @Valid @RequestBody ReceiveWrongItemsRequest request) {
+        return discrepancies.receiveWrongItems(owner, id, request);
     }
 }
