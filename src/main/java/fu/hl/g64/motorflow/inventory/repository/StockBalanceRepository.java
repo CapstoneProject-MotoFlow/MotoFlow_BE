@@ -150,4 +150,8 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
     /** UC-91: the parts shelved in one storage area of a warehouse, by id. */
     @Query("select b.productId from StockBalance b where b.storeId = :storeId and b.storageArea = :area order by b.productId")
     List<Long> findProductIdsByStorageArea(Long storeId, String area);
+
+    /** GVHD 20/11: the parts with damaged goods in a warehouse, which a count of the defective area also counts. */
+    @Query("select b.productId from StockBalance b where b.storeId = :storeId and b.damagedQty > 0 order by b.productId")
+    List<Long> findProductIdsWithDamaged(Long storeId);
 }

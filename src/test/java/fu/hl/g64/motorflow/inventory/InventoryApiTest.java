@@ -26,6 +26,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -167,6 +168,24 @@ class InventoryApiTest extends ApiTestUsers {
     }
 
     @Test
+    void theDefectiveAreaListsEveryPartWithGoodsThatCannotBeSold() throws Exception {
+        // GVHD 20/11: the chain is shelved on Kệ A but has a damaged unit; the branch brake waits to go back.
+        place(central, chain, "Kệ A", null);
+        place(central, brake, "Kệ A", null);
+        jdbc.update("UPDATE stock_balance SET available_qty = available_qty - 1, damaged_qty = 1 "
+                + "WHERE store_id = ? AND product_id = ?", central, chain);
+        jdbc.update("UPDATE stock_balance SET awaiting_supplier_return_qty = 1 WHERE store_id = ? AND product_id = ?",
+                branch, brake);
+        stock("owner", "?storageArea=khu hàng lỗi")
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].defectiveArea", contains("Khu hàng lỗi", "Khu hàng lỗi")));
+        stock("owner", "?storageArea=Kệ A")
+                .andExpect(jsonPath("$.items[*].sku", containsInAnyOrder("MA-PHANH", "XICH-428")));
+        stock("owner", "?q=MA-PHANH&storeId=" + central)
+                .andExpect(jsonPath("$.items[0].defectiveArea").value(nullValue()));
+    }
+
+    @Test
     void zeroStockIsHiddenUnlessAskedFor() throws Exception {
         placeWithThreshold(branch, chain, 4);
         stock("bm", "").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH")));
@@ -224,9 +243,10 @@ class InventoryApiTest extends ApiTestUsers {
         place(branch, brake, "Kệ B", null);
         place(central, brake, "Kệ B", null);
         place(central, chain, "Kệ A", null);
-        stock("owner", "/storage-areas").andExpect(jsonPath("$", contains("Kệ A", "Kệ B")));
-        stock("owner", "/storage-areas?storeId=" + branch).andExpect(jsonPath("$", contains("Kệ B")));
-        stock("bm", "/storage-areas").andExpect(jsonPath("$", contains("Kệ B")));
+        // GVHD 20/11: every warehouse has the defective area, shelved or not.
+        stock("owner", "/storage-areas").andExpect(jsonPath("$", contains("Kệ A", "Kệ B", "Khu hàng lỗi")));
+        stock("owner", "/storage-areas?storeId=" + branch).andExpect(jsonPath("$", contains("Kệ B", "Khu hàng lỗi")));
+        stock("bm", "/storage-areas").andExpect(jsonPath("$", contains("Kệ B", "Khu hàng lỗi")));
         stock("bm", "/storage-areas?storeId=" + central).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
         stock("owner", "/storage-areas?storeId=9999").andExpect(status().isNotFound())

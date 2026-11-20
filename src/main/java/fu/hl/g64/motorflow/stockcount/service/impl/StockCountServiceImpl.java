@@ -22,6 +22,7 @@ import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountRequestStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.helper.DefectiveArea;
 import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountedLot;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
@@ -246,7 +247,8 @@ public class StockCountServiceImpl implements StockCountService {
         boolean bad = switch (scopeType) {
             case WHOLE -> !productIds.isEmpty() || scopeNote != null || partCategoryId != null;
             case AREA -> !productIds.isEmpty() || scopeNote == null || partCategoryId != null
-                    || !stockBalances.findStorageAreas(storeId).contains(scopeNote);
+                    || !(DefectiveArea.is(scopeNote)
+                    || stockBalances.findStorageAreas(storeId).contains(scopeNote));
             case PRODUCTS -> productIds.isEmpty() || new HashSet<>(productIds).size() != productIds.size()
                     || scopeNote != null || partCategoryId != null;
             case CATEGORY -> !productIds.isEmpty() || scopeNote != null || partCategoryId == null

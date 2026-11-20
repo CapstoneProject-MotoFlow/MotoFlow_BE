@@ -9,6 +9,7 @@ import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
  * @param onHandQty     everything held in this warehouse in any status; goods in transit are not included
  * @param nearExpiryQty available quantity in lots that expire within the warning days (BR-76)
  * @param expiredQty    available quantity in expired lots, which cannot be sold
+ * @param defectiveArea "Khu hàng lỗi" when wrong, damaged or awaiting-return goods are kept there, else null
  */
 public record StockRowResponse(
         long storeId,
@@ -31,5 +32,6 @@ public record StockRowResponse(
         int nearExpiryQty,
         int expiredQty,
         boolean lowStock,
-        Long stockValue) {
+        Long stockValue,
+        String defectiveArea) {
 }

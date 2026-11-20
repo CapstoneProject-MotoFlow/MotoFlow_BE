@@ -8,6 +8,7 @@ import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequest;
 import fu.hl.g64.motorflow.inventory.entity.StockCountRequestProduct;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountRequestStatus;
+import fu.hl.g64.motorflow.inventory.helper.DefectiveArea;
 import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockCountRequestProductRepository;
@@ -97,7 +98,8 @@ public class StockCountRequestServiceImpl implements StockCountRequestService {
             case PRODUCTS -> !productIds.isEmpty() && new HashSet<>(productIds).size() == productIds.size()
                     && note == null && partCategoryId == null;
             case AREA -> productIds.isEmpty() && note != null && partCategoryId == null
-                    && stockBalances.findStorageAreas(store.getId()).contains(note);
+                    && (DefectiveArea.is(note)
+                    || stockBalances.findStorageAreas(store.getId()).contains(note));
             case CATEGORY -> productIds.isEmpty() && note == null && partCategoryId != null
                     && countableCategory(partCategoryId);
         };
