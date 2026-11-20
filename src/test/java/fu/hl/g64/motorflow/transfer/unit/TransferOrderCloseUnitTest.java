@@ -66,7 +66,7 @@ class TransferOrderCloseUnitTest extends TransferOrderUnitTestBase {
         when(lines.findByTransferOrderIdOrderByProductId(1L)).thenAnswer(inv -> List.of(lineP1));
         when(lines.openReceiptQty(1L)).thenReturn(List.of());
         when(guide.parts(eq(1L), any(), any())).thenAnswer(inv -> Map.of(P1,
-                new PickingGuide.Part(sourceSellable, null, null, List.of(), List.of(), List.of())));
+                new PickingGuide.Part(sourceSellable, 0, null, null, List.of(), List.of(), List.of())));
     }
 
     private static TransferOrder reconciling(Long requestId) {

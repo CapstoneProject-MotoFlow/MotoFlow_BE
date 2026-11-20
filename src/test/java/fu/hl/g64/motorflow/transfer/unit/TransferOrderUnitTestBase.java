@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
+import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
@@ -46,6 +47,7 @@ import static fu.hl.g64.motorflow.support.unit.UnitFixtures.store;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -103,7 +105,8 @@ abstract class TransferOrderUnitTestBase {
     void baseData() {
         service = new TransferOrderServiceImpl(orders, lines, requests, requestLines, cases, stores,
                 new StoreScope(stores), new RequestedParts(products), reconciliation, products, inventory, users,
-                auditLog, notifications, posting, tasks, warehouseTasks, guide, attachments, CLOCK);
+                auditLog, notifications, posting, tasks, warehouseTasks, guide, attachments,
+                mock(StockBalanceRepository.class), CLOCK);
         allStores.put(1L, store(1, StoreStatus.ACTIVE, true));
         allStores.put(2L, store(2, StoreStatus.ACTIVE, false));
         allStores.put(3L, store(3, StoreStatus.ACTIVE, false));

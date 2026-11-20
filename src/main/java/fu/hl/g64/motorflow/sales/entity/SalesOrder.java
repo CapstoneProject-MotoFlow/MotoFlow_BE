@@ -163,6 +163,30 @@ public class SalesOrder {
     }
 
     /**
+     * GVHD 20/11: the new order holds nothing the store can sell now, so it waits for stock instead of picking. Only
+     * right after it was opened, before any picking.
+     */
+    public void waitForStock() {
+        if (status != SalesOrderStatus.AWAITING_PICKING) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not just opened");
+        }
+        status = SalesOrderStatus.AWAITING_STOCK;
+    }
+
+    /** GVHD 20/11: the whole waiting order is released to picking, keeping its number. */
+    public void release(LocalDateTime now) {
+        if (status != SalesOrderStatus.AWAITING_STOCK) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not waiting for stock");
+        }
+        status = SalesOrderStatus.AWAITING_PICKING;
+        updatedAt = now;
+    }
+
+    public boolean isWaitingForStock() {
+        return status == SalesOrderStatus.AWAITING_STOCK;
+    }
+
+    /**
      * UC-55: the order moves to a new version with this customer and pricing (BR-36). Its price and credit decision
      * must be confirmed again, so the confirmation and any credit decision are dropped.
      */
@@ -191,6 +215,11 @@ public class SalesOrder {
     /** The parts or requested quantities changed: the goods must be picked again for the new content (UC-58). */
     public void backToPicking(LocalDateTime now) {
         requireUnfinished();
+        if (status == SalesOrderStatus.AWAITING_STOCK) {
+            // A waiting order is not picked until it is released (GVHD 20/11).
+            updatedAt = now;
+            return;
+        }
         status = SalesOrderStatus.AWAITING_PICKING;
         dropConfirmation(now);
     }

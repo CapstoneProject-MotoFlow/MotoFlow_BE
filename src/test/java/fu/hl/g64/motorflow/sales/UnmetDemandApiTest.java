@@ -56,7 +56,8 @@ class UnmetDemandApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items[0].requestedQty").value(1))
                 .andExpect(jsonPath("$.items[0].deliveredQty").value(0))
                 .andExpect(jsonPath("$.items[0].missingQty").value(1))
-                .andExpect(jsonPath("$.items[0].sellableQty").value(2))
+                // 2 oils in stock, 1 held by the order still open (GVHD 20/11).
+                .andExpect(jsonPath("$.items[0].sellableQty").value(1))
                 .andExpect(jsonPath("$.items[1].orderId").value(shortOrder))
                 .andExpect(jsonPath("$.items[1].orderStatus").value("COMPLETED"))
                 .andExpect(jsonPath("$.items[1].sku").value("MA-PHANH-01"))

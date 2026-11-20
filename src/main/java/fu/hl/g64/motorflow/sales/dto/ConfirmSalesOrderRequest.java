@@ -34,6 +34,16 @@ public record ConfirmSalesOrderRequest(
             @NotNull(message = "Vui lòng nhập số giao.")
             @PositiveOrZero(message = "Số giao không được âm.")
             @Max(value = 100_000, message = "Số giao tối đa 100.000.")
-            Integer deliveredQty) {
+            Integer deliveredQty,
+
+            /*
+             * GVHD 20/11: what is not delivered of the line waits on a new waiting order ("mai chị đến lấy nốt");
+             * otherwise the customer gives it up, as before. Only when the picking is confirmed the first time.
+             */
+            Boolean waitForRest) {
+
+        public Line(Long productId, Integer deliveredQty) {
+            this(productId, deliveredQty, null);
+        }
     }
 }

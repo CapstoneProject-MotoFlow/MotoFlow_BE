@@ -26,6 +26,10 @@ import java.util.List;
  * {@code money} holds the payments, refunds, credit and receivable of the order (UC-54, UC-60, UC-61) and
  * {@code closing} its completion or cancellation; both are null for Staff. {@code note} is the seller's note on the
  * order, shown to the picker too.
+ *
+ * <p>GVHD 20/11: {@code splitFromOrderId} is the order this one came from ("tách từ BH-xxx"), read from audit_log.
+ * {@code split} is filled only in the answer of the call that split the request: the order sold now, the waiting
+ * order and the units the customer declined.</p>
  */
 public record SalesOrderDetail(
         long id, int version, SalesOrderStatus status, long storeId, String storeName,
@@ -35,7 +39,24 @@ public record SalesOrderDetail(
         Long confirmedById, String confirmedBy, LocalDateTime confirmedAt,
         String quantityBasis, Long referenceTotal, Long discountAmount, Long total, BigDecimal invoiceDiscountRate,
         BigDecimal discountThreshold, Money money, Closing closing, List<Line> lines, Actions actions,
-        List<HistoryEntry> history) {
+        List<HistoryEntry> history, Long splitFromOrderId, Split split) {
+
+    /** GVHD 20/11: how one request was split. Either order id is null when nothing went to it. */
+    public record Split(Long salesOrderId, Long waitingOrderId, List<Declined> declined) {
+    }
+
+    /** Units of a part the customer asked for and chose not to take. */
+    public record Declined(long productId, int quantity) {
+    }
+
+    /** This answer with the split of the call that made it. */
+    public SalesOrderDetail withSplit(Split made) {
+        return new SalesOrderDetail(id, version, status, storeId, storeName, customerId, customerName, customerPhone,
+                customerAddress, note, priceType, discountRate, picker, createdById, createdBy, createdAt, updatedAt,
+                confirmedById, confirmedBy, confirmedAt, quantityBasis, referenceTotal, discountAmount, total,
+                invoiceDiscountRate, discountThreshold, money, closing, lines, actions, history, splitFromOrderId,
+                made);
+    }
 
     /** Who holds the picking task and where it stands. */
     public record Picker(long id, String name, WarehouseTaskStatus taskStatus) {
@@ -46,18 +67,19 @@ public record SalesOrderDetail(
      * line, the reason when short or any remark when picked in full. {@code sellableQty}
      * is what the store can hand over now (available, not expired); {@code stockShortQty} what it lacks for the
      * quantity still to deliver. {@code pickFirst} lists the lots to take, earliest expiry first (BR-75).
+     * GVHD 20/11: {@code sellableQty} leaves out what other open orders hold ({@code heldByOthersQty}).
      */
     public record Line(long id, int lineNo, long productId, String sku, String partName, String baseUnit,
                        ProductStatus productStatus, List<String> barcodes, String storageArea, String binLocation,
                        int requestedQty, Integer pickedQty, Integer shortQty, String shortReason, Integer deliveredQty,
                        Long referencePrice, Long actualUnitPrice, Long lineTotal, int sellableQty, int stockShortQty,
-                       List<LotToPick> pickFirst) {
+                       List<LotToPick> pickFirst, int heldByOthersQty) {
     }
 
     /** What the signed-in user may do with the order now. */
     public record Actions(boolean canUpdate, boolean canAssignPicker, boolean canRecordPicking, boolean canConfirm,
                           boolean canRecordPayment, boolean canRefund, boolean canRecordCredit, boolean canComplete,
-                          boolean canCancel) {
+                          boolean canCancel, boolean canRelease) {
     }
 
     /**

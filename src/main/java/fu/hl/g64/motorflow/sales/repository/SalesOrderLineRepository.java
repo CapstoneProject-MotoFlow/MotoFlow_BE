@@ -27,6 +27,41 @@ public interface SalesOrderLineRepository extends JpaRepository<SalesOrderLine, 
     /** The lines of one order in the order they were added. */
     List<SalesOrderLine> findBySalesOrderIdOrderByLineNoAsc(Long salesOrderId);
 
+    /** What the lines of open sales orders hold (BR-33, GVHD 20/11), as JPQL on {@code l} and {@code o}. */
+    String HELD = """
+            sum(case
+                when o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING
+                    then l.requestedQty
+                when o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED
+                    then coalesce(l.pickedQty, l.requestedQty)
+                else coalesce(l.deliveredQty, l.pickedQty, l.requestedQty) end)""";
+
+    /** The open sales orders that hold goods: waiting for picking, picked and confirmed. */
+    String HOLDING = " " + """
+            o.status in (fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING,
+                         fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED,
+                         fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.CONFIRMED)""";
+
+    /**
+     * GVHD 20/11 (BR-33): [productId, quantity held] of the store's open sales orders other than
+     * {@code excludeOrderId} (-1 for none): waiting for picking holds what was requested, picked what was picked,
+     * confirmed what is delivered. Drafts and waiting orders hold nothing; the goods leave stock at completion
+     * (SALE_ISSUE).
+     */
+    @Query("select l.productId, " + HELD + """
+             from SalesOrderLine l
+            join SalesOrder o on o.id = l.salesOrderId
+            where o.storeId = :storeId and l.productId in :productIds and o.id <> :excludeOrderId and """ + HOLDING
+            + " group by l.productId")
+    List<Object[]> reservedQuantities(long storeId, Collection<Long> productIds, long excludeOrderId);
+
+    /** GVHD 20/11: [storeId, productId, quantity held] of every store's open sales orders for these parts. */
+    @Query("select o.storeId, l.productId, " + HELD + """
+             from SalesOrderLine l
+            join SalesOrder o on o.id = l.salesOrderId
+            where l.productId in :productIds and """ + HOLDING + " group by o.storeId, l.productId")
+    List<Object[]> reservedByStore(Collection<Long> productIds);
+
     String UNMET_DEMAND = """
             from SalesOrderLine l
             join SalesOrder o on o.id = l.salesOrderId

@@ -53,7 +53,7 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.history[0].action").value("CREATED"));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_type = 'SALES_ORDER' "
                 + "AND action = 'SALES_ORDER_CREATED'", Integer.class)).isEqualTo(1);
-        // Nothing is reserved (BR-33).
+        // Holding is computed from the open orders, nothing is booked on the stock (BR-33).
         assertThat(jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE store_id = ? AND product_id = ?",
                 Integer.class, store, pad)).isEqualTo(10);
         assertThat(notifications(manager, "SALES_ORDER_CREATED")).isZero();
@@ -69,18 +69,32 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.total").value(257_925))
                 .andExpect(jsonPath("$.discountAmount").value(27_075));
 
-        // Missing stock does not stop the order (UC-53 step 5).
+        // Missing stock does not stop the order (UC-53 step 5): GVHD 20/11, what cannot be sold now waits on a
+        // waiting order. 8 sellable, 4 + 2 held by the two orders above: 2 sold now, 18 wait.
         Map<String, Object> walkIn = order(null, null, "RETAIL", "0", lines(pad, 20));
         walkIn.put("walkInName", "  Chị Lan ");
-        create(managerToken, walkIn).andExpect(status().isCreated())
+        String split = create(managerToken, walkIn).andExpect(status().isCreated())
                 .andExpect(jsonPath("$.customerName").value("Chị Lan"))
-                .andExpect(jsonPath("$.lines[0].stockShortQty").value(12));
+                .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(2))
+                .andExpect(jsonPath("$.lines[0].heldByOthersQty").value(6))
+                .andExpect(jsonPath("$.lines[0].stockShortQty").value(0))
+                .andReturn().getResponse().getContentAsString();
+        long waiting = ((Number) JsonPath.read(split, "$.split.waitingOrderId")).longValue();
+        detail(managerToken, waiting)
+                .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andExpect(jsonPath("$.splitFromOrderId").value((Integer) JsonPath.read(split, "$.id")))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(18))
+                .andExpect(jsonPath("$.actions.canRelease").value(true))
+                .andExpect(jsonPath("$.actions.canAssignPicker").value(false));
 
         // Owner chooses the store; its Branch Manager is asked to assign the picking, the Owner may too (GVHD 20/11).
         create(ownerToken, order(null, customer, "RETAIL", null, lines(pad, 1)))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG157"));
-        create(ownerToken, order(store, customer, "RETAIL", null, lines(pad, 1)))
+        // The pads are all held now; the last oil is not.
+        create(ownerToken, order(store, customer, "RETAIL", null, lines(oil, 1)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
                 .andExpect(jsonPath("$.actions.canAssignPicker").value(true));
         assertThat(notifications(manager, "SALES_ORDER_CREATED")).isEqualTo(1);
     }

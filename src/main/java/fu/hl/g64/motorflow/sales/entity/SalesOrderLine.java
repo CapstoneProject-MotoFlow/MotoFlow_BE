@@ -87,6 +87,14 @@ public class SalesOrderLine {
         this.pickedQty = pickedQty;
     }
 
+    /** GVHD 20/11: part of a waiting line was released onto another order; this many still wait. */
+    public void keepWaiting(int quantity) {
+        if (quantity <= 0 || quantity >= requestedQty) {
+            throw new IllegalArgumentException("waiting quantity must be 1.." + (requestedQty - 1));
+        }
+        requestedQty = quantity;
+    }
+
     /** UC-58: what the customer agreed to receive, from the picked quantity (BR-34). */
     public void deliver(int deliveredQty) {
         if (deliveredQty < 0 || pickedQty == null || deliveredQty > pickedQty) {
