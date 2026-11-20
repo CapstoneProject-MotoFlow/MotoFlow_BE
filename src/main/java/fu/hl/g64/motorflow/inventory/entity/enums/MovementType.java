@@ -7,6 +7,8 @@ public enum MovementType {
     EXCESS_ACCEPTED,
     EXCESS_REJECTED,
     RETURN_HOLD,
+    /** Goods taken back from awaiting return to supplier to the status they were held from (V14). */
+    RETURN_RELEASE,
     SUPPLIER_RETURN,
     TRANSFER_DISPATCH,
     TRANSFER_EXTRA_DISPATCH,

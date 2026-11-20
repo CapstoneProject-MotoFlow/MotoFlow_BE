@@ -19,6 +19,11 @@ public enum PurchaseOrderView {
     AWAITING_RECEIVING_ASSIGNMENT(EnumSet.of(PurchaseOrderStatus.AWAITING_DELIVERY, PurchaseOrderStatus.RECEIVING)),
     FULLY_RECEIVED(EnumSet.of(PurchaseOrderStatus.FULLY_RECEIVED)),
     CANCELLED(EnumSet.of(PurchaseOrderStatus.CANCELLED)),
+    /**
+     * Test report 20/11 (item 2): POs with a supplier discrepancy case still open, whatever their receiving status.
+     * A work queue like OPEN, so no default range of creation days.
+     */
+    DISCREPANCY_OPEN(EnumSet.complementOf(EnumSet.of(PurchaseOrderStatus.DRAFT))),
     /** Every PO; drafts are never listed here (PM 17/11, N4). */
     ALL(EnumSet.complementOf(EnumSet.of(PurchaseOrderStatus.DRAFT)));
 

@@ -155,12 +155,14 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             if (!found.isOpen()) {
                 throw changed();
             }
-            // UC-46 Step 5_Invalid or stale quantities. Goods already moved to awaiting return stay to be returned.
+            // UC-46 Step 5_Invalid or stale quantities. Test report 20/11: the return may come down again (the store
+            // keeps the goods) but never below what went back already or the excess Owner rejected.
             if (line.returnRequiredQty() > found.heldQty()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
             }
-            if (line.returnRequiredQty() < found.getReturnRequiredQty()) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, found.getReturnRequiredQty());
+            int returnFloor = returnFloor(found, progress.getOrDefault(found.getId(), Progress.NONE));
+            if (line.returnRequiredQty() < returnFloor) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, returnFloor);
             }
             // UC-46 step 3, BR-27: the replacement is agreed apart from the return, never above the case's limit
             // (BR-67); left empty, it grows by the wrong or damaged units newly agreed to go back.
@@ -274,17 +276,30 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         return responses(owner, List.of(found), true).getFirst();
     }
 
-    /** Moves goods of the case to awaiting return to supplier, with the event the movements point to. */
+    /**
+     * Moves goods of the case to awaiting return to supplier ({@code quantity} above 0), or back from it to the status
+     * they were held from (below 0), with the event the movements point to.
+     */
     private void hold(DiscrepancyCase found, StockStatus from, int quantity, long lotId, long storeId, long by,
                       String note, LocalDateTime now) {
-        if (quantity <= 0) {
+        if (quantity == 0) {
             return;
         }
+        boolean release = quantity < 0;
+        int moved = Math.abs(quantity);
         DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.done(found.getId(),
-                ResolutionType.MOVED_TO_AWAITING_RETURN, quantity, note, by, now));
-        posting.move(new MovePosting(found.getProductId(), storeId, from, storeId,
-                StockStatus.AWAITING_SUPPLIER_RETURN, quantity, List.of(new LotQuantity(lotId, quantity)),
-                MovementType.RETURN_HOLD, SourceRef.discrepancyResolutionEvent(event.getId()), by, note));
+                release ? ResolutionType.RELEASED_FROM_AWAITING_RETURN : ResolutionType.MOVED_TO_AWAITING_RETURN,
+                moved, note, by, now));
+        posting.move(new MovePosting(found.getProductId(), storeId,
+                release ? StockStatus.AWAITING_SUPPLIER_RETURN : from, storeId,
+                release ? from : StockStatus.AWAITING_SUPPLIER_RETURN, moved, List.of(new LotQuantity(lotId, moved)),
+                release ? MovementType.RETURN_RELEASE : MovementType.RETURN_HOLD,
+                SourceRef.discrepancyResolutionEvent(event.getId()), by, note));
+    }
+
+    /** The least the agreed return may be: what went back already, and the excess Owner rejected (UC-45). */
+    private static int returnFloor(DiscrepancyCase found, Progress done) {
+        return Math.max(found.getRejectedExcessQty(), done.returned());
     }
 
     /** The lot the receipt line of the part created; held, rejected and returned goods all stay in it. */
@@ -377,6 +392,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                     found.getStatus(), found.getOpenedAt(), found.getClosureType(), found.getClosureReason(),
                     found.getClosedBy(), names.get(found.getClosedBy()), found.getClosedAt(),
                     open && (owner || manager) && (found.heldQty() > found.getReturnRequiredQty()
+                            || found.getReturnRequiredQty() > returnFloor(found, done)
                             || found.replacementLimit() > replacementFloor(found, done)),
                     open && manager && standing.outstandingReturn() > 0,
                     open && owner && standing.openReplacement() > 0,

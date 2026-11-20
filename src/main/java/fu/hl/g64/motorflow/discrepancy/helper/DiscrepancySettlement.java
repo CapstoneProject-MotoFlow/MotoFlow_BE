@@ -54,7 +54,7 @@ public class DiscrepancySettlement {
                 case CLOSED_BY_AGREEMENT ->
                         new Progress(returned, writtenOff, replaced, waived + q, pendingReplacement, event.getReason());
                 // Moving goods to awaiting return changes no obligation; the case records it in return_required_qty.
-                case MOVED_TO_AWAITING_RETURN, RECEIVED_BACK_AT_SOURCE -> this;
+                case MOVED_TO_AWAITING_RETURN, RELEASED_FROM_AWAITING_RETURN, RECEIVED_BACK_AT_SOURCE -> this;
             };
         }
     }

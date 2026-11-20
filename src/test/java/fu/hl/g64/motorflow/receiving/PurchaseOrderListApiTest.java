@@ -185,11 +185,16 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items", hasSize(0)));
         list(ownerToken, "view", "ALL", "createdFrom", "2026-09-01")
                 .andExpect(jsonPath("$.items[*].id", hasItem((int) fullyReceived)));
+        // Test report 20/11 (item 2): the discrepancy tab lists every PO with an open case, with no default range.
+        list(ownerToken, "view", "DISCREPANCY_OPEN")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, fullyReceived))));
 
         jdbc.update("UPDATE discrepancy_case SET status = 'CLOSED', closure_type = 'ALL_SETTLED', closed_by = ?, "
                 + "closed_at = ? WHERE goods_receipt_note_id = ?", owner.getId(), LocalDateTime.of(2026, 9, 6, 9, 0),
                 delivery);
         list(ownerToken).andExpect(jsonPath("$.items[*].id", contains(ids(newOrder, receivingOrder, lateOrder))));
+        list(ownerToken, "view", "DISCREPANCY_OPEN")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
         list(ownerToken, "view", "FULLY_RECEIVED", "createdFrom", "2026-09-01")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
     }
