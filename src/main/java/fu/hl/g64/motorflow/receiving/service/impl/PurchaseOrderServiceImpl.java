@@ -172,9 +172,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                     && (to == null || (arrived != null && arrived.isBefore(to)));
         }).sorted(newest).toList();
         int pageSize = Math.clamp(size, 1, 100);
-        int first = Math.max(page, 0) * pageSize;
+        long first = (long) Math.max(page, 0) * pageSize;
         List<PurchaseOrder> slice = first >= rows.size() ? List.of()
-                : rows.subList(first, Math.min(first + pageSize, rows.size()));
+                : rows.subList((int) first, (int) Math.min(first + pageSize, rows.size()));
         Map<Long, Object[]> figures = slice.isEmpty() ? Map.of()
                 : discrepancies.summarizeOpenByPurchaseOrder(slice.stream().map(PurchaseOrder::getId).toList())
                 .stream().collect(Collectors.toMap(row -> (Long) row[0], Function.identity()));

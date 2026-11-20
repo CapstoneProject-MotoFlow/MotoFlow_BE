@@ -232,6 +232,10 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
         list(ownerToken, "view", "DISCREPANCY_OPEN", "size", "1", "page", "1")
                 .andExpect(jsonPath("$.totalItems").value(2))
                 .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
+        // A page far past the end is empty, not an overflowed offset.
+        list(ownerToken, "view", "DISCREPANCY_OPEN", "size", "100", "page", String.valueOf(Integer.MAX_VALUE))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(0)));
         list(managerToken, "view", "DISCREPANCY_OPEN")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, fullyReceived))));
         list(otherManagerToken, "view", "DISCREPANCY_OPEN").andExpect(jsonPath("$.items", hasSize(0)));
