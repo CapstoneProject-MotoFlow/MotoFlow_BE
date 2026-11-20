@@ -143,6 +143,12 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
                 .andExpect(jsonPath("$.splitFromOrderId").value((int) order))
                 .andExpect(jsonPath("$.lines[0].requestedQty").value(2));
+        // A waiting order is neither picked nor confirmed until it is released.
+        mvc.perform(post("/api/v1/sales-orders/" + waiting + "/confirm")
+                        .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("version", 1, "customerAgreed", true, "lines", List.of(Map.of(
+                                "productId", pad, "deliveredQty", 2))))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG308"));
 
         // Confirming again cannot deliver the 2 that went to the waiting order (kept in the audit log).
         mvc.perform(post("/api/v1/sales-orders/" + order + "/confirm")
