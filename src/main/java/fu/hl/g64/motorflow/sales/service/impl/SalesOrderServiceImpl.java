@@ -672,6 +672,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Override
     public SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request) {
         SalesOrder order = lockForSeller(seller, id);
+        if (order.isWaitingForStock()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG308");
+        }
         if (order.getStatus() == SalesOrderStatus.AWAITING_PICKING) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG174");
         }
