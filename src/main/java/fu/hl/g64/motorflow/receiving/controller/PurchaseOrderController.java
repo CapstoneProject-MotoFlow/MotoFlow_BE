@@ -62,10 +62,12 @@ public class PurchaseOrderController {
             @RequestParam(required = false) PurchaseOrderView view,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdTo,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate deliveredFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate deliveredTo,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return purchaseOrders.list(user, new PurchaseOrderSearch(q, storeId, supplierId, view, createdFrom, createdTo),
-                page, size);
+        return purchaseOrders.list(user, new PurchaseOrderSearch(q, storeId, supplierId, view, createdFrom, createdTo,
+                deliveredFrom, deliveredTo), page, size);
     }
 
     @Operation(summary = "Last purchase price of each part from this supplier (PM 17/11, UC-40/UC-42 form)",

@@ -10,6 +10,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -73,4 +74,10 @@ public interface GoodsReceiptNoteRepository extends JpaRepository<GoodsReceiptNo
     boolean existsByPurchaseOrderIdAndDeliveryDocumentNoIgnoreCase(Long purchaseOrderId, String deliveryDocumentNo);
 
     boolean existsByTransferOrderIdAndDeliveryDocumentNoIgnoreCase(Long transferOrderId, String deliveryDocumentNo);
+
+    /** GVHD 20/11 (PR 6): [purchaseOrderId, arrival of its latest delivery] of the given POs. */
+    @Query("""
+            select r.purchaseOrderId, max(r.arrivedAt) from GoodsReceiptNote r
+            where r.purchaseOrderId in :purchaseOrderIds group by r.purchaseOrderId""")
+    List<Object[]> lastArrivalByPurchaseOrder(Collection<Long> purchaseOrderIds);
 }

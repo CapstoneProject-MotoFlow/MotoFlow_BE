@@ -726,6 +726,23 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(filterCase, oilCase))));
         discrepancies(ownerToken, "status", "CLOSED")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(padCase))));
+
+
+        // GVHD 20/11 (PR 6): by supplier, by the day the delivery arrived and by SKU or part name.
+        discrepancies(ownerToken, "supplierId", String.valueOf(yamaha))
+                .andExpect(jsonPath("$.items[*].id", contains(ids(filterCase))));
+        discrepancies(ownerToken, "supplierId", String.valueOf(honda))
+                .andExpect(jsonPath("$.items[*].id", contains(ids(oilCase, padCase))));
+        discrepancies(ownerToken, "q", "nhot 10w")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(oilCase))));
+        discrepancies(ownerToken, "q", "ma-phanh")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(padCase))));
+        discrepancies(ownerToken, "deliveredFrom", TODAY.toString(), "deliveredTo", TODAY.toString())
+                .andExpect(jsonPath("$.items", hasSize(3)));
+        discrepancies(ownerToken, "deliveredFrom", TODAY.plusDays(1).toString())
+                .andExpect(jsonPath("$.items", hasSize(0)));
+        discrepancies(managerToken, "supplierId", String.valueOf(yamaha))
+                .andExpect(jsonPath("$.items", hasSize(0)));
     }
 
     /** [actor, return before, replacement before, return after, replacement after, note] of each saved handling. */
