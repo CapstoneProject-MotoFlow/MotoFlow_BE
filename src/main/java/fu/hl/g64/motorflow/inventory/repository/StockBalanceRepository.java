@@ -151,6 +151,11 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
     @Query("select b.productId from StockBalance b where b.storeId = :storeId and b.storageArea = :area order by b.productId")
     List<Long> findProductIdsByStorageArea(Long storeId, String area);
 
+    /** GVHD 20/11: the parts shelved in an area whatever the letter case of its name, as the defective area is matched. */
+    @Query("select b.productId from StockBalance b where b.storeId = :storeId and lower(b.storageArea) = lower(:area) "
+            + "order by b.productId")
+    List<Long> findProductIdsByStorageAreaIgnoringCase(Long storeId, String area);
+
     /** GVHD 20/11: the parts with damaged goods in a warehouse, which a count of the defective area also counts. */
     @Query("select b.productId from StockBalance b where b.storeId = :storeId and b.damagedQty > 0 order by b.productId")
     List<Long> findProductIdsWithDamaged(Long storeId);

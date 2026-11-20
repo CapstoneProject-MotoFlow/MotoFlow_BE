@@ -40,6 +40,18 @@ class StockCountDefectiveAreaApiTest extends StockCountTestData {
     }
 
     @Test
+    void theDefectiveAreaCountFindsItsShelvesWhateverTheLetterCase() throws Exception {
+        // The filter's 9 units are shelved under the area's name typed in capitals; one plain-lot unit is damaged.
+        jdbc.update("UPDATE stock_balance SET storage_area = 'KHU HÀNG LỖI' WHERE store_id = ? AND product_id = ?",
+                store, filter);
+        markDamaged(store, filter, filterLotPlain, 1);
+
+        long defective = countArea("Khu hàng lỗi");
+        assertThat(books(defective).stream().filter(line -> line.get(0).equals(filter))
+                .mapToInt(line -> (Integer) line.get(1)).sum()).isEqualTo(9);
+    }
+
+    @Test
     void aShelfCountWithOnlyDamagedGoodsLeftHasNothingToCount() throws Exception {
         markDamaged(store, plug, plugLot(), 6);
         postAs(managerToken, COUNTS, area("Kệ C")).andExpect(status().isBadRequest())

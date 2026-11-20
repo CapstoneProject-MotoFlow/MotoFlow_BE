@@ -113,7 +113,7 @@ public class CountSheetServiceImpl implements CountSheetService {
     }
 
     private List<Long> defectiveParts(long storeId, String scopeNote) {
-        Set<Long> parts = new HashSet<>(stockBalances.findProductIdsByStorageArea(storeId, DefectiveArea.NAME));
+        Set<Long> parts = new HashSet<>(stockBalances.findProductIdsByStorageAreaIgnoringCase(storeId, DefectiveArea.NAME));
         parts.addAll(stockBalances.findProductIdsWithDamaged(storeId));
         return parts.stream().sorted().toList();
     }
@@ -126,7 +126,7 @@ public class CountSheetServiceImpl implements CountSheetService {
             return new Portion(Part.SELLABLE, Set.of());
         }
         return new Portion(Part.DAMAGED, Set.copyOf(
-                stockBalances.findProductIdsByStorageArea(count.getStoreId(), DefectiveArea.NAME)));
+                stockBalances.findProductIdsByStorageAreaIgnoringCase(count.getStoreId(), DefectiveArea.NAME)));
     }
 
     private enum Part { ALL, SELLABLE, DAMAGED }
