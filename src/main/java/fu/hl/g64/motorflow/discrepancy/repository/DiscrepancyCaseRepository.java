@@ -63,6 +63,19 @@ public interface DiscrepancyCaseRepository extends JpaRepository<DiscrepancyCase
     List<Object[]> countOpenByPurchaseOrder(Collection<Long> purchaseOrderIds);
 
     /**
+     * GVHD 20/11 (PR 6), the DISCREPANCY_OPEN tab: [purchaseOrderId, parts in an open case (each counted once), open
+     * cases, short, wrong-item and damaged units of those cases] of the given POs.
+     */
+    @Query("""
+            select r.purchaseOrderId, count(distinct c.productId), count(c), sum(c.shortQty), sum(c.wrongItemQty),
+                   sum(c.damagedQty)
+            from DiscrepancyCase c, GoodsReceiptNote r
+            where c.goodsReceiptNoteId = r.id and r.purchaseOrderId in :purchaseOrderIds
+              and c.status = fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus.OPEN
+            group by r.purchaseOrderId""")
+    List<Object[]> summarizeOpenByPurchaseOrder(Collection<Long> purchaseOrderIds);
+
+    /**
      * Cases, locked in id order. Every change of a case (UC-46, a replacement GRN confirmed, excess rejected) locks
      * the cases before it posts stock, so the lock order is always: PO, GRN, cases, then stock.
      */

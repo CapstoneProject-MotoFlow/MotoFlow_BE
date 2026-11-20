@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,6 +22,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
 
 @Tag(name = "Supplier discrepancies", description = "UC-46: short, wrong-item, damaged and rejected excess goods of "
         + "supplier deliveries, tracked until they are returned and replaced. The handling of a delivery's cases is "
@@ -41,10 +44,18 @@ public class DiscrepancyController {
                                                       @RequestParam(required = false) Long storeId,
                                                       @RequestParam(required = false) Long purchaseOrderId,
                                                       @RequestParam(required = false) Long goodsReceiptNoteId,
+                                                      @RequestParam(required = false) Long supplierId,
+                                                      @RequestParam(required = false)
+                                                      @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+                                                      LocalDate deliveredFrom,
+                                                      @RequestParam(required = false)
+                                                      @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+                                                      LocalDate deliveredTo,
+                                                      @RequestParam(required = false) String q,
                                                       @RequestParam(defaultValue = "0") int page,
                                                       @RequestParam(defaultValue = "20") int size) {
-        return discrepancies.list(user, new DiscrepancySearch(status, storeId, purchaseOrderId, goodsReceiptNoteId),
-                page, size);
+        return discrepancies.list(user, new DiscrepancySearch(status, storeId, purchaseOrderId, goodsReceiptNoteId,
+                supplierId, deliveredFrom, deliveredTo, q), page, size);
     }
 
     @Operation(summary = "A discrepancy case with what was done on it (UC-46 step 2)")
