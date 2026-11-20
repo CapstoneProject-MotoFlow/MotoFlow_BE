@@ -323,7 +323,14 @@ class WarehouseTaskApiTest extends ApiTestUsers {
     void onlyTheBranchManagerOfTheDocumentsStoreAssigns() throws Exception {
         long order = order("AWAITING_PICKING");
 
-        for (String username : List.of("bm2", "owner", "staff1")) {
+        // The Owner manages the picking of a sales order (GVHD 20/11, below), no other task.
+        String owner = signIn("owner");
+        long receipt = supplierReceipt(store, "AWAITING_INSPECTION");
+        assign(owner, TaskType.INSPECTION, receipt, staff1.getId())
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+
+        for (String username : List.of("bm2", "staff1")) {
             String other = signIn(username);
             assignment(other, TaskType.PICKING, order)
                     .andExpect(status().isForbidden())

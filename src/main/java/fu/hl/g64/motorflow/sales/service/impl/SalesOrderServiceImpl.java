@@ -878,8 +878,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
         return switch (order.getStatus()) {
             case DRAFT -> null;
-            case AWAITING_PICKING -> picking == null && user.role() == Role.BRANCH_MANAGER
-                    ? NextAction.ASSIGN_PICKER : null;
+            // GVHD 20/11: the Owner sells like a Branch Manager, so they give the picking too.
+            case AWAITING_PICKING -> picking == null ? NextAction.ASSIGN_PICKER : null;
             // K1 (PM 19/11): the seller confirms, even a Branch Manager who picked the goods themself.
             case PICKED -> NextAction.CONFIRM;
             case CONFIRMED -> NextAction.COLLECT_PAYMENT;
@@ -966,14 +966,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         // A draft is only edited, submitted or deleted by its creator (PM 13/11).
         Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false)
                 : new Actions(seller && unfinished,
-                user.role() == Role.BRANCH_MANAGER && seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
+                seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
                 holdsTask && ((order.getStatus() == SalesOrderStatus.AWAITING_PICKING
                         && taskStatus == WarehouseTaskStatus.ASSIGNED)
                         || (order.getStatus() == SalesOrderStatus.PICKED
                         && taskStatus == WarehouseTaskStatus.RESULT_SUBMITTED)),
-                // K1 (PM 19/11): a Branch Manager selling alone confirms what they picked themself.
-                seller && (!holdsTask || user.role() == Role.BRANCH_MANAGER)
-                        && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
+                // K1 (PM 19/11): a Branch Manager selling alone confirms what they picked themself; the Owner too
+                // (GVHD 20/11). A seller is never Staff.
+                seller && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
                 seller && confirmedNow && money.payableNow() > 0,
                 seller && unfinished && money.refundable() > 0,
                 seller && confirmedNow && settled && creditAllowed && money.remainingPayable() > 0

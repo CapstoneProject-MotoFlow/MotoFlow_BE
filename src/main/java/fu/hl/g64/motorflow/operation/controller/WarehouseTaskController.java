@@ -26,7 +26,8 @@ import java.util.List;
         + "TRANSFER_RECEIVING: documentId = transfer order) to a Staff member, or take it yourself")
 @RestController
 @RequestMapping("/api/v1/warehouse-tasks")
-@PreAuthorize("hasRole('BRANCH_MANAGER')")
+// GVHD 20/11: the Owner gives or takes the picking of a sales order like a Branch Manager (PICKING only).
+@PreAuthorize("hasAnyRole('BRANCH_MANAGER', 'OWNER')")
 @RequiredArgsConstructor
 public class WarehouseTaskController {
 

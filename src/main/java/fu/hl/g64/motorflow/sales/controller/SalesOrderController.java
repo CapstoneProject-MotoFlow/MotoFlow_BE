@@ -101,7 +101,7 @@ public class SalesOrderController {
 
     @Operation(summary = "Send the picked quantity of every line, or correct it before confirmation (UC-57)")
     @PutMapping("/{id}/picked-lines")
-    @PreAuthorize("hasAnyRole('STAFF', 'BRANCH_MANAGER')")
+    @PreAuthorize("hasAnyRole('STAFF', 'BRANCH_MANAGER', 'OWNER')")
     public SalesOrderDetail recordPicking(@AuthenticationPrincipal AuthenticatedUser picker, @PathVariable long id,
                                           @Valid @RequestBody PickingRequest request) {
         return salesOrders.recordPicking(picker, id, request);

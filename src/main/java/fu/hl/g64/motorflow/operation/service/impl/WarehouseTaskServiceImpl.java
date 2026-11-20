@@ -204,7 +204,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         if (task.getAssignedTo() == confirmer.id()) {
             // K1, BR-26: a Branch Manager who took the task may confirm it; the Owner is told. Picking too since PM
             // 19/11: a Branch Manager selling alone picks the goods themself and confirms the order.
-            if (open.isPresent()) {
+            // The Owner confirming their own picking has nobody above to tell.
+            if (open.isPresent() && confirmer.role() != Role.OWNER) {
                 notifications.notifyOwners("TASK_SELF_CONFIRMED",
                         "Branch Manager %s đã tự xác nhận kết quả %s do chính mình thực hiện."
                                 .formatted(confirmer.fullName(), describe(type, documentId)),
@@ -283,7 +284,11 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     private Document requireManagedDocument(AuthenticatedUser manager, TaskType type, long documentId) {
         Document document = find(type, documentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG120"));
-        if (manager.role() != Role.BRANCH_MANAGER || !Objects.equals(manager.storeId(), document.storeId())) {
+        // GVHD 20/11: the Owner sells at every store like its Branch Manager, so they manage its picking too.
+        boolean owner = manager.role() == Role.OWNER && type == TaskType.PICKING;
+        boolean branchManager = manager.role() == Role.BRANCH_MANAGER
+                && Objects.equals(manager.storeId(), document.storeId());
+        if (!owner && !branchManager) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         return document;
