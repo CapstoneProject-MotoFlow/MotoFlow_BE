@@ -29,6 +29,8 @@ import fu.hl.g64.motorflow.operation.service.AttachmentService;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentMethod;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
+import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.receiving.service.GoodsReceiptService;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -64,6 +66,8 @@ public class DocumentServiceImpl implements DocumentService {
     private static final Pattern NUMBER = Pattern.compile("^\\s*#?\\s*(\\d{1,18})\\s*$");
 
     private final DocumentQuery documents;
+    private final PaymentRepository payments;
+    private final SalesDepositApplicationRepository depositApplications;
     private final SalesOrderService salesOrders;
     private final GoodsReceiptService goodsReceipts;
     private final TransferReceiptService transferReceipts;
@@ -466,22 +470,9 @@ public class DocumentServiceImpl implements DocumentService {
             lines.add(new Line(lines.size() + 1, lng(found, "product_id"), str(found, "sku"),
                     str(found, "part_name"), str(found, "base_unit"), null, null, quantity, price, amount));
         }
-        Map<String, Object> money = documents.row("""
-                SELECT COALESCE(SUM((CASE WHEN p.payment_type = 'REFUND' THEN -1 ELSE 1 END)
-                                    * (p.amount + COALESCE(c.change, 0))), 0) AS paid,
-                       (SELECT COALESCE(SUM(a.amount), 0) FROM sales_deposit_application a
-                         WHERE a.sales_order_id = :id) AS deposit
-                  FROM payment p
-                  -- BR-49: each payment counts with its applied corrections.
-                  LEFT JOIN (SELECT l.payment_id, SUM(l.amount_change) AS change FROM adjustment_amount_line l
-                               JOIN adjustment_request q ON q.id = l.adjustment_request_id
-                              WHERE q.status = 'APPLIED' AND l.payment_id IS NOT NULL
-                              GROUP BY l.payment_id) c ON c.payment_id = p.id
-                 WHERE p.sales_order_id = :id AND p.status = 'VERIFIED'
-                   AND p.payment_type IN ('ORDER_PAYMENT', 'REFUND')""", Map.of("id", row.id()))
-                .orElseThrow();
-        long deposit = lng(money, "deposit");
-        long paid = lng(money, "paid");
+        // BR-49: paid is verified payments less refunds, each with its applied corrections. The deposit is separate.
+        long deposit = depositApplications.sumAppliedTo(row.id());
+        long paid = payments.sumVerifiedNet(row.id());
         Long credit = documents.row("SELECT original_amount FROM receivable WHERE sales_order_id = :id",
                 Map.of("id", row.id())).map(debt -> lng(debt, "original_amount")).orElse(null);
         // What is still unpaid after the deposit, the cash already taken and anything put on credit.
