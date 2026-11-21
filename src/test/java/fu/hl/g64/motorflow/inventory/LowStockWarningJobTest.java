@@ -64,6 +64,18 @@ class LowStockWarningJobTest extends ApiTestUsers {
     }
 
     @Test
+    void aDentedGoodsVariantBelowItsThresholdIsNotReported() {
+        long brake = part("MA-PHANH", "ACTIVE");
+        long dented = part("MA-PHANH-M", "ACTIVE");
+        jdbc.update("UPDATE product SET variant_of_product_id = ? WHERE id = ?", brake, dented);
+        balance(branch, brake, 10, 5);
+        balance(branch, dented, 0, 5);
+
+        assertThat(job.run()).isZero();
+        assertThat(sentTo(bm)).isEmpty();
+    }
+
+    @Test
     void runningAgainWithNothingChangedSendsNothing() {
         long brake = part("MA-PHANH", "ACTIVE");
         balance(branch, brake, 2, 5);

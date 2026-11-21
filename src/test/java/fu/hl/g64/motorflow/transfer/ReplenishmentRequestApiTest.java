@@ -197,6 +197,22 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
     }
 
     @Test
+    void aDentedGoodsVariantIsNeitherRequestedNorSuggested() throws Exception {
+        long variant = product("MA-PHANH-M", "Má phanh trước (hàng móp)", categoryOf(brake));
+        jdbc.update("UPDATE product SET variant_of_product_id = ? WHERE id = ?", brake, variant);
+        stock(branch, variant, 0, 5);
+        stock(branch, chain, 0, 5);
+
+        suggestions("bm", null).andExpect(jsonPath("$[*].sku", contains("XICH-XE")));
+        create("bm", null, null, line(variant, 1)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG316"));
+        mvc.perform(post(REQUESTS + "/drafts").header(HttpHeaders.AUTHORIZATION, signIn("bm"))
+                        .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("storeId", branch,
+                                "lines", List.of(line(variant, 1))))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG316"));
+    }
+
+    @Test
     void aDraftIsNotARequestYet() throws Exception {
         stock(branch, brake, 1, 5);
         stock(central, brake, 10, null);

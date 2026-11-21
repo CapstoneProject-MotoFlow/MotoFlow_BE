@@ -89,7 +89,7 @@ public class DiscrepancyController {
     @Operation(summary = "Ask Owner to take held damaged or wrong goods into stock (GVHD 20/11)",
             description = "Branch Manager of the receiving store or Owner. type DAMAGED (as the \"-M\" variant) or "
                     + "WRONG_ITEM (productId: the part they really are, optional). MSG309: more than is held and not "
-                    + "decided of that kind. Owner is notified; the case shows it as pendingRequest.")
+                    + "decided of that kind. Owner is notified; MSG314: that kind already has a request waiting. The case shows it in pendingRequests.")
     @PostMapping("/{id}/acceptance-requests")
     @PreAuthorize("hasAnyRole('BRANCH_MANAGER', 'OWNER')")
     public DiscrepancyCaseResponse requestAcceptance(@AuthenticationPrincipal AuthenticatedUser user,
