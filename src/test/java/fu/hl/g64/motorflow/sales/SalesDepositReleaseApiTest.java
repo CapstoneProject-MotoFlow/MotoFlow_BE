@@ -152,7 +152,12 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items[0].id").value((int) waiting))
                 .andExpect(jsonPath("$.items[0].depositRemaining").value(0))
                 .andExpect(jsonPath("$.items[0].depositExpiresOn").value("2026-10-16"));
-        list(staffToken).andExpect(status().isOk());
+        // Staff see no deposit and the filter is not applied for them.
+        assign(managerToken, "PICKING", waiting, staff).andExpect(status().isOk());
+        list(staffToken, "depositStatus", "EXPIRED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].depositStatus").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].depositRemaining").value(nullValue()));
     }
 
     @Test
