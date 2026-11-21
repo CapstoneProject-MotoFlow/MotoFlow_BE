@@ -13,6 +13,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.nullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -103,6 +105,24 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.lines[0].variant.sku").value("MA-PHANH-01-M"))
                 .andExpect(jsonPath("$.lines[0].variant.sellableQty").value(2))
                 .andExpect(jsonPath("$.lines[0].variant.retailPrice").value(90_000));
+        // Góp ý UI 21/11 item 20: the variant chosen on its own shows what can be sold, in the search and the preview,
+        // for the Branch Manager and for Owner choosing the store.
+        preview.put("lines", List.of(Map.of("productId", variant, "quantity", 1)));
+        mvc.perform(post("/api/v1/sales-orders/preview").header(HttpHeaders.AUTHORIZATION, managerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(preview)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].sellableQty").value(2));
+        preview.put("storeId", giaLam);
+        mvc.perform(post("/api/v1/sales-orders/preview").header(HttpHeaders.AUTHORIZATION, ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(preview)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].sellableQty").value(2));
+        mvc.perform(get("/api/v1/products").param("q", "MA-PHANH-01-M").header(HttpHeaders.AUTHORIZATION, managerToken))
+                .andExpect(jsonPath("$.items[0].availableQty").value(2));
+        mvc.perform(get("/api/v1/products").param("q", "MA-PHANH-01-M").param("storeId", String.valueOf(giaLam))
+                        .header(HttpHeaders.AUTHORIZATION, ownerToken))
+                .andExpect(jsonPath("$.items[0].availableQty").value(2));
+        // Without a store Owner sees no stock figure (null): the sales form must send the chosen store.
+        mvc.perform(get("/api/v1/products").param("q", "MA-PHANH-01-M").header(HttpHeaders.AUTHORIZATION, ownerToken))
+                .andExpect(jsonPath("$.items[0].availableQty").value(nullValue()));
     }
 
     @Test
