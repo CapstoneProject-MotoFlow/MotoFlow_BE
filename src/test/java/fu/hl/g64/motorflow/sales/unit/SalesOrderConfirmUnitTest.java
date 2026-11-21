@@ -209,7 +209,7 @@ class SalesOrderConfirmUnitTest extends SalesOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID12 A: only 1 oil sellable -> MSG171")
+    @DisplayName("UTCID12 B: only 1 oil sellable -> MSG171")
     void utc12() {
         sellable.put(OIL, 1);
 
@@ -277,9 +277,9 @@ class SalesOrderConfirmUnitTest extends SalesOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID20 A: Staff 7 of store 2 is not a seller -> MSG05")
+    @DisplayName("UTCID20 A: Staff 8 of store 2 is not a seller -> MSG05")
     void utc20() {
-        assertRefused(auth(7, Role.STAFF, 2L), asPicked(), HttpStatus.FORBIDDEN, "MSG05");
+        assertRefused(auth(8, Role.STAFF, 2L), asPicked(), HttpStatus.FORBIDDEN, "MSG05");
     }
 
     @Test

@@ -173,7 +173,7 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID14 A: wholesale 10%, at the threshold -> MSG162")
+    @DisplayName("UTCID14 B: wholesale 10%, at the threshold -> MSG162")
     void utc14() {
         assertRefused(wholesale("10", line(OIL, 1)), HttpStatus.BAD_REQUEST, "MSG162");
     }
@@ -215,7 +215,7 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID19 A: oil wanted 2, taken now 3 -> MSG305")
+    @DisplayName("UTCID19 B: oil wanted 2, taken now 3 -> MSG305")
     void utc19() {
         assertRefused(walkIn(null, new SalesOrderLineRequest(OIL, 2, 3, null)), HttpStatus.BAD_REQUEST, "MSG305");
     }
@@ -228,7 +228,7 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID21 A: no oil sellable and the customer does not wait -> MSG171")
+    @DisplayName("UTCID21 B: no oil sellable and the customer does not wait -> MSG171")
     void utc21() {
         sellable.put(OIL, 0);
 

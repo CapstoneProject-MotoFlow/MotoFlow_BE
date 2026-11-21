@@ -143,7 +143,7 @@ class GoodsReceiptRecordResultUnitTest extends GoodsReceiptUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID08 A: expiry before manufacture -> MSG137")
+    @DisplayName("UTCID08 B: expiry before manufacture -> MSG137")
     void utc08() {
         assertRefused(request(null, null, new InspectionResultRequest.Line(1L, null, 10, 0, 0, null, MADE,
                 LocalDate.of(2026, 8, 31))), HttpStatus.BAD_REQUEST, "MSG137");

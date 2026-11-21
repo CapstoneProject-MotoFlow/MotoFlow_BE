@@ -186,7 +186,7 @@ class OrderPaymentRecordUnitTest extends SettlementUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID16 A: only 1 oil sellable -> payment kept, completion blocked by MSG171")
+    @DisplayName("UTCID16 B: only 1 oil sellable -> payment kept, completion blocked by MSG171")
     void utc16() {
         sellable.put(OIL, 1);
 

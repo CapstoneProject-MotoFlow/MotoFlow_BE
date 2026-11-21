@@ -272,7 +272,7 @@ class CustomerDebtPaymentUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID15 A: 500,001, above the 500,000 owed -> MSG150")
+    @DisplayName("UTCID15 B: 500,001, above the 500,000 owed -> MSG150")
     void utc15() {
         assertRefused(manager, 20, cash(500_001, split(100, 300_000, 300_000), split(101, 200_000, 200_001)),
                 HttpStatus.BAD_REQUEST, "MSG150");

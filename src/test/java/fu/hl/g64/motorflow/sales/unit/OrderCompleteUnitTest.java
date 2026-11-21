@@ -140,7 +140,7 @@ class OrderCompleteUnitTest extends SettlementUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID11 A: only 1 oil sellable -> MSG171")
+    @DisplayName("UTCID11 B: only 1 oil sellable -> MSG171")
     void utc11() {
         collected(55, 250_000, true);
         sellable.put(OIL, 1);
@@ -149,7 +149,7 @@ class OrderCompleteUnitTest extends SettlementUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID12 A: 5% off (oil 2 x 95,000), threshold now 5% -> MSG162")
+    @DisplayName("UTCID12 B: 5% off, only oil 2 x 95,000 (no filter line), threshold now 5% -> MSG162")
     void utc12() {
         saved.clear();
         lines.clear();

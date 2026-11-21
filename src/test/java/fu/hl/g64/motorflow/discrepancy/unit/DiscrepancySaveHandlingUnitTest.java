@@ -322,7 +322,7 @@ class DiscrepancySaveHandlingUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID11 A: return 5, above the 4 held -> MSG35")
+    @DisplayName("UTCID11 B: return 5, above the 4 held -> MSG35")
     void utc11() {
         assertRefused(manager, request(line(50, 5, null)), HttpStatus.BAD_REQUEST, "MSG35");
     }
@@ -341,19 +341,19 @@ class DiscrepancySaveHandlingUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID13 A: replacement 7, above the limit 6 -> MSG35")
+    @DisplayName("UTCID13 B: replacement 7, above the limit 6 -> MSG35")
     void utc13() {
         assertRefused(manager, request(line(50, 0, 7)), HttpStatus.BAD_REQUEST, "MSG35");
     }
 
     @Test
-    @DisplayName("UTCID14 A: replacement 1, below the 2 short -> MSG193")
+    @DisplayName("UTCID14 B: replacement 1, below the 2 short -> MSG193")
     void utc14() {
         assertRefused(manager, request(line(50, 0, 1)), HttpStatus.BAD_REQUEST, "MSG193");
     }
 
     @Test
-    @DisplayName("UTCID15 A: 4 pads already on a replacement delivery, replacement 3 -> MSG193")
+    @DisplayName("UTCID15 B: 4 pads already on a replacement delivery, replacement 3 -> MSG193")
     void utc15() {
         progress.put(50L, new Progress(0, 0, 0, 0, 4, null, 0, 0));
 
@@ -361,7 +361,7 @@ class DiscrepancySaveHandlingUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID16 A: agreed 3/5, 2 pads went back, return lowered to 1 -> MSG134")
+    @DisplayName("UTCID16 B: agreed 3/5, 2 pads went back, return lowered to 1 -> MSG134")
     void utc16() {
         agreedBefore();
         progress.put(50L, new Progress(2, 0, 0, 0, 0, null, 0, 0));
