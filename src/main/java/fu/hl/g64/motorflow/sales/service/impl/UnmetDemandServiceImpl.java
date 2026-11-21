@@ -26,6 +26,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,9 +73,12 @@ public class UnmetDemandServiceImpl implements UnmetDemandService {
             SalesOrder order = (SalesOrder) row[1];
             Product part = (Product) row[2];
             boolean cancelled = order.getStatus() == SalesOrderStatus.CANCELLED;
-            int delivered = cancelled || line.getDeliveredQty() == null ? 0 : line.getDeliveredQty();
+            boolean waiting = order.getStatus() == SalesOrderStatus.AWAITING_STOCK;
+            int delivered = cancelled || waiting || line.getDeliveredQty() == null ? 0 : line.getDeliveredQty();
+            LocalDateTime at = cancelled ? order.getCancelledAt()
+                    : waiting ? order.getCreatedAt() : order.getCompletedAt();
             PickingGuide.Part held = stock.get(order.getStoreId()).get(line.getProductId());
-            return new UnmetDemandRow(cancelled ? order.getCancelledAt() : order.getCompletedAt(), order.getId(),
+            return new UnmetDemandRow(at, order.getId(),
                     order.getStatus(), order.getStoreId(), storeNames.get(order.getStoreId()), order.getCustomerId(),
                     order.getCustomerNameSnapshot(), order.getCustomerPhoneSnapshot(), part.getId(), part.getSku(),
                     part.getPartName(), part.getBaseUnit(), line.getRequestedQty(), delivered,

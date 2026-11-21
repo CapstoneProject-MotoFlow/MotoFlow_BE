@@ -317,7 +317,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     public SalesOrderDetail create(AuthenticatedUser seller, SalesOrderRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         Content content = content(seller, request, now);
-        List<Share> shares = shares(content.store().getId(), request.lines(), now.toLocalDate());
+        List<Share> shares = shares(content.store().getId(), content.customer().id() == null, request.lines(),
+                now.toLocalDate());
         SalesOrder order = orders.save(SalesOrder.create(content.store().getId(), content.customer(),
                 request.priceType(), content.rate(), text(request.note()), seller.id(), now));
         return openSplit(seller, order, shares, content, now);
@@ -372,7 +373,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         // UC-53 as for a new order: the prices in effect now (BR-18) and the discount threshold (BR-16). A refusal
         // rolls the whole transaction back, so the draft keeps what it had.
         Content content = rewriteDraft(seller, order, request, now);
-        List<Share> shares = shares(content.store().getId(), request.lines(), now.toLocalDate());
+        List<Share> shares = shares(content.store().getId(), content.customer().id() == null, request.lines(),
+                now.toLocalDate());
         order.submit(now);
         // GVHD 20/11: the draft becomes the order sold now (or the waiting order if nothing can be sold now).
         orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
@@ -392,9 +394,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
      * open orders, read under the lock of the parts' stock rows so two sellers take turns. The server works it out
      * again and does not trust the client's figures: sellNow = min(nowQty, sellable); with {@code waitForRest} the
      * rest of the requested quantity waits, without it the rest is declined. MSG171 when nothing at all is sold or
-     * waits.
+     * waits. Góp ý UI 21/11: a walk-in customer (no profile) cannot leave anything waiting, MSG332.
      */
-    private List<Share> shares(long storeId, List<SalesOrderLineRequest> lines, LocalDate today) {
+    private List<Share> shares(long storeId, boolean walkIn, List<SalesOrderLineRequest> lines, LocalDate today) {
         List<Long> ids = lines.stream().map(SalesOrderLineRequest::productId).sorted().toList();
         balances.findByStoreForUpdate(storeId, ids);
         Map<Long, PickingGuide.Part> stock = guide.parts(storeId, ids, today);
@@ -413,6 +415,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             int sellable = stock.get(line.productId()).sellableQty();
             int sellNow = Math.min(now, sellable);
             int waitQty = line.waits() ? line.quantity() - sellNow : 0;
+            if (walkIn && waitQty > 0) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG332", parts.get(line.productId()).getSku(),
+                        line.quantity(), sellable);
+            }
             shares.add(new Share(line, sellNow, waitQty, line.quantity() - sellNow - waitQty));
             if (sellNow < now) {
                 lacking.add("%s cần %d, còn %d".formatted(parts.get(line.productId()).getSku(), now, sellable));
@@ -765,7 +771,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, SalesOrderLine> byProduct = matchLines(lines, parts,
                 request.lines().stream().map(ConfirmSalesOrderRequest.Line::productId).toList());
         Map<Long, Integer> delivered = new HashMap<>();
-        Set<Long> waitForRest = new HashSet<>();
         for (ConfirmSalesOrderRequest.Line line : request.lines()) {
             SalesOrderLine target = byProduct.get(line.productId());
             // What already went to a waiting order is no longer on the line (GVHD 20/11).
@@ -775,9 +780,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                         most);
             }
             delivered.put(line.productId(), line.deliveredQty());
-            if (Boolean.TRUE.equals(line.waitForRest())) {
-                waitForRest.add(line.productId());
-            }
         }
         if (delivered.values().stream().allMatch(quantity -> quantity == 0)) {
             // BR-14: the reference total of the delivered goods must be greater than zero.
@@ -818,30 +820,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         order.confirm(seller.id(), now);
         orderLines.flush();
         int confirmedVersion = newVersion ? version + 1 : version;
-        // The waiting order of a first confirmation is not made again when the confirmation is redone.
-        Map<Long, Integer> waits = confirmed ? Map.of() : rest(lines, waitForRest);
-        Map<Long, Integer> requestedBefore = new HashMap<>();
-        lines.forEach(line -> requestedBefore.put(line.getProductId(), line.getRequestedQty()));
-        Long waitingId = waits.isEmpty() ? null : deferRest(seller, order, lines, waits, now);
-        // GVHD 20/11: what moved to the waiting order leaves the line, so it is unmet only there; the version saved
-        // below is the narrowed one.
-        List<SalesOrderLine> kept = new ArrayList<>(lines);
-        for (SalesOrderLine line : lines) {
-            if (!waits.containsKey(line.getProductId())) {
-                continue;
-            }
-            if (line.getDeliveredQty() == 0) {
-                orderLines.delete(line);
-                kept.remove(line);
-            } else {
-                line.narrowToDelivered();
-            }
-        }
-        orderLines.flush();
         if (newVersion) {
             auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(),
                     null, previous, SalesOrderHistory.snapshot(confirmedVersion, SalesOrderHistory.CAUSE_DELIVERY,
-                            order, kept), now));
+                            order, lines), now));
         }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("version", confirmedVersion);
@@ -851,56 +833,11 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("product_id", line.getProductId());
             row.put("delivered_qty", line.getDeliveredQty());
-            if (waits.containsKey(line.getProductId())) {
-                row.put(SalesOrderHistory.REQUESTED_BEFORE, requestedBefore.get(line.getProductId()));
-            }
             return row;
         }).toList());
-        if (waitingId != null) {
-            data.put(SalesOrderHistory.WAITING_ORDER, waitingId);
-        }
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.CONFIRMED, seller.id(), null,
                 null, data, now));
-        SalesOrderDetail detail = detail(seller, order);
-        return waitingId == null ? detail
-                : detail.withSplit(new SalesOrderDetail.Split(id, waitingId, null, List.of()));
-    }
-
-    /** [product id → units not delivered] of the lines the customer waits for the rest of. */
-    private static Map<Long, Integer> rest(List<SalesOrderLine> lines, Set<Long> waitFor) {
-        Map<Long, Integer> rest = new LinkedHashMap<>();
-        lines.stream().filter(line -> waitFor.contains(line.getProductId())
-                        && line.getRequestedQty() > line.getDeliveredQty())
-                .forEach(line -> rest.put(line.getProductId(), line.getRequestedQty() - line.getDeliveredQty()));
-        return rest;
-    }
-
-    /**
-     * GVHD 20/11 (UC-58, "mai chị đến lấy nốt"): what was not delivered of the lines the customer will wait for goes
-     * to one new waiting order, at the prices in effect. The caller then narrows the original lines to what was
-     * delivered.
-     */
-    private Long deferRest(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
-                           Map<Long, Integer> waits, LocalDateTime now) {
-        List<SalesOrderLine> rest = lines.stream().filter(line -> waits.containsKey(line.getProductId())).toList();
-        Map<Long, Product> parts = byId(products.findAllById(rest.stream().map(SalesOrderLine::getProductId)
-                .toList()), Product::getId);
-        Map<Long, Long> prices = requireLinePrices(rest, parts, now);
-        SalesOrder waiting = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
-                order.getDiscountRate(), order.getNote(), seller.id(), now));
-        waiting.waitForStock();
-        List<SalesOrderLine> waitingLines = new ArrayList<>();
-        for (int i = 0; i < rest.size(); i++) {
-            SalesOrderLine line = rest.get(i);
-            int quantity = waits.get(line.getProductId());
-            long reference = prices.get(line.getProductId());
-            waitingLines.add(SalesOrderLine.create(waiting.getId(), i + 1, line.getProductId(), quantity, reference,
-                    OrderPricing.actualUnitPrice(reference, order.getDiscountRate())));
-        }
-        orderLines.saveAll(waitingLines);
-        orderLines.flush();
-        opened(seller, waiting, waitingLines, now, order.getId());
-        return waiting.getId();
+        return detail(seller, order);
     }
 
     // GVHD 20/11
