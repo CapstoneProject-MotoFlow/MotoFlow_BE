@@ -61,19 +61,25 @@ public class SalesDepositServiceImpl implements SalesDepositService {
         if (order.getCustomerId() == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG320");
         }
-        requireNotExpired(order);
+        OrderCollections.Money money = collections.of(orderId);
+        OrderDeposits.State held = deposits.of(order, money);
+        // A rejected deposit leaves the date behind with nothing verified. That date is not a deposit,
+        // so it neither blocks a new one (MSG321) nor freezes the date (MSG323).
+        boolean fresh = held.total() == 0;
+        if (!fresh) {
+            requireNotExpired(order);
+        }
         LocalDate today = LocalDate.now(clock);
         LocalDate expiry = request.depositExpiresOn();
-        if (order.getDepositExpiresOn() == null) {
+        if (fresh || order.getDepositExpiresOn() == null) {
             if (expiry == null || !expiry.isAfter(today)) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG322");
             }
         } else if (expiry != null && !expiry.equals(order.getDepositExpiresOn())) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG323", order.getDepositExpiresOn().format(DAY));
         }
-        OrderCollections.Money money = collections.of(orderId);
         // BR-45: the same deposit sent twice finds more already recorded.
-        if (request.expectedDepositRecorded() != deposits.of(order, money).recorded()) {
+        if (request.expectedDepositRecorded() != held.recorded()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG194");
         }
         Long tendered = request.tenderedAmount();
@@ -86,7 +92,7 @@ public class SalesDepositServiceImpl implements SalesDepositService {
         }
         references.requireUnused(reference);
         LocalDateTime now = LocalDateTime.now(clock);
-        if (order.getDepositExpiresOn() == null) {
+        if (fresh || order.getDepositExpiresOn() == null) {
             order.setDepositExpiry(expiry, now);
         }
         Payment payment = references.save(Payment.deposit(orderId, request.amount(), tendered,

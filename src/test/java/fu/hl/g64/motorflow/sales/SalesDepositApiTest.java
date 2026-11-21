@@ -102,8 +102,8 @@ class SalesDepositApiTest extends SalesOrderTestData {
         long now = createOrder(pad, 1);
         deposit(managerToken, now, 500_000, "CASH", null, true, "2026-10-16", 0)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG319"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment WHERE payment_type = 'DEPOSIT'", Long.class))
-                .isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment WHERE sales_order_id = ? "
+                + "AND payment_type = 'DEPOSIT'", Long.class, now)).isZero();
     }
 
     @Test
@@ -120,6 +120,12 @@ class SalesDepositApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.actions.canChangeDepositExpiry").value(false));
         expiry(managerToken, rejectedOrder, "2026-10-20")
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG324"));
+        // Nothing was verified, so the next deposit may choose its own date.
+        deposit(managerToken, rejectedOrder, 200_000, "CASH", null, true, "2026-10-20", 0)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.deposit.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.order.deposit.expiresOn").value("2026-10-20"))
+                .andExpect(jsonPath("$.order.deposit.total").value(200_000));
 
         long order = waitingOrder(customer);
         expiry(managerToken, order, "2026-10-20")
@@ -159,6 +165,27 @@ class SalesDepositApiTest extends SalesOrderTestData {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG321"));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_deposit_expiry_change WHERE sales_order_id = ?",
                 Long.class, order)).isEqualTo(2);
+    }
+
+    @Test
+    void aRejectedDepositDoesNotExpireTheOrder() throws Exception {
+        long order = waitingOrder(customer);
+        String body = deposit(managerToken, order, 500_000, "CASH", null, false, "2026-10-14", 0)
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long paymentId = ((Number) JsonPath.read(body, "$.paymentId")).longValue();
+        send(managerToken, "/api/v1/sales-orders/" + order + "/payments/" + paymentId + "/reject",
+                Map.of("reason", "Không thấy tiền về")).andExpect(status().isOk());
+
+        // 15/10 is after the date the rejected deposit left behind. There is still no deposit.
+        clock.advance(Duration.ofDays(2));
+        signInAll();
+        detail(managerToken, order)
+                .andExpect(jsonPath("$.deposit.status").value("NONE"))
+                .andExpect(jsonPath("$.actions.canRecordDeposit").value(true));
+        deposit(managerToken, order, 300_000, "CASH", null, true, "2026-10-20", 0)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.order.deposit.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.order.deposit.expiresOn").value("2026-10-20"));
     }
 
     /** A new order that takes none of 3 pads now and waits for them. */

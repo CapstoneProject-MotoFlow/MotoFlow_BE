@@ -1344,8 +1344,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .filter(customer -> customer.getCreditStatus() == CreditStatus.ELIGIBLE).isPresent();
         // A draft is only edited, submitted or deleted by its creator (PM 13/11).
         boolean waiting = order.isWaitingForStock();
+        // A date left by a rejected deposit (nothing verified) does not count as expired.
         boolean depositHolds = waiting && deposit != null && deposit.status() != DepositStatus.EXPIRED
-                && !deposits.expired(order);
+                && (deposit.total() == 0 || !deposits.expired(order));
         boolean storeManager = user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
         Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false, false,
                 false, false)

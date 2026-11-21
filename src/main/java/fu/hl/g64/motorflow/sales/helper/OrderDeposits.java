@@ -65,7 +65,10 @@ public class OrderDeposits {
         return new State(total, unverified, applied, refunded, remaining, expiresOn, status, changes);
     }
 
-    /** True when today is after the deposit's last day. */
+    /**
+     * True when today is after the date stored on the order. A rejected deposit can leave that date with no verified
+     * money; callers treat that as no deposit, not as expired.
+     */
     public boolean expired(SalesOrder order) {
         return order.getDepositExpiresOn() != null && LocalDate.now(clock).isAfter(order.getDepositExpiresOn());
     }
