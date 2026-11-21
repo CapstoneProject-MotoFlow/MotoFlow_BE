@@ -108,6 +108,19 @@ class SalesDepositApiTest extends SalesOrderTestData {
 
     @Test
     void theBranchManagerMovesTheExpiryDateUntilItHasPassed() throws Exception {
+        long rejectedOrder = waitingOrder(customer);
+        String rejected = deposit(managerToken, rejectedOrder, 500_000, "CASH", null, false, "2026-10-16", 0)
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long rejectedId = ((Number) JsonPath.read(rejected, "$.paymentId")).longValue();
+        send(managerToken, "/api/v1/sales-orders/" + rejectedOrder + "/payments/" + rejectedId + "/reject",
+                Map.of("reason", "Không thấy tiền về")).andExpect(status().isOk());
+        detail(managerToken, rejectedOrder)
+                .andExpect(jsonPath("$.deposit.status").value("NONE"))
+                .andExpect(jsonPath("$.deposit.expiresOn").value("2026-10-16"))
+                .andExpect(jsonPath("$.actions.canChangeDepositExpiry").value(false));
+        expiry(managerToken, rejectedOrder, "2026-10-20")
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG324"));
+
         long order = waitingOrder(customer);
         expiry(managerToken, order, "2026-10-20")
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG324"));

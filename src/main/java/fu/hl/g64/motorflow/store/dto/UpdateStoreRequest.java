@@ -8,7 +8,8 @@ import jakarta.validation.constraints.Size;
 
 /**
  * UC-06. The store id never changes; the name stays unique. {@code central} can only be switched on while the chain
- * has no central warehouse. {@code taxCode} (PM 21/11): empty or null clears it.
+ * has no central warehouse. {@code taxCode} (PM 21/11): null leaves the current code unchanged, so a form
+ * that does not send it cannot wipe the code; empty clears it.
  */
 public record UpdateStoreRequest(
         @NotBlank(message = "Vui lòng nhập tên cửa hàng.")
