@@ -16,7 +16,8 @@ public record TransferReceiptResponse(long id, long transferOrderId, ReceiptType
                                       GoodsReceiptNoteStatus status, String deliveryDocumentNo,
                                       LocalDate deliveryDocumentDate, String delivererName, String vehiclePlateNo,
                                       LocalDateTime arrivedAt, Long createdBy, String createdByName,
-                                      Long recordedBy, LocalDateTime submittedAt, String inspectionNote, String recountReason,
+                                      Long recordedBy, String recordedByName, LocalDateTime submittedAt,
+                                      String inspectionNote, String recountReason,
                                       Long confirmedBy, LocalDateTime confirmedAt, List<Line> lines,
                                       List<AttachmentResponse> documents) {
 

@@ -518,10 +518,13 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                 receipt.getId(), List.of(RECEIPT_CREATED)).stream().findFirst().map(AuditLog::getActorId).orElse(null);
         String createdByName = createdBy == null ? null
                 : users.findById(createdBy).map(UserAccount::getFullName).orElse(null);
+        Long recordedBy = receipt.getRecordedBy();
+        String recordedByName = recordedBy == null ? null
+                : users.findById(recordedBy).map(UserAccount::getFullName).orElse(null);
         return new TransferReceiptResponse(receipt.getId(), receipt.getTransferOrderId(), receipt.getReceiptType(),
                 receipt.getStatus(), receipt.getDeliveryDocumentNo(), receipt.getDeliveryDocumentDate(),
                 delivererName, vehiclePlateNo, receipt.getArrivedAt(), createdBy,
-                createdByName, receipt.getRecordedBy(), receipt.getSubmittedAt(), receipt.getInspectionNote(),
+                createdByName, recordedBy, recordedByName, receipt.getSubmittedAt(), receipt.getInspectionNote(),
                 receipt.getRecountReason(), receipt.getConfirmedBy(), receipt.getConfirmedAt(),
                 lines.stream().map(line -> {
                     Product part = parts.get(line.getProductId());

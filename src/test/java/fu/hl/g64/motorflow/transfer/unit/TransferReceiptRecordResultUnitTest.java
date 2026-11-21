@@ -50,6 +50,7 @@ import java.util.Optional;
 
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.CLOCK;
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.NOW;
+import static fu.hl.g64.motorflow.support.unit.UnitFixtures.account;
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.assertBusiness;
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.auth;
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.product;
@@ -132,6 +133,7 @@ class TransferReceiptRecordResultUnitTest {
         when(reconciliation.pendingClaims(anyLong())).thenReturn(Map.of());
         when(auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(any(), any(), any()))
                 .thenReturn(List.of());
+        when(users.findById(anyLong())).thenAnswer(inv -> Optional.of(account(inv.getArgument(0), Role.STAFF, 2L)));
         when(attachments.list(any(), anyLong())).thenReturn(List.of());
         // Only S1 holds the receiving task of receipts 10 and 20.
         doThrow(new BusinessException(HttpStatus.FORBIDDEN, "MSG05"))
@@ -156,6 +158,8 @@ class TransferReceiptRecordResultUnitTest {
 
     private void assertSubmitted(TransferReceiptResponse result, int passed, int damaged, int excess) {
         assertThat(result.status()).isEqualTo(GoodsReceiptNoteStatus.AWAITING_CONFIRMATION);
+        assertThat(result.recordedBy()).isEqualTo(staffS1.id());
+        assertThat(result.recordedByName()).isEqualTo("User " + staffS1.id());
         assertThat(result.lines()).singleElement().satisfies(line -> {
             assertThat(line.passedQty()).isEqualTo(passed);
             assertThat(line.damagedQty()).isEqualTo(damaged);
