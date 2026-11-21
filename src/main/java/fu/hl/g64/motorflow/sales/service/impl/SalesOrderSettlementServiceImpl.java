@@ -286,7 +286,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                     refundId = saved.getId();
                     depositLeft = 0;
                 }
-            } else if (depositLeft > 0 && deposit.status() == DepositStatus.EXPIRED && !storeManager(seller, order)) {
+            } else if (deposit != null && depositLeft > 0 && deposit.status() == DepositStatus.EXPIRED
+                    && !storeManager(seller, order)) {
                 // Forfeiting an expired deposit is the Branch Manager's /forfeit-deposit, not an Owner cancel.
                 throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
             }
