@@ -473,8 +473,13 @@ public class DocumentServiceImpl implements DocumentService {
         // BR-49: paid is verified payments less refunds, each with its applied corrections. The deposit is separate.
         long deposit = depositApplications.sumAppliedTo(row.id());
         long paid = payments.sumVerifiedNet(row.id());
-        Long credit = documents.row("SELECT original_amount FROM receivable WHERE sales_order_id = :id",
-                Map.of("id", row.id())).map(debt -> lng(debt, "original_amount")).orElse(null);
+        // BR-49: the debt counts with its applied corrections too.
+        Long credit = documents.row("""
+                SELECT r.original_amount + COALESCE((SELECT SUM(l.amount_change) FROM adjustment_amount_line l
+                         JOIN adjustment_request q ON q.id = l.adjustment_request_id
+                        WHERE q.status = 'APPLIED' AND l.receivable_id = r.id), 0) AS credit
+                  FROM receivable r WHERE r.sales_order_id = :id""",
+                Map.of("id", row.id())).map(debt -> lng(debt, "credit")).orElse(null);
         // What is still unpaid after the deposit, the cash already taken and anything put on credit.
         long amountDue = total - deposit - paid - (credit == null ? 0 : credit);
         Totals totals = new Totals(reference, reference - total, (BigDecimal) order.get("discount_rate"), total,
