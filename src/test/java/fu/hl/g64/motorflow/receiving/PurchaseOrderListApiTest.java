@@ -199,6 +199,50 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
     }
 
+    /** GVHD 20/11 (PR 6): the discrepancy tab sums the open cases of each PO and sorts by its latest delivery. */
+    @Test
+    void theDiscrepancyTabCountsEachPartOnceAndSortsByTheLatestDelivery() throws Exception {
+        long delivery = delivery(fullyReceived, "PX-201", LocalDateTime.of(2026, 9, 5, 9, 0), "CONFIRMED", staff,
+                manager);
+        result(delivery, pad, 10, 9, 0, 1, 0, "NOT_APPLICABLE");
+        discrepancy(delivery, pad, 0, 1, LocalDateTime.of(2026, 9, 5, 10, 0), null);
+        // The receiving order: pads damaged on the first delivery and on the second, a wrong lamp; the oil is closed.
+        discrepancy(confirmedDelivery, lamp, 1, 0, LocalDateTime.of(2026, 10, 12, 16, 0), null);
+        discrepancy(uninspectedDelivery, pad, 0, 1, LocalDateTime.of(2026, 10, 13, 8, 0), null);
+
+        list(ownerToken, "view", "DISCREPANCY_OPEN")
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, fullyReceived))))
+                .andExpect(jsonPath("$.items[0].discrepancy.discrepancyProductCount").value(2))
+                .andExpect(jsonPath("$.items[0].discrepancy.openCaseCount").value(3))
+                .andExpect(jsonPath("$.items[0].discrepancy.lastDeliveredAt").value("2026-10-13T07:30:00"))
+                .andExpect(jsonPath("$.items[0].discrepancy.shortQty").value(0))
+                .andExpect(jsonPath("$.items[0].discrepancy.wrongItemQty").value(1))
+                .andExpect(jsonPath("$.items[0].discrepancy.damagedQty").value(3))
+                .andExpect(jsonPath("$.items[1].discrepancy.discrepancyProductCount").value(1))
+                .andExpect(jsonPath("$.items[1].discrepancy.lastDeliveredAt").value("2026-09-05T09:00:00"));
+        list(ownerToken, "view", "DISCREPANCY_OPEN", "deliveredFrom", "2026-10-01")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
+        list(ownerToken, "view", "DISCREPANCY_OPEN", "deliveredTo", "2026-09-30")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
+        list(ownerToken, "view", "DISCREPANCY_OPEN", "deliveredFrom", "2026-09-05", "deliveredTo", "2026-09-05")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
+        list(ownerToken, "view", "DISCREPANCY_OPEN", "supplierId", String.valueOf(yamaha))
+                .andExpect(jsonPath("$.items", hasSize(0)));
+        list(ownerToken, "view", "DISCREPANCY_OPEN", "size", "1", "page", "1")
+                .andExpect(jsonPath("$.totalItems").value(2))
+                .andExpect(jsonPath("$.items[*].id", contains(ids(fullyReceived))));
+        // A page far past the end is empty, not an overflowed offset.
+        list(ownerToken, "view", "DISCREPANCY_OPEN", "size", "100", "page", String.valueOf(Integer.MAX_VALUE))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(0)));
+        list(managerToken, "view", "DISCREPANCY_OPEN")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, fullyReceived))));
+        list(otherManagerToken, "view", "DISCREPANCY_OPEN").andExpect(jsonPath("$.items", hasSize(0)));
+        // The other tabs carry no discrepancy figures.
+        list(ownerToken).andExpect(jsonPath("$.items[0].discrepancy").doesNotExist());
+    }
+
     @Test
     void searchFindsAnOrderByItsNumberOrItsSupplier() throws Exception {
         list(ownerToken, "q", "#" + receivingOrder)

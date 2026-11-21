@@ -8,6 +8,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse.Event;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
@@ -436,6 +437,35 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 ofOrder.select(receipt.get("id"))
                         .where(cb.equal(receipt.get("purchaseOrderId"), search.purchaseOrderId()));
                 where.add(root.get("goodsReceiptNoteId").in(ofOrder));
+            }
+            if (search.supplierId() != null || search.deliveredFrom() != null || search.deliveredTo() != null) {
+                Subquery<Long> delivered = query.subquery(Long.class);
+                Root<GoodsReceiptNote> receipt = delivered.from(GoodsReceiptNote.class);
+                List<Predicate> onReceipt = new ArrayList<>();
+                if (search.supplierId() != null) {
+                    Subquery<Long> ofSupplier = query.subquery(Long.class);
+                    Root<PurchaseOrder> order = ofSupplier.from(PurchaseOrder.class);
+                    ofSupplier.select(order.get("id")).where(cb.equal(order.get("supplierId"), search.supplierId()));
+                    onReceipt.add(receipt.get("purchaseOrderId").in(ofSupplier));
+                }
+                if (search.deliveredFrom() != null) {
+                    onReceipt.add(cb.greaterThanOrEqualTo(receipt.get("arrivedAt"),
+                            search.deliveredFrom().atStartOfDay()));
+                }
+                if (search.deliveredTo() != null) {
+                    onReceipt.add(cb.lessThan(receipt.get("arrivedAt"), search.deliveredTo().plusDays(1)
+                            .atStartOfDay()));
+                }
+                delivered.select(receipt.get("id")).where(onReceipt.toArray(Predicate[]::new));
+                where.add(root.get("goodsReceiptNoteId").in(delivered));
+            }
+            if (StringUtils.hasText(search.q())) {
+                String like = SearchText.likePattern(search.q());
+                Subquery<Long> parts = query.subquery(Long.class);
+                Root<Product> part = parts.from(Product.class);
+                parts.select(part.get("id")).where(cb.or(SearchText.like(cb, part.get("sku"), like),
+                        SearchText.like(cb, part.get("partName"), like)));
+                where.add(root.get("productId").in(parts));
             }
             if (storeId != null) {
                 Subquery<Long> ordersOfStore = query.subquery(Long.class);

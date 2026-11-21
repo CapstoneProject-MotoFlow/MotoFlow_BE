@@ -79,6 +79,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -139,10 +140,61 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             to = to != null ? to : today;
             from = from != null ? from : to.minusDays(DEFAULT_DAYS - 1);
         }
-        Page<PurchaseOrder> found = orders.findAll(matching(search.q(), storeId, search.supplierId(), view, from, to),
-                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
-                        Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
+        Specification<PurchaseOrder> spec = matching(search.q(), storeId, search.supplierId(), view, from, to);
+        if (view == PurchaseOrderView.DISCREPANCY_OPEN) {
+            return discrepancyTab(user, spec, search, page, size, today);
+        }
+        Page<PurchaseOrder> found = orders.findAll(spec, PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100),
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
         return PageResponse.of(found, summaries(user, found.getContent(), today));
+    }
+
+    /**
+     * GVHD 20/11 (PR 6): the DISCREPANCY_OPEN tab, POs with an open case (as {@code openCaseOf}), filtered on the day
+     * of their latest delivery and sorted by it, newest first. The tab only holds what is still being settled, so it
+     * is sorted in memory.
+     */
+    private PageResponse<PurchaseOrderSummary> discrepancyTab(AuthenticatedUser user, Specification<PurchaseOrder> spec,
+                                                              PurchaseOrderSearch search, int page, int size,
+                                                              LocalDate today) {
+        List<PurchaseOrder> all = orders.findAll(spec);
+        Map<Long, LocalDateTime> lastArrival = all.isEmpty() ? Map.of()
+                : receipts.lastArrivalByPurchaseOrder(all.stream().map(PurchaseOrder::getId).toList()).stream()
+                .collect(Collectors.toMap(row -> (Long) row[0], row -> (LocalDateTime) row[1]));
+        LocalDateTime from = search.deliveredFrom() == null ? null : search.deliveredFrom().atStartOfDay();
+        LocalDateTime to = search.deliveredTo() == null ? null : search.deliveredTo().plusDays(1).atStartOfDay();
+        Comparator<PurchaseOrder> newest = Comparator.comparing(
+                (PurchaseOrder order) -> lastArrival.get(order.getId()), Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(PurchaseOrder::getId, Comparator.reverseOrder());
+        List<PurchaseOrder> rows = all.stream().filter(order -> {
+            LocalDateTime arrived = lastArrival.get(order.getId());
+            return (from == null || (arrived != null && !arrived.isBefore(from)))
+                    && (to == null || (arrived != null && arrived.isBefore(to)));
+        }).sorted(newest).toList();
+        int pageSize = Math.clamp(size, 1, 100);
+        long first = (long) Math.max(page, 0) * pageSize;
+        List<PurchaseOrder> slice = first >= rows.size() ? List.of()
+                : rows.subList((int) first, (int) Math.min(first + pageSize, rows.size()));
+        Map<Long, Object[]> figures = slice.isEmpty() ? Map.of()
+                : discrepancies.summarizeOpenByPurchaseOrder(slice.stream().map(PurchaseOrder::getId).toList())
+                .stream().collect(Collectors.toMap(row -> (Long) row[0], Function.identity()));
+        List<PurchaseOrderSummary> summaries = summaries(user, slice, today).stream().map(summary -> {
+            Object[] row = figures.get(summary.id());
+            return withDiscrepancy(summary, new PurchaseOrderSummary.Discrepancy(intOf(row, 1), intOf(row, 2),
+                    lastArrival.get(summary.id()), intOf(row, 3), intOf(row, 4), intOf(row, 5)));
+        }).toList();
+        return new PageResponse<>(summaries, rows.size(), Math.max(page, 0), pageSize);
+    }
+
+    private static int intOf(Object[] row, int index) {
+        return row == null || row[index] == null ? 0 : ((Number) row[index]).intValue();
+    }
+
+    private static PurchaseOrderSummary withDiscrepancy(PurchaseOrderSummary s,
+                                                        PurchaseOrderSummary.Discrepancy discrepancy) {
+        return new PurchaseOrderSummary(s.id(), s.status(), s.supplierId(), s.supplierCode(), s.supplierName(),
+                s.storeId(), s.storeName(), s.createdAt(), s.expectedArrival(), s.overdue(), s.lineCount(),
+                s.orderedValue(), s.openDiscrepancies(), discrepancy);
     }
 
     // UC-41
@@ -423,7 +475,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                     storeNames.get(order.getStoreId()), order.getCreatedAt(), order.getExpectedArrival(),
                     overdue(order, today), total == null ? 0 : (Long) total[1],
                     owner ? (total == null ? 0L : ((Number) total[2]).longValue()) : null,
-                    openCases.getOrDefault(order.getId(), 0L));
+                    openCases.getOrDefault(order.getId(), 0L), null);
         }).toList();
     }
 
