@@ -1347,7 +1347,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         // A date left by a rejected deposit (nothing recorded) does not count as expired.
         boolean depositHolds = waiting && deposit != null && deposit.status() != DepositStatus.EXPIRED
                 && (deposit.recorded() == 0 || !deposits.expired(order));
-        boolean storeManager = user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
+        // Owner, or the Branch Manager of this store: the same people who record a deposit.
+        boolean storeManager = user.role() == Role.OWNER
+                || (user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId()));
         Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false, false,
                 false, false)
                 : new Actions(seller && unfinished,
