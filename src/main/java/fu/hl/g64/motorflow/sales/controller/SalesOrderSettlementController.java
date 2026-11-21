@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.sales.dto.CancelSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.CompleteSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderCreditRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderPaymentRequest;
+import fu.hl.g64.motorflow.sales.dto.OrderSplitPaymentRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderRefundRequest;
 import fu.hl.g64.motorflow.sales.dto.PaymentRejectionRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
@@ -39,6 +40,15 @@ public class SalesOrderSettlementController {
     public SettlementResult recordPayment(@AuthenticationPrincipal AuthenticatedUser seller, @PathVariable long id,
                                           @Valid @RequestBody OrderPaymentRequest request) {
         return settlement.recordPayment(seller, id, request);
+    }
+
+    @Operation(summary = "Record the cash and the bank transfer of one collection together, both verified; if the "
+            + "order is then paid in full it completes (UC-60, góp ý UI 21/11)")
+    @PostMapping("/payments/split")
+    public SettlementResult recordSplitPayment(@AuthenticationPrincipal AuthenticatedUser seller,
+                                               @PathVariable long id,
+                                               @Valid @RequestBody OrderSplitPaymentRequest request) {
+        return settlement.recordSplitPayment(seller, id, request);
     }
 
     @Operation(summary = "Give money back before completion, at most what the order holds (UC-60, BR-48)")

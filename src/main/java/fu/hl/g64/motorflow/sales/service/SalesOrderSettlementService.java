@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.sales.dto.CancelSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.CompleteSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderCreditRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderPaymentRequest;
+import fu.hl.g64.motorflow.sales.dto.OrderSplitPaymentRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderRefundRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SettlementResult;
@@ -29,6 +30,13 @@ public interface SalesOrderSettlementService {
      * transfer without reference, MSG151 a reference already recorded (BR-45).
      */
     SettlementResult recordPayment(AuthenticatedUser seller, long orderId, OrderPaymentRequest request);
+
+    /**
+     * Góp ý UI 21/11: records the cash and the bank transfer of one collection together, both verified, in one
+     * transaction (nothing is recorded if either is refused). If the order is then exactly paid, it completes as
+     * {@link #recordPayment} does. The result's {@code paymentId} is the transfer, or the cash if there is no transfer.
+     */
+    SettlementResult recordSplitPayment(AuthenticatedUser seller, long orderId, OrderSplitPaymentRequest request);
 
     /**
      * UC-60 Step 7_Net collection exceeds the total: gives money back before completion, at most what the order holds

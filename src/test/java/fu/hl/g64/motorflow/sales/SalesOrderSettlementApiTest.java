@@ -444,6 +444,53 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
     // ---- helpers -------------------------------------------------------------------------------------------------
 
     /** An order picked in full by Staff and confirmed by the Branch Manager, version 1. */
+    @Test
+    void cashAndTransferAreRecordedTogetherAndVerified() throws Exception {
+        // Góp ý UI 21/11: one collection, split into cash and bank transfer.
+        long order = confirmedOrder(pad, 2, oil, 1);   // 285,000 đ
+        String path = "/api/v1/sales-orders/" + order + "/payments/split";
+        send(managerToken, path, Map.of("expectedPayable", 285_000))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG333"));
+        send(managerToken, path, Map.of("cashAmount", 200_000, "transferAmount", 100_000, "transactionReference",
+                "FT1", "expectedPayable", 285_000))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG181"));
+        send(managerToken, path, Map.of("cashAmount", 100_000, "transferAmount", 85_000, "expectedPayable", 285_000))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG154"));
+        send(managerToken, path, Map.of("cashAmount", 100_000, "tenderedAmount", 50_000, "expectedPayable", 285_000))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG182"));
+        send(managerToken, path, Map.of("transferAmount", 85_000, "tenderedAmount", 100_000, "transactionReference",
+                "FT1", "expectedPayable", 285_000))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG182"));
+        // BR-45: a reference already recorded refuses the whole collection, so the cash is not recorded either.
+        pay(managerToken, confirmedOrder(oil, 1), 85_000, null, "BANK_TRANSFER", "FT-DUP", true)
+                .andExpect(status().isOk());
+        send(managerToken, path, Map.of("cashAmount", 100_000, "transferAmount", 85_000, "transactionReference",
+                "FT-DUP", "expectedPayable", 285_000)).andExpect(status().is4xxClientError());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment WHERE sales_order_id = ?", Integer.class, order))
+                .isZero();
+
+        // Cash only, with change.
+        send(managerToken, path, Map.of("cashAmount", 100_000, "tenderedAmount", 200_000, "expectedPayable", 285_000))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.completed").value(false))
+                .andExpect(jsonPath("$.order.money.netCollected").value(100_000))
+                .andExpect(jsonPath("$.order.money.payments[0].changeGiven").value(100_000))
+                .andExpect(jsonPath("$.order.money.payments[0].status").value("VERIFIED"));
+        send(managerToken, path, Map.of("cashAmount", 100_000, "expectedPayable", 285_000))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG194"));
+        // Both at once pay the rest and complete the order.
+        send(managerToken, path, Map.of("cashAmount", 85_000, "transferAmount", 100_000, "transactionReference",
+                " FT26101300009 ", "expectedPayable", 185_000))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.completed").value(true))
+                .andExpect(jsonPath("$.order.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.order.money.netCollected").value(285_000));
+        assertThat(jdbc.queryForList("SELECT payment_method || ':' || amount || ':' || status || ':' "
+                + "|| coalesce(transaction_reference, '') FROM payment WHERE sales_order_id = ? ORDER BY id",
+                String.class, order)).containsExactly("CASH:100000:VERIFIED:", "CASH:85000:VERIFIED:",
+                "BANK_TRANSFER:100000:VERIFIED:FT26101300009");
+    }
+
     private long confirmedOrder(long... productAndQuantity) throws Exception {
         long order = createOrder(productAndQuantity);
         pickAndConfirm(order, productAndQuantity);

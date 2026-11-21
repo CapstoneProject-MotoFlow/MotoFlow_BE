@@ -33,6 +33,7 @@ import fu.hl.g64.motorflow.sales.dto.CancelSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.CompleteSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderCreditRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderPaymentRequest;
+import fu.hl.g64.motorflow.sales.dto.OrderSplitPaymentRequest;
 import fu.hl.g64.motorflow.sales.dto.OrderRefundRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SettlementResult;
@@ -136,6 +137,54 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                 attachments.attach(OwnerType.PAYMENT, payment.getId(), request.evidence(), seller.id());
             }
             return payment.getId();
+        });
+        return settle(seller, orderId, Objects.requireNonNull(paymentId));
+    }
+
+    // UC-60, góp ý UI 21/11
+    @Override
+    public SettlementResult recordSplitPayment(AuthenticatedUser seller, long orderId,
+                                               OrderSplitPaymentRequest request) {
+        Long paymentId = transactions.execute(status -> {
+            SalesOrder order = lockForSeller(seller, orderId);
+            requireNotWaiting(order);
+            requireConfirmed(order);
+            long total = total(orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId));
+            long payable = collections.of(orderId).payable(total);
+            if (payable == 0) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG180");
+            }
+            if (request.expectedPayable() != payable) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG194");
+            }
+            long cash = request.cash();
+            long transfer = request.transfer();
+            if (cash + transfer == 0) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG333");
+            }
+            if (cash + transfer > payable) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG181", money(payable));
+            }
+            Long tendered = request.tenderedAmount();
+            if (tendered != null && (cash == 0 || tendered < cash)) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG182");
+            }
+            String reference = transfer > 0
+                    ? reference(PaymentMethod.BANK_TRANSFER, request.transactionReference()) : null;
+            LocalDateTime now = LocalDateTime.now(clock);
+            Payment last = null;
+            if (cash > 0) {
+                last = references.save(Payment.orderPayment(orderId, cash, tendered, PaymentMethod.CASH, null, true,
+                        seller.id(), now));
+            }
+            if (transfer > 0) {
+                last = references.save(Payment.orderPayment(orderId, transfer, null, PaymentMethod.BANK_TRANSFER,
+                        reference, true, seller.id(), now));
+            }
+            if (request.evidence() != null && !request.evidence().isEmpty()) {
+                attachments.attach(OwnerType.PAYMENT, last.getId(), request.evidence(), seller.id());
+            }
+            return last.getId();
         });
         return settle(seller, orderId, Objects.requireNonNull(paymentId));
     }
