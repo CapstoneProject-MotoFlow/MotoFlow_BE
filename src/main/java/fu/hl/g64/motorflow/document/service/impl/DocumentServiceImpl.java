@@ -474,10 +474,13 @@ public class DocumentServiceImpl implements DocumentService {
                    AND payment_type IN ('ORDER_PAYMENT', 'REFUND')""", Map.of("id", row.id()))
                 .orElseThrow();
         long deposit = lng(money, "deposit");
+        long paid = lng(money, "paid");
         Long credit = documents.row("SELECT original_amount FROM receivable WHERE sales_order_id = :id",
                 Map.of("id", row.id())).map(debt -> lng(debt, "original_amount")).orElse(null);
+        // What is still unpaid after the deposit, the cash already taken and anything put on credit.
+        long amountDue = total - deposit - paid - (credit == null ? 0 : credit);
         Totals totals = new Totals(reference, reference - total, (BigDecimal) order.get("discount_rate"), total,
-                lng(money, "paid"), credit, deposit, Math.max(0, total - deposit));
+                paid, credit, deposit, Math.max(0, amountDue));
         // BE-9: a retail sale prints on the small receipt, a wholesale one on the A5 slip, unless the user picks.
         PrintLayout chosen = layout != null ? layout
                 : PriceType.WHOLESALE.name().equals(str(order, "price_type")) ? PrintLayout.LARGE : PrintLayout.SMALL;

@@ -165,6 +165,19 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.items[0].depositStatus").value(nullValue()))
                 .andExpect(jsonPath("$.items[0].depositRemaining").value(nullValue()));
+
+        // The customer then pays the 250,000 the deposit did not cover. The slip must not still say that is due.
+        pick(staffToken, waiting, 2, pad, 3, null).andExpect(status().isOk());
+        confirm(managerToken, waiting, 2, pad, 3).andExpect(status().isOk());
+        send(managerToken, "/api/v1/sales-orders/" + waiting + "/payments", Map.of("amount", 250_000,
+                "paymentMethod", "CASH", "verified", true, "expectedPayable", 250_000))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.completed").value(true));
+        print("SALES_ORDER", waiting, "")
+                .andExpect(jsonPath("$.totals.total").value(300_000))
+                .andExpect(jsonPath("$.totals.deposit").value(50_000))
+                .andExpect(jsonPath("$.totals.paid").value(250_000))
+                .andExpect(jsonPath("$.totals.amountDue").value(0));
     }
 
     @Test

@@ -64,8 +64,9 @@ public class DocumentController {
     @Operation(summary = "What a printed form of the document shows (UC-80)",
             description = "form: one of the document's printForms, the first when left out; MSG252 otherwise. "
                     + "layout (PM 21/11, sales invoice only): SMALL (80 mm receipt) or LARGE (A5 \"Phiếu bán hàng\"); "
-                    + "when left out, SMALL for a retail sale and LARGE for a wholesale one. totals.deposit and "
-                    + "totals.amountDue show the deposit taken into the order and what was left to pay. A deposit "
+                    + "when left out, SMALL for a retail sale and LARGE for a wholesale one. totals.deposit is the "
+                    + "deposit taken into the order. totals.amountDue is what is still unpaid after that deposit, "
+                    + "the cash already taken and any amount put on credit, and it is never negative. A deposit "
                     + "receipt has the title \"Phiếu thu tiền cọc\" and payment.depositExpiresOn.")
     @GetMapping("/{type}/{id}/print")
     public DocumentPrint print(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable DocumentType type,
