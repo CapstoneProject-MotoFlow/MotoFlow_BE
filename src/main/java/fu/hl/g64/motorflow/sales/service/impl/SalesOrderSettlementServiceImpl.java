@@ -39,6 +39,7 @@ import fu.hl.g64.motorflow.sales.dto.SettlementResult;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.CompletionType;
+import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
 import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
@@ -269,9 +270,27 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         requireVerified(money);
         LocalDateTime now = LocalDateTime.now(clock);
         long held = money.netCollected();
+        OrderDeposits.State deposit = order.isWaitingForStock() ? deposits.of(order, money) : null;
+        long depositLeft = deposit == null ? 0 : deposit.remaining();
         Long refundId = null;
         CancelSalesOrderRequest.Refund refund = request.refund();
-        if (refund != null) {
+        if (order.isWaitingForStock()) {
+            // A refund here is the deposit still held. The ordinary refund path cannot see it (MSG308).
+            if (refund != null) {
+                if (refund.amount() != depositLeft) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG331", money(depositLeft));
+                }
+                if (depositLeft > 0) {
+                    Payment saved = saveDepositRefund(orderId, refund.amount(), refund.paymentMethod(),
+                            refund.transactionReference(), seller, now);
+                    refundId = saved.getId();
+                    depositLeft = 0;
+                }
+            } else if (depositLeft > 0 && deposit.status() == DepositStatus.EXPIRED && !storeManager(seller, order)) {
+                // Forfeiting an expired deposit is the Branch Manager's /forfeit-deposit, not an Owner cancel.
+                throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+            }
+        } else if (refund != null) {
             Payment saved = saveRefund(orderId, money, refund.amount(), refund.paymentMethod(),
                     refund.transactionReference(), true, seller, now);
             refundId = saved.getId();
@@ -280,9 +299,9 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         if (held != 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG185", money(held));
         }
-        // PM 21/11 (BE-7): the customer who gives up a waiting order loses the deposit it still holds; what releases
-        // already put into other orders stays with them.
-        long forfeited = order.isWaitingForStock() ? deposits.of(order, money).remaining() : 0;
+        // What releases already put into other orders stays there. What is left is kept only when this cancel
+        // does not hand it back.
+        long forfeited = depositLeft;
         if (forfeited > 0) {
             order.forfeitDeposit(forfeited, seller.id(), now);
         }
@@ -402,6 +421,18 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         data.put("lines", issued);
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, orderId, SalesOrderHistory.COMPLETED, seller.id(),
                 null, null, data, now));
+    }
+
+    /** The deposit a waiting order still holds, handed back in full when the seller cancels and chooses to return it. */
+    private Payment saveDepositRefund(long orderId, long amount, PaymentMethod method, String transactionReference,
+                                      AuthenticatedUser seller, LocalDateTime now) {
+        String reference = reference(method, transactionReference);
+        return references.save(Payment.depositRefund(orderId, amount, method, reference, seller.id(), now));
+    }
+
+    /** The store's Branch Manager: the only role that may declare a deposit lost. */
+    private static boolean storeManager(AuthenticatedUser user, SalesOrder order) {
+        return user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
     }
 
     /** BR-48: a refund of at most what the order holds, less refunds still waiting for verification. */

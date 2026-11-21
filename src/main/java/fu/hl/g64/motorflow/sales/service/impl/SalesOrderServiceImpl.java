@@ -1328,7 +1328,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     order.getCreatedAt(), staff ? null : totals.getOrDefault(order.getId(), 0L),
                     picking == null ? null : picking.getAssignedTo(),
                     picking == null ? null : names.get(picking.getAssignedTo()),
-                    nextAction(user, order, picking), deposit == null ? null : deposit.status(today),
+                    nextAction(user, order, picking, deposit == null ? null : deposit.status(today)),
+                    deposit == null ? null : deposit.status(today),
                     deposit == null ? null : deposit.remaining(), deposit == null ? null : deposit.expiresOn());
         }).toList();
     }
@@ -1358,7 +1359,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return value instanceof java.sql.Date date ? date.toLocalDate() : (LocalDate) value;
     }
 
-    private static NextAction nextAction(AuthenticatedUser user, SalesOrder order, WarehouseTask picking) {
+    private static NextAction nextAction(AuthenticatedUser user, SalesOrder order, WarehouseTask picking,
+                                          DepositStatus depositStatus) {
         if (picking != null && picking.getAssignedTo() == user.id()
                 && picking.getStatus() == WarehouseTaskStatus.ASSIGNED) {
             return NextAction.RECORD_PICKING;
@@ -1368,7 +1370,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
         return switch (order.getStatus()) {
             case DRAFT -> null;
-            case AWAITING_STOCK -> NextAction.RELEASE;
+            case AWAITING_STOCK -> depositStatus == DepositStatus.EXPIRED ? null : NextAction.RELEASE;
             // GVHD 20/11: the Owner sells like a Branch Manager, so they give the picking too.
             case AWAITING_PICKING -> picking == null ? NextAction.ASSIGN_PICKER : null;
             // K1 (PM 19/11): the seller confirms, even a Branch Manager who picked the goods themself.
@@ -1465,7 +1467,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 && !deposits.expired(order);
         boolean storeManager = user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
         Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false, false,
-                false, false, false)
+                false, false, false, false)
                 : new Actions(seller && unfinished,
                 seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
                 holdsTask && ((order.getStatus() == SalesOrderStatus.AWAITING_PICKING
@@ -1481,10 +1483,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 seller && confirmedNow && settled && creditAllowed && money.remainingPayable() > 0
                         && money.overpaidAmount() == 0,
                 seller && confirmedNow && settled && money.remainingPayable() == 0 && money.overpaidAmount() == 0,
-                seller && unfinished, seller && waiting,
+                seller && unfinished,
+                seller && waiting && (deposit == null || deposit.status() != DepositStatus.EXPIRED),
                 seller && depositHolds && order.getCustomerId() != null,
                 storeManager && depositHolds && deposit.total() > 0,
-                storeManager && waiting && deposit != null && deposit.status() == DepositStatus.EXPIRED);
+                storeManager && waiting && deposit != null && deposit.status() == DepositStatus.EXPIRED,
+                seller && unfinished && waiting && deposit != null && deposit.remaining() > 0);
         Closing closing = staff ? null : new Closing(order.getCompletionType(), order.getCompletedBy(),
                 names.get(order.getCompletedBy()), order.getCompletedAt(), order.getCancelledBy(),
                 names.get(order.getCancelledBy()), order.getCancelledAt(), order.getCancellationReason());

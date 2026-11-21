@@ -155,7 +155,10 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
         forfeit(otherManagerToken, expiring)
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
 
-        // Cancelling before the expiry: nothing to refund, the deposit is kept.
+        detail(managerToken, cancelled)
+                .andExpect(jsonPath("$.actions.canRelease").value(true))
+                .andExpect(jsonPath("$.actions.cancelForfeitsDeposit").value(true));
+        // Cancelling before the expiry with no refund: the deposit is kept.
         send(managerToken, "/api/v1/sales-orders/" + cancelled + "/cancel", Map.of("reason", "Khách đổi ý"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
@@ -171,12 +174,18 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.items[0].id").value((int) expiring))
                 .andExpect(jsonPath("$.items[0].depositStatus").value("EXPIRED"))
-                .andExpect(jsonPath("$.items[0].depositRemaining").value(200_000));
+                .andExpect(jsonPath("$.items[0].depositRemaining").value(200_000))
+                .andExpect(jsonPath("$.items[0].nextAction").value(nullValue()));
         list(managerToken, "depositStatus", "NONE")
                 .andExpect(jsonPath("$.items[*].id").value(containsInAnyOrder((int) none)));
         release(expiring, 3, null, null)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG321"));
-        detail(managerToken, expiring).andExpect(jsonPath("$.actions.canForfeitDeposit").value(true));
+        detail(managerToken, expiring)
+                .andExpect(jsonPath("$.actions.canRelease").value(false))
+                .andExpect(jsonPath("$.actions.canForfeitDeposit").value(true))
+                .andExpect(jsonPath("$.actions.cancelForfeitsDeposit").value(true));
+        send(ownerToken, "/api/v1/sales-orders/" + expiring + "/cancel", Map.of("reason", "Hết hàng"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         detail(ownerToken, expiring).andExpect(jsonPath("$.actions.canForfeitDeposit").value(false));
 
         forfeit(managerToken, expiring)
@@ -194,6 +203,33 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.total.depositsReceived").value(300_000))
                 .andExpect(jsonPath("$.total.depositsForfeited").value(300_000))
                 .andExpect(jsonPath("$.total.totalCollected").value(300_000));
+    }
+
+    @Test
+    void cancellingAWaitingOrderCanReturnTheDepositInsteadOfKeepingIt() throws Exception {
+        long returned = waitingOrder();
+        paidDeposit(returned, 80_000, "2026-10-20");
+        Map<String, Object> shortRefund = new LinkedHashMap<>();
+        shortRefund.put("amount", 10_000);
+        shortRefund.put("paymentMethod", "CASH");
+        shortRefund.put("paidToCustomer", true);
+        send(managerToken, "/api/v1/sales-orders/" + returned + "/cancel",
+                Map.of("reason", "Cửa hàng không gom được hàng", "refund", shortRefund))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG331"));
+        Map<String, Object> fullRefund = new LinkedHashMap<>();
+        fullRefund.put("amount", 80_000);
+        fullRefund.put("paymentMethod", "CASH");
+        fullRefund.put("paidToCustomer", true);
+        send(managerToken, "/api/v1/sales-orders/" + returned + "/cancel",
+                Map.of("reason", "Cửa hàng không gom được hàng", "refund", fullRefund))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.deposit.status").value("SETTLED"))
+                .andExpect(jsonPath("$.deposit.remaining").value(0))
+                .andExpect(jsonPath("$.deposit.refunded").value(80_000))
+                .andExpect(jsonPath("$.deposit.forfeitedAmount").value(nullValue()));
+        assertThat(jdbc.queryForObject("SELECT payment_type FROM payment WHERE sales_order_id = ? "
+                + "AND payment_type = 'DEPOSIT_REFUND'", String.class, returned)).isEqualTo("DEPOSIT_REFUND");
     }
 
     /** A new order of the customer that takes none of 3 pads now and waits for them. */
