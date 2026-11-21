@@ -38,4 +38,10 @@ public class SessionServiceImpl implements SessionService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG75"));
         session.revoke(now, reason);
     }
+
+    @Transactional
+    @Override
+    public void signOutOthers(long userId, long currentSessionId) {
+        sessions.revokeOtherSessions(userId, currentSessionId, LocalDateTime.now(clock), AuthSession.RevokeReason.LOGOUT);
+    }
 }

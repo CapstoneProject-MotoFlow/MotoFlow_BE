@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,6 +79,37 @@ class SessionApiTest extends IntegrationTest {
         // Signing out an ended session again gives MSG75.
         mvc.perform(delete("/api/v1/auth/sessions/{id}", phoneSession).header(HttpHeaders.AUTHORIZATION, bearer(laptopToken)))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG75"));
+    }
+
+    @Test
+    void userSignsOutEveryOtherDeviceAtOnce() throws Exception {
+        String phoneToken = signIn("owner01", PHONE);
+        String tabletToken = signIn("owner01", PHONE);
+        String laptopToken = signIn("owner01", LAPTOP);
+        String adminToken = signIn("admin", LAPTOP);
+
+        mvc.perform(post("/api/v1/auth/sessions/sign-out-others").header(HttpHeaders.AUTHORIZATION, bearer(laptopToken)))
+                .andExpect(status().isNoContent());
+
+        // The other devices stop working at once; this device and other users stay signed in.
+        for (String token : List.of(phoneToken, tabletToken)) {
+            mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(token)))
+                    .andExpect(status().isUnauthorized());
+        }
+        mvc.perform(get("/api/v1/auth/sessions").header(HttpHeaders.AUTHORIZATION, bearer(laptopToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].current").value(true));
+        mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(adminToken)))
+                .andExpect(status().isOk());
+        assertThat(jdbc.queryForList("SELECT s.revoke_reason FROM auth_session s JOIN user_account u ON u.id = s.user_id "
+                + "WHERE u.username = 'owner01' AND s.revoked_at IS NOT NULL", String.class))
+                .containsExactly("LOGOUT", "LOGOUT");
+
+        // Nothing left to sign out is not an error; signing out others needs a signed-in device.
+        mvc.perform(post("/api/v1/auth/sessions/sign-out-others").header(HttpHeaders.AUTHORIZATION, bearer(laptopToken)))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/api/v1/auth/sessions/sign-out-others")).andExpect(status().isUnauthorized());
     }
 
     @Test
