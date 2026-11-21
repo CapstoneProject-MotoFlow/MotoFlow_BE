@@ -1366,7 +1366,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 seller && confirmedNow && settled && money.remainingPayable() == 0 && money.overpaidAmount() == 0,
                 seller && unfinished, seller && waiting,
                 seller && depositHolds && order.getCustomerId() != null,
-                storeManager && depositHolds && order.getDepositExpiresOn() != null);
+                storeManager && depositHolds && deposit.total() > 0);
         Closing closing = staff ? null : new Closing(order.getCompletionType(), order.getCompletedBy(),
                 names.get(order.getCompletedBy()), order.getCompletedAt(), order.getCancelledBy(),
                 names.get(order.getCancelledBy()), order.getCancelledAt(), order.getCancellationReason());

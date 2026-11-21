@@ -102,7 +102,7 @@ public record SalesOrderDetail(
     /**
      * What the signed-in user may do with the order now. PM 21/11: {@code canRecordDeposit} for a seller of a waiting
      * order with a customer profile whose deposit has not expired; {@code canChangeDepositExpiry} for the store's
-     * Branch Manager while the deposit holds.
+     * Branch Manager while a verified deposit still holds. A date left behind by a rejected deposit is not enough.
      */
     public record Actions(boolean canUpdate, boolean canAssignPicker, boolean canRecordPicking, boolean canConfirm,
                           boolean canRecordPayment, boolean canRefund, boolean canRecordCredit, boolean canComplete,

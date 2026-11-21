@@ -200,7 +200,10 @@ public class StoreServiceImpl implements StoreService {
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
         store.update(name, request.address().strip(), phone, request.status(), now);
-        store.changeTaxCode(blankToNull(request.taxCode()), now);
+        // Null means the caller did not send a tax code (the current store form has no field). Empty clears it.
+        if (request.taxCode() != null) {
+            store.changeTaxCode(blankToNull(request.taxCode()), now);
+        }
         if (request.central() && !isCentral) {
             store.makeCentral(now);
         }
