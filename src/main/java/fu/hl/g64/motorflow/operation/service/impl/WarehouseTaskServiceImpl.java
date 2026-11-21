@@ -280,7 +280,11 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         return type == TaskType.SUPPLIER_RECEIVING ? task.getPurchaseOrderId() : task.getTransferOrderId();
     }
 
-    /** The document, if the user is a Branch Manager of its store (MSG05 otherwise, MSG120 if it does not exist). */
+    /**
+     * The document, if the user manages it: the Branch Manager of its store, or the Owner for the picking of any
+     * store's sales order (GVHD 20/11); every other task type stays with the store's Branch Manager. MSG05
+     * otherwise, MSG120 if the document does not exist.
+     */
     private Document requireManagedDocument(AuthenticatedUser manager, TaskType type, long documentId) {
         Document document = find(type, documentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG120"));
@@ -359,8 +363,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     }
 
     /**
-     * UC-86 step 4: an active Staff account of the document's store, or the Branch Manager themself (MSG40; they
-     * already passed {@link #requireManagedDocument}).
+     * UC-86 step 4: an active Staff account of the document's store, or the manager themself (a Branch Manager
+     * gets MSG40; the Owner may take picking too, GVHD 20/11). They already passed {@link #requireManagedDocument}.
      */
     private UserAccount requireEligibleAssignee(AuthenticatedUser manager, TaskType type, long assigneeId,
                                                 long storeId) {
@@ -393,8 +397,10 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                         || task.getStatus() == WarehouseTaskStatus.RESULT_SUBMITTED)
                 .findFirst();
         String blocked = blockedCode(document, open);
-        // MSG40 speaks to the Branch Manager who took the task, so only they get it.
-        String notice = open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
+        // MSG40 speaks to the Branch Manager who took the task, so only they get it: it promises the Owner is told,
+        // and the Owner confirming their own picking has nobody above to tell.
+        String notice = manager.role() == Role.BRANCH_MANAGER
+                && open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
 
         Collator byName = Collator.getInstance(VIETNAMESE);
         List<UserAccount> staff = users.findByRoleAndStoreIdAndStatus(Role.STAFF, document.storeId(),
