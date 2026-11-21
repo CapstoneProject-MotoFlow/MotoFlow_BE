@@ -171,8 +171,8 @@ class ExpiryWarningApiTest extends ApiTestUsers {
                 + "VALUES ('Phanh', 'MOTORCYCLE') RETURNING id", Long.class);
         long product = jdbc.queryForObject("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
                 + "VALUES ('MA-PHANH', 'Má phanh', ?, 'cái', ?) RETURNING id", Long.class, category, owner.getId());
-        long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) "
-                + "VALUES ('NCC001', 'Honda') RETURNING id", Long.class);
+        long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_name) "
+                + "VALUES ('Honda') RETURNING id", Long.class);
         long po = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) "
                 + "RETURNING id", Long.class, supplier, branch, owner.getId());
         long grn = jdbc.queryForObject("INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, "

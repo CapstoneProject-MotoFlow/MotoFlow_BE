@@ -63,7 +63,7 @@ class InventoryApiTest extends ApiTestUsers {
                 + "VALUES ('Phanh', 'MOTORCYCLE') RETURNING id", Long.class);
         brake = product("MA-PHANH", "Má phanh trước", category);
         chain = product("XICH-428", "Xích 428", category);
-        supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Honda') "
+        supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_name) VALUES ('Honda') "
                 + "RETURNING id", Long.class);
         po = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) "
                 + "RETURNING id", Long.class, supplier, central, owner.getId());

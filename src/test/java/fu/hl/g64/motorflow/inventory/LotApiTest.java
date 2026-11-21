@@ -75,8 +75,8 @@ class LotApiTest extends ApiTestUsers {
                 + "VALUES ('Phanh', 'MOTORCYCLE') RETURNING id", Long.class);
         brake = product("MA-PHANH", "Má phanh trước", category);
         chain = product("XICH-XE", "Xích tải", category);
-        honda = supplier("NCC001", "Honda");
-        yamaha = supplier("NCC002", "Yamaha");
+        honda = supplier("Honda");
+        yamaha = supplier("Yamaha");
         po = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) "
                 + "RETURNING id", Long.class, honda, central, owner.getId());
         jdbc.update("INSERT INTO pricing_policy (policy_type, expiry_warning_days, effective_from, status, set_by, set_at) "
@@ -475,9 +475,9 @@ class LotApiTest extends ApiTestUsers {
                 + "VALUES (?, ?, ?, 'cái', ?) RETURNING id", Long.class, sku, name, category, owner.getId());
     }
 
-    private long supplier(String code, String name) {
-        return jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES (?, ?) RETURNING id",
-                Long.class, code, name);
+    private long supplier(String name) {
+        return jdbc.queryForObject("INSERT INTO supplier (supplier_name) VALUES (?) RETURNING id",
+                Long.class, name);
     }
 
     /** 3 units from a new goods receipt note line; returns the lot. */

@@ -50,7 +50,7 @@ abstract class PurchaseOrderTestData extends ApiTestUsers {
     protected String staff2Token;
     protected String adminToken;
 
-    /** "Honda Việt Nam" (NCC-HD), "Yamaha Motor" (NCC-YM), and "Phụ tùng Cũ" (NCC-CU), which no longer trades. */
+    /** "Honda Việt Nam", "Yamaha Motor", and "Phụ tùng Cũ", which no longer trades. */
     protected long honda;
     protected long yamaha;
     protected long inactiveSupplier;
@@ -80,10 +80,10 @@ abstract class PurchaseOrderTestData extends ApiTestUsers {
         createUser("admin", Role.ADMIN, null);
         signInAll();
 
-        honda = id("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC-HD', 'Honda Việt Nam') RETURNING id");
-        yamaha = id("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC-YM', 'Yamaha Motor') RETURNING id");
-        inactiveSupplier = id("INSERT INTO supplier (supplier_code, supplier_name, status) "
-                + "VALUES ('NCC-CU', 'Phụ tùng Cũ', 'INACTIVE') RETURNING id");
+        honda = id("INSERT INTO supplier (supplier_name) VALUES ('Honda Việt Nam') RETURNING id");
+        yamaha = id("INSERT INTO supplier (supplier_name) VALUES ('Yamaha Motor') RETURNING id");
+        inactiveSupplier = id("INSERT INTO supplier (supplier_name, status) "
+                + "VALUES ('Phụ tùng Cũ', 'INACTIVE') RETURNING id");
 
         long category = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Phụ tùng', 'MOTORCYCLE') "
                 + "RETURNING id");
