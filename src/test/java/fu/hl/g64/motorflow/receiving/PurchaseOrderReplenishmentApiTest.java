@@ -85,19 +85,74 @@ class PurchaseOrderReplenishmentApiTest extends PurchaseOrderTestData {
     }
 
     @Test
-    void aTransferPlannedWhileThePoWasOpenRefusesThePoAndChangesNothing() throws Exception {
+    void thePoMayBuyMoreThanIsShort() throws Exception {
         long request = request("IN_PROGRESS");
         long transfer = id("INSERT INTO transfer_order (replenishment_request_id, source_store_id, dest_store_id, "
                 + "created_by) VALUES (?, ?, ?, ?) RETURNING id", request, longBien, giaLam, owner.getId());
         jdbc.update("INSERT INTO transfer_order_line (transfer_order_id, product_id, planned_qty) VALUES (?, ?, 3)",
                 transfer, oil);
 
-        // The Owner's screen still buys 5 oil, but only 2 are short now.
-        create(ownerToken, purchase(giaLam, request, true))
+        // GVHD 20/11: only 2 oil are short now, the Owner still buys 5 (more is allowed).
+        create(ownerToken, purchase(giaLam, request, true)).andExpect(status().isCreated());
+
+        // What is passed to purchase stays within the request (to_purchase_qty <= requested_qty).
+        assertThat(toPurchase(request)).containsExactly(4, 2, 0);
+        // The PO line itself keeps the 5 oil the Owner chose.
+        assertThat(jdbc.queryForObject("SELECT ordered_qty FROM purchase_order_line WHERE product_id = ?",
+                Integer.class, oil)).isEqualTo(5);
+    }
+
+    @Test
+    void withAnAllocationAlreadySavedThePoMayNotBuyLess() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> body = purchase(giaLam, request, false);
+        body.put("lines", List.of(line(pad, 1, 120_000), line(oil, 5, 85_000)));
+
+        create(ownerToken, body)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG262"))
                 .andExpect(jsonPath("$.message").value("Yêu cầu bổ sung #" + request
-                        + " vừa thay đổi nên số mua của phụ tùng NHOT-01 phải là 2. Vui lòng tải lại."));
+                        + " vừa thay đổi nên số mua của phụ tùng MA-PHANH-01 phải ít nhất là 2. Vui lòng tải lại."));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();
+    }
+
+    @Test
+    void withAnAllocationAlreadySavedThePoMayNotOmitThePart() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> body = purchase(giaLam, request, false);
+        body.put("lines", List.of(line(oil, 5, 85_000)));
+
+        create(ownerToken, body)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG262"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();
+    }
+
+    @Test
+    void withAnAllocationAlreadySavedThePoMayBuyExactlyOrMore() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> exact = purchase(giaLam, request, false);
+        exact.put("lines", List.of(line(pad, 2, 120_000)));
+        long first = created(exact);
+        cancel(ownerToken, first, "Nhà cung cấp hết hàng").andExpect(status().isOk());
+
+        Map<String, Object> more = purchase(giaLam, request, false);
+        more.put("lines", List.of(line(pad, 7, 120_000), line(oil, 5, 85_000)));
+        create(ownerToken, more).andExpect(status().isCreated());
+        assertThat(toPurchase(request)).containsExactly(2, 0, 0);
+    }
+
+    @Test
+    void thePoMayNotBuyLessThanIsPassedToPurchase() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> body = purchase(giaLam, request, true);
+        body.put("lines", List.of(line(pad, 3, 120_000), line(oil, 5, 85_000)));
+
+        create(ownerToken, body)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG262"))
+                .andExpect(jsonPath("$.message").value("Yêu cầu bổ sung #" + request
+                        + " vừa thay đổi nên số mua của phụ tùng MA-PHANH-01 phải ít nhất là 4. Vui lòng tải lại."));
 
         assertThat(toPurchase(request)).containsExactly(2, 0, 0);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();

@@ -33,8 +33,9 @@ public interface ReplenishmentRequestService {
     /**
      * UC-40 with BR-55, inside the Owner's PO creation. Locks the request so that two POs cannot be bought for it at
      * once. It must belong to the receiving warehouse, be open, have no PO that is not cancelled, and the PO may only
-     * buy its parts. With {@code includeUnallocated}, what no transfer order has planned yet is passed to purchase too,
-     * and the PO must then buy exactly what is passed to purchase, per part.
+     * buy its parts. With {@code includeUnallocated}, what no transfer order has planned yet is passed to purchase too.
+     * On both paths the PO must buy at least what is passed to purchase, per part, and a part left out counts as 0
+     * (more is allowed, GVHD 20/11).
      *
      * @param quantities the PO's quantity per part, in line order
      */
