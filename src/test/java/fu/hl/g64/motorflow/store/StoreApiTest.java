@@ -95,6 +95,9 @@ class StoreApiTest extends IntegrationTest {
         Map<String, Object> change = update("PLANNED", false);
         change.put("taxCode", "0101234567-001");
         updateStore(id, change).andExpect(status().isOk()).andExpect(jsonPath("$.taxCode").value("0101234567-001"));
+        // The current store form sends no taxCode. Null leaves the code; only an empty value clears it.
+        change.remove("taxCode");
+        updateStore(id, change).andExpect(status().isOk()).andExpect(jsonPath("$.taxCode").value("0101234567-001"));
         change.put("taxCode", "12345");
         updateStore(id, change).andExpect(status().isBadRequest());
         change.put("taxCode", "");

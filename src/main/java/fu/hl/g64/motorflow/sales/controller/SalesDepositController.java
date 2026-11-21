@@ -58,8 +58,9 @@ public class SalesDepositController {
             description = "Only the store's Branch Manager (403 for Owner and Staff). The order still waits for "
                     + "stock (MSG319) and its deposit has EXPIRED: MSG329 while it holds, MSG330 when no deposit is "
                     + "left. The order is cancelled with the reason \"Hết hạn cọc\"; nothing is refunded and "
-                    + "deposit.forfeitedAmount is what the store keeps. Cancelling a waiting order before the expiry "
-                    + "(POST /cancel) keeps the deposit left too.")
+                    + "deposit.forfeitedAmount is what the store keeps. POST /cancel of a waiting order keeps the "
+                    + "deposit left unless its refund returns that amount (MSG331). An Owner cannot cancel an expired "
+                    + "deposit without that refund.")
     @PreAuthorize("hasRole('BRANCH_MANAGER')")
     @PostMapping("/forfeit-deposit")
     public SalesOrderDetail forfeit(@AuthenticationPrincipal AuthenticatedUser manager, @PathVariable long id) {

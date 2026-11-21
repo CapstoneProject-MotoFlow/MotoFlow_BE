@@ -114,7 +114,8 @@ public class SalesDepositServiceImpl implements SalesDepositService {
         }
         requireWaiting(order);
         LocalDate old = order.getDepositExpiresOn();
-        if (old == null) {
+        // A rejected first deposit still leaves the date behind, with nothing verified to extend (MSG324).
+        if (old == null || deposits.of(order, collections.of(orderId)).total() == 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG324");
         }
         requireNotExpired(order);
