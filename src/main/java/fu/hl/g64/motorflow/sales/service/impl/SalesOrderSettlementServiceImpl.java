@@ -346,7 +346,9 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                 .sorted(Comparator.comparing(SalesOrderLine::getProductId)).toList();
         Map<Long, Product> parts = products.findAllById(delivered.stream().map(SalesOrderLine::getProductId).toList())
                 .stream().collect(Collectors.toMap(Product::getId, Function.identity()));
-        Map<Long, PickingGuide.Part> stock = guide.parts(order.getStoreId(), parts.keySet(), now.toLocalDate());
+        // The order's own holding is its own (GVHD 20/11): only other open orders' holds are left out.
+        Map<Long, PickingGuide.Part> stock = guide.parts(order.getStoreId(), parts.keySet(), now.toLocalDate(),
+                orderId);
         String lacking = delivered.stream()
                 .filter(line -> line.getDeliveredQty() > stock.get(line.getProductId()).sellableQty())
                 .map(line -> "%s cần %d, còn %d".formatted(parts.get(line.getProductId()).getSku(),

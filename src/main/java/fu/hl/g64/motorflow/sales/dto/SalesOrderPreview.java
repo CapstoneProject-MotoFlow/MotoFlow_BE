@@ -16,8 +16,12 @@ public record SalesOrderPreview(long storeId, PriceType priceType, BigDecimal di
                                 long referenceTotal, long discountAmount, long total, BigDecimal invoiceDiscountRate,
                                 List<Line> lines) {
 
+    /**
+     * GVHD 20/11: {@code sellableQty} is what the store can sell now, less what other open orders hold
+     * ({@code heldByOthersQty}); {@code suggestedNowQty} = min(quantity, sellableQty), the default "lấy ngay".
+     */
     public record Line(long productId, String sku, String partName, String baseUnit, ProductStatus productStatus,
                        int quantity, Long retailPrice, Long actualUnitPrice, Long lineTotal, int sellableQty,
-                       int shortQty) {
+                       int shortQty, int heldByOthersQty, int suggestedNowQty) {
     }
 }

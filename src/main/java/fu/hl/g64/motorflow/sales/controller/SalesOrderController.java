@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.sales.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
+import fu.hl.g64.motorflow.sales.dto.ReleaseWaitingOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.PickingRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderPreview;
@@ -112,5 +113,14 @@ public class SalesOrderController {
     public SalesOrderDetail confirm(@AuthenticationPrincipal AuthenticatedUser seller, @PathVariable long id,
                                     @Valid @RequestBody ConfirmSalesOrderRequest request) {
         return salesOrders.confirm(seller, id, request);
+    }
+
+    @Operation(summary = "Release a waiting order to picking, in part or in full (GVHD 20/11)",
+            description = "Only an AWAITING_STOCK order (MSG307). Each line sells at most what it waits for (MSG305) "
+                    + "and what the store can sell now; MSG171 if nothing can be sold.")
+    @PostMapping("/{id}/release")
+    public SalesOrderDetail release(@AuthenticationPrincipal AuthenticatedUser seller, @PathVariable long id,
+                                    @Valid @RequestBody ReleaseWaitingOrderRequest request) {
+        return salesOrders.release(seller, id, request);
     }
 }

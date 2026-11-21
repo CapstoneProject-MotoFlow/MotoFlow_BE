@@ -305,6 +305,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                     .map(order -> new Document(order.getStoreId(),
                     switch (order.getStatus()) {
                         case DRAFT -> throw new IllegalStateException("draft " + documentId);
+                        // GVHD 20/11: a waiting order is not picked until it is released to picking.
+                        case AWAITING_STOCK -> throw new BusinessException(HttpStatus.CONFLICT, "MSG308");
                         case AWAITING_PICKING -> Stage.OPEN;
                         case PICKED -> Stage.RESULT_IN;
                         case CONFIRMED, COMPLETED, CANCELLED -> Stage.FINISHED;

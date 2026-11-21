@@ -93,9 +93,9 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
     List<StockBalance> findByProductIdIn(Collection<Long> productIds);
 
     /**
-     * JOB-02: parts still on sale, in active stores, whose sellable stock (available, not expired) is below the
-     * threshold set in UC-51. Expired lots are the same ones {@link LotBalanceRepository#sumExpiryByStoreAndProduct}
-     * counts: past their expiry date or marked EXPIRED.
+     * JOB-02: parts still on sale, in active stores, whose sellable stock (available, not expired, less what open
+     * sales orders hold since GVHD 20/11) is below the threshold set in UC-51. Expired lots are the same ones
+     * {@link LotBalanceRepository#sumExpiryByStoreAndProduct} counts: past their expiry date or marked EXPIRED.
      */
     @Query("""
             select new fu.hl.g64.motorflow.inventory.dto.LowStockRow(b.storeId, b.productId, p.sku, p.partName,
@@ -106,7 +106,19 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
                           and lb.quantity > 0 and l.expiryDate is not null
                           and lb.storeId = b.storeId and l.productId = b.productId
                           and (l.expiryDate < :today
-                               or l.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED)), 0) as int),
+                               or l.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED)), 0) as int)
+                   - cast(coalesce((select sum(case
+                            when so.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING
+                                then sl.requestedQty
+                            when so.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED
+                                then coalesce(sl.pickedQty, sl.requestedQty)
+                            else coalesce(sl.deliveredQty, sl.pickedQty, sl.requestedQty) end)
+                        from fu.hl.g64.motorflow.sales.entity.SalesOrderLine sl,
+                             fu.hl.g64.motorflow.sales.entity.SalesOrder so
+                        where so.id = sl.salesOrderId and so.storeId = b.storeId and sl.productId = b.productId
+                          and so.status in (fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING,
+                                            fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED,
+                                            fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.CONFIRMED)), 0) as int),
                    b.lowStockThreshold)
             from StockBalance b join Product p on p.id = b.productId join Store s on s.id = b.storeId
             where b.lowStockThreshold is not null
@@ -117,6 +129,18 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
                           and lb2.storeId = b.storeId and l2.productId = b.productId
                           and (l2.expiryDate < :today
                                or l2.status = fu.hl.g64.motorflow.inventory.entity.enums.LotStatus.EXPIRED)), 0) as int)
+                   - cast(coalesce((select sum(case
+                            when so2.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING
+                                then sl2.requestedQty
+                            when so2.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED
+                                then coalesce(sl2.pickedQty, sl2.requestedQty)
+                            else coalesce(sl2.deliveredQty, sl2.pickedQty, sl2.requestedQty) end)
+                        from fu.hl.g64.motorflow.sales.entity.SalesOrderLine sl2,
+                             fu.hl.g64.motorflow.sales.entity.SalesOrder so2
+                        where so2.id = sl2.salesOrderId and so2.storeId = b.storeId and sl2.productId = b.productId
+                          and so2.status in (fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING,
+                                            fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED,
+                                            fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.CONFIRMED)), 0) as int)
                   < b.lowStockThreshold
               and p.status = fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus.ACTIVE
               and s.status = fu.hl.g64.motorflow.store.entity.enums.StoreStatus.ACTIVE

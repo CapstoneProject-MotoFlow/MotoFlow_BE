@@ -19,6 +19,7 @@ import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
@@ -104,6 +105,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
     private final WarehouseTaskService warehouseTasks;
     private final PickingGuide guide;
     private final AttachmentService attachments;
+    private final StockBalanceRepository balances;
     private final Clock clock;
 
     // UC-71
@@ -120,6 +122,9 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .map(TransferOrderCreateRequest.Line::productId).toList());
         checkMakeups(body, parts);
         ReplenishmentRequest request = body.replenishmentRequestId() == null ? null : coveredRequest(body, parts);
+        // GVHD 20/11: the source's stock rows are locked after the request (document first, then stock by part id),
+        // so a sales order taking the same goods waits for this check.
+        balances.findByStoreForUpdate(body.sourceStoreId(), parts.keySet().stream().sorted().toList());
         checkSellable(user, body, parts);
 
         LocalDateTime now = LocalDateTime.now(clock);
@@ -644,7 +649,10 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         return value == null || value.isBlank() ? null : value.strip();
     }
 
-    /** UC-48: available minus expired; the source's stock is only checked here, never reserved. */
+    /**
+     * UC-48: available minus expired, less what open sales orders hold (GVHD 20/11); the source's stock is only
+     * checked here, never reserved.
+     */
     private void checkSellable(AuthenticatedUser user, TransferOrderCreateRequest body, Map<Long, Product> parts) {
         Map<Long, Integer> sellable = inventory.availability(user, parts.keySet()).stream()
                 .filter(row -> row.storeId() == body.sourceStoreId())

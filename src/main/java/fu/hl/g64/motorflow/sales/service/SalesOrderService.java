@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.sales.service;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
+import fu.hl.g64.motorflow.sales.dto.ReleaseWaitingOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.PickingRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderPreview;
@@ -71,6 +72,14 @@ public interface SalesOrderService {
      * confirm; the Owner is notified (K1, PM 19/11).
      */
     SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request);
+
+    /**
+     * GVHD 20/11: releases a waiting order to picking, line by line, as far as the store can sell now. All of it:
+     * the order itself goes to picking with the same number; part of it: a new order is sold now and the waiting
+     * order keeps the rest. Prices in effect now (BR-18). MSG307 if not a waiting order, MSG171 if nothing can be
+     * sold now.
+     */
+    SalesOrderDetail release(AuthenticatedUser seller, long id, ReleaseWaitingOrderRequest request);
 
     /**
      * PM 13/11: the caller's own drafts, newest first ({@code q} as in {@link #list}; {@code storeId} filters for

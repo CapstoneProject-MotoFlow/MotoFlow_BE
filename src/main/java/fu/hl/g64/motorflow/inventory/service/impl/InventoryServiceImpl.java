@@ -58,6 +58,7 @@ import fu.hl.g64.motorflow.inventory.service.InventoryService;
 import fu.hl.g64.motorflow.partner.entity.Supplier;
 import fu.hl.g64.motorflow.partner.repository.SupplierRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
+import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.entity.enums.StoreStatus;
@@ -121,6 +122,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final ExpiryWarning expiryWarning;
     private final GoodsReceiptNoteLineRepository receiptLines;
     private final StoreScope storeScope;
+    private final SalesOrderLineRepository salesLines;
     private final Clock clock;
 
     // UC-47
@@ -273,12 +275,19 @@ public class InventoryServiceImpl implements InventoryService {
         List<StockBalance> found = balances.findByProductIdIn(productById.keySet()).stream()
                 .filter(b -> active.containsKey(b.getStoreId())).toList();
         Map<String, int[]> expiry = expiryTotals(active.keySet(), productById.keySet());
+        // GVHD 20/11 (BR-33): what open sales orders hold is not there to transfer.
+        Map<String, Integer> reserved = new HashMap<>();
+        for (Object[] row : salesLines.reservedByStore(productById.keySet())) {
+            reserved.put(key((Long) row[0], (Long) row[1]), ((Number) row[2]).intValue());
+        }
         return found.stream()
                 .map(b -> {
-                    int expired = expiry.getOrDefault(key(b.getStoreId(), b.getProductId()), new int[2])[0];
+                    String key = key(b.getStoreId(), b.getProductId());
+                    int expired = expiry.getOrDefault(key, new int[2])[0];
                     Store store = active.get(b.getStoreId());
                     return new StockAvailabilityResponse(b.getProductId(), productById.get(b.getProductId()).getSku(),
-                            store.getId(), store.getStoreName(), store.isCentral(), b.getAvailableQty() - expired);
+                            store.getId(), store.getStoreName(), store.isCentral(),
+                            b.getAvailableQty() - expired - reserved.getOrDefault(key, 0));
                 })
                 .filter(r -> r.sellableQty() > 0)
                 .sorted(Comparator.comparing(StockAvailabilityResponse::sku)

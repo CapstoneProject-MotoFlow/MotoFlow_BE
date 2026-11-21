@@ -11,6 +11,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.common.text.SearchText;
+import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
 import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
@@ -28,6 +29,7 @@ import fu.hl.g64.motorflow.receivable.entity.Receivable;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
+import fu.hl.g64.motorflow.sales.dto.ReleaseWaitingOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.NextAction;
 import fu.hl.g64.motorflow.sales.dto.PickingRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
@@ -101,6 +103,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
 
     /** notification.ref_type of a sales order, so that opening the notification opens it. */
     private static final String REF_TYPE = "SALES_ORDER";
+    private static final String DECLINED_REASON = "Khách không chờ hàng";
     private static final Locale VIETNAMESE = Locale.forLanguageTag("vi");
 
     private final SalesOrderRepository orders;
@@ -115,6 +118,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final NotificationService notifications;
     private final OrderPricing pricing;
     private final PickingGuide guide;
+    private final StockBalanceRepository balances;
     private final OrderCollections collections;
     private final ReceivableRepository receivables;
     private final AttachmentService attachments;
@@ -238,11 +242,13 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             if (reference != null) {
                 priced.add(new Priced(line.quantity(), reference, actual));
             }
-            int sellable = stock.get(part.getId()).sellableQty();
+            PickingGuide.Part held = stock.get(part.getId());
+            int sellable = held.sellableQty();
             lines.add(new SalesOrderPreview.Line(part.getId(), part.getSku(), part.getPartName(), part.getBaseUnit(),
                     part.getStatus(), line.quantity(), reference, actual,
                     actual == null ? null : (long) line.quantity() * actual, sellable,
-                    Math.max(0, line.quantity() - sellable)));
+                    Math.max(0, line.quantity() - sellable), held.heldByOthersQty(),
+                    Math.min(line.quantity(), sellable)));
         }
         Totals totals = OrderPricing.totals(priced);
         boolean within = true;
@@ -262,10 +268,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     public SalesOrderDetail create(AuthenticatedUser seller, SalesOrderRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         Content content = content(seller, request, now);
-        checkPricing(content, now);
+        List<Share> shares = shares(content.store().getId(), request.lines(), now.toLocalDate());
         SalesOrder order = orders.save(SalesOrder.create(content.store().getId(), content.customer(),
                 request.priceType(), content.rate(), text(request.note()), seller.id(), now));
-        return opened(seller, order, saveLines(order, request, content), now);
+        return openSplit(seller, order, shares, content, now);
     }
 
     // PM 13/11: sales drafts
@@ -317,9 +323,139 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         // UC-53 as for a new order: the prices in effect now (BR-18) and the discount threshold (BR-16). A refusal
         // rolls the whole transaction back, so the draft keeps what it had.
         Content content = rewriteDraft(seller, order, request, now);
-        checkPricing(content, now);
+        List<Share> shares = shares(content.store().getId(), request.lines(), now.toLocalDate());
         order.submit(now);
-        return opened(seller, order, orderLines.findBySalesOrderIdOrderByLineNoAsc(id), now);
+        // GVHD 20/11: the draft becomes the order sold now (or the waiting order if nothing can be sold now).
+        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
+        orderLines.flush();
+        return openSplit(seller, order, shares, content, now);
+    }
+
+    /**
+     * GVHD 20/11: one requested line split into what is sold now (held by the order), what waits on a waiting order
+     * and what the customer declined (not stored).
+     */
+    private record Share(SalesOrderLineRequest line, int sellNow, int waitQty, int declinedQty) {
+    }
+
+    /**
+     * GVHD 20/11 (BR-29, BR-33): how much of each line the store sells now, against the stock not held by other
+     * open orders, read under the lock of the parts' stock rows so two sellers take turns. The server works it out
+     * again and does not trust the client's figures: sellNow = min(nowQty, sellable); with {@code waitForRest} the
+     * rest of the requested quantity waits, without it the rest is declined. MSG171 when nothing at all is sold or
+     * waits.
+     */
+    private List<Share> shares(long storeId, List<SalesOrderLineRequest> lines, LocalDate today) {
+        List<Long> ids = lines.stream().map(SalesOrderLineRequest::productId).sorted().toList();
+        balances.findByStoreForUpdate(storeId, ids);
+        Map<Long, PickingGuide.Part> stock = guide.parts(storeId, ids, today);
+        Map<Long, Product> parts = byId(products.findAllById(ids), Product::getId);
+        List<Share> shares = new ArrayList<>();
+        List<String> lacking = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            SalesOrderLineRequest line = lines.get(i);
+            int now = line.takenNow();
+            if (now > line.quantity()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG305", i + 1, line.quantity());
+            }
+            if (now == 0 && !line.waits()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG306", i + 1);
+            }
+            int sellable = stock.get(line.productId()).sellableQty();
+            int sellNow = Math.min(now, sellable);
+            int waitQty = line.waits() ? line.quantity() - sellNow : 0;
+            shares.add(new Share(line, sellNow, waitQty, line.quantity() - sellNow - waitQty));
+            if (sellNow < now) {
+                lacking.add("%s cần %d, còn %d".formatted(parts.get(line.productId()).getSku(), now, sellable));
+            }
+        }
+        if (shares.stream().allMatch(share -> share.sellNow() == 0 && share.waitQty() == 0)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG171", String.join("; ", lacking));
+        }
+        return shares;
+    }
+
+    /**
+     * GVHD 20/11: saves {@code order} with what is sold now, and what waits on a waiting order split from it; if
+     * nothing is sold now, {@code order} itself waits. BR-16 is checked on the order that is sold now (the waiting
+     * order is checked when released), or on the waiting order when it is all there is.
+     */
+    private SalesOrderDetail openSplit(AuthenticatedUser seller, SalesOrder order, List<Share> shares,
+                                       Content content, LocalDateTime now) {
+        List<Share> sold = shares.stream().filter(share -> share.sellNow() > 0).toList();
+        List<Share> waiting = shares.stream().filter(share -> share.waitQty() > 0).toList();
+        BigDecimal rate = content.rate();
+        checkPricing(rate, (sold.isEmpty() ? waiting : sold).stream().map(share -> priced(sold.isEmpty()
+                ? share.waitQty() : share.sellNow(), content.prices().get(share.line().productId()), rate))
+                .toList(), now);
+        List<SalesOrderDetail.Declined> declined = shares.stream().filter(share -> share.declinedQty() > 0)
+                .map(share -> new SalesOrderDetail.Declined(share.line().productId(), share.declinedQty())).toList();
+        List<Share> refused = shares.stream().filter(share -> share.declinedQty() > 0).toList();
+        if (sold.isEmpty()) {
+            order.waitForStock();
+            List<SalesOrderLine> lines = saveShares(order, waiting, Share::waitQty, content);
+            SalesOrderDetail detail = opened(seller, order, lines, now);
+            Long declinedId = declineRest(seller, order, refused, content, now);
+            return detail.withSplit(new SalesOrderDetail.Split(null, order.getId(), declinedId, declined));
+        }
+        List<SalesOrderLine> lines = saveShares(order, sold, Share::sellNow, content);
+        SalesOrderDetail detail = opened(seller, order, lines, now);
+        Long waitingId = null;
+        if (!waiting.isEmpty()) {
+            SalesOrder rest = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order),
+                    order.getPriceType(), rate, order.getNote(), seller.id(), now));
+            rest.waitForStock();
+            opened(seller, rest, saveShares(rest, waiting, Share::waitQty, content), now, order.getId());
+            waitingId = rest.getId();
+        }
+        Long declinedId = declineRest(seller, order, refused, content, now);
+        if (waitingId == null && declinedId == null) {
+            return detail;
+        }
+        return detail.withSplit(new SalesOrderDetail.Split(order.getId(), waitingId, declinedId, declined));
+    }
+
+    /**
+     * GVHD 20/11: what the customer declined is kept as an order of its own, cancelled at once ("Khách không chờ
+     * hàng"), so the unmet-demand report (UC-59) shows it. It is split from {@code order}, holds nothing, is not
+     * picked, notifies nobody and is not checked against the discount threshold (it is never sold).
+     */
+    private Long declineRest(AuthenticatedUser seller, SalesOrder order, List<Share> refused, Content content,
+                             LocalDateTime now) {
+        if (refused.isEmpty()) {
+            return null;
+        }
+        SalesOrder gone = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
+                content.rate(), order.getNote(), seller.id(), now));
+        List<SalesOrderLine> lines = saveShares(gone, refused, Share::declinedQty, content);
+        Map<String, Object> first = SalesOrderHistory.snapshot(1, null, gone, lines);
+        first.put(SalesOrderHistory.SPLIT_FROM, order.getId());
+        auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, gone.getId(), SalesOrderHistory.CREATED, seller.id(),
+                null, null, first, now));
+        gone.cancel(seller.id(), DECLINED_REASON, now);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("refund_id", null);
+        data.put("refunded", 0);
+        auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, gone.getId(), SalesOrderHistory.CANCELLED,
+                seller.id(), DECLINED_REASON, null, data, now));
+        return gone.getId();
+    }
+
+    private List<SalesOrderLine> saveShares(SalesOrder order, List<Share> shares,
+                                            java.util.function.ToIntFunction<Share> quantity, Content content) {
+        List<SalesOrderLine> lines = new ArrayList<>();
+        for (int i = 0; i < shares.size(); i++) {
+            Share share = shares.get(i);
+            long reference = content.prices().get(share.line().productId());
+            lines.add(SalesOrderLine.create(order.getId(), i + 1, share.line().productId(),
+                    quantity.applyAsInt(share), reference, OrderPricing.actualUnitPrice(reference, content.rate())));
+        }
+        return orderLines.saveAll(lines);
+    }
+
+    private static SalesOrder.Customer customerOf(SalesOrder order) {
+        return new SalesOrder.Customer(order.getCustomerId(), order.getCustomerNameSnapshot(),
+                order.getCustomerPhoneSnapshot(), order.getCustomerAddressSnapshot());
     }
 
     @Transactional
@@ -356,7 +492,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     /**
      * What every new order and draft is checked for (UC-53): the selling store, the customer, the discount rate
      * (BR-10, BR-12), the parts (MSG57, MSG158, MSG159) and a retail price in effect for each (MSG160). The discount
-     * threshold (BR-16) is left to {@link #checkPricing(Content, LocalDateTime)}, which a draft skips.
+     * threshold (BR-16) is checked on the order sold now when it is opened, which a draft skips.
      */
     private Content content(AuthenticatedUser seller, SalesOrderRequest request, LocalDateTime now) {
         Store store = sellingStore(seller, request.storeId());
@@ -373,10 +509,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                            List<Priced> priced) {
     }
 
-    private void checkPricing(Content content, LocalDateTime now) {
-        checkPricing(content.rate(), content.priced(), now);
-    }
-
     private List<SalesOrderLine> saveLines(SalesOrder order, SalesOrderRequest request, Content content) {
         List<SalesOrderLine> lines = new ArrayList<>();
         for (int i = 0; i < request.lines().size(); i++) {
@@ -391,12 +523,21 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     /** UC-53 steps 9-10: version 1 is recorded and, when Owner sold it, the store's Branch Manager is told. */
     private SalesOrderDetail opened(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
                                     LocalDateTime now) {
+        return opened(seller, order, lines, now, null);
+    }
+
+    /** As above for an order split from {@code splitFrom} (GVHD 20/11): version 1 keeps where it came from. */
+    private SalesOrderDetail opened(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
+                                    LocalDateTime now, Long splitFrom) {
+        Map<String, Object> first = SalesOrderHistory.snapshot(1, null, order, lines);
+        if (splitFrom != null) {
+            first.put(SalesOrderHistory.SPLIT_FROM, splitFrom);
+        }
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, order.getId(), SalesOrderHistory.CREATED, seller.id(),
-                null, null, SalesOrderHistory.snapshot(1, null, order, lines), now));
-        if (seller.role() == Role.OWNER) {
-            // The store's Branch Manager gives the picking to someone (UC-86).
-            notifications.notifyStoreManagers(order.getStoreId(), "SALES_ORDER_CREATED",
-                    "Có đơn bán mới %s cần giao việc lấy hàng.".formatted(label(order)), REF_TYPE, order.getId());
+                null, null, first, now));
+        if (order.getStatus() == SalesOrderStatus.AWAITING_PICKING) {
+            // A waiting order is not picked yet.
+            notifyPicking(seller, order);
         }
         return detail(seller, order);
     }
@@ -438,7 +579,15 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         checkPricing(rate, request.lines().stream().map(line -> priced(line.quantity(), prices.get(line.productId()),
                 rate)).toList(), now);
 
+        if (!order.isWaitingForStock()) {
+            // GVHD 20/11: more units on an order that holds its goods must be in stock, not held by others (MSG171);
+            // a picked or confirmed order whose lines change goes back to holding the whole request, so every line
+            // is checked. A waiting order is checked when released.
+            boolean backToPicking = linesChanged && order.getStatus() != SalesOrderStatus.AWAITING_PICKING;
+            checkMoreInStock(order, wanted, backToPicking ? Map.of() : before, parts, now.toLocalDate());
+        }
         Map<String, Object> previous = SalesOrderHistory.snapshot(version, null, order, current);
+        boolean waiting = order.isWaitingForStock();
         boolean pickedBefore = order.getStatus() != SalesOrderStatus.AWAITING_PICKING;
         order.revise(customer, request.priceType(), rate, now);
         List<SalesOrderLine> removed = current.stream().filter(line -> !wanted.containsKey(line.getProductId()))
@@ -464,7 +613,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         orderLines.saveAll(added);
         orderLines.flush();
 
-        if (linesChanged) {
+        if (linesChanged && !waiting) {
             // UC-58 needs a picking result for the current content: the picker records it again.
             order.backToPicking(now);
             Long picker = pickedBefore ? Long.valueOf(warehouseTasks.returnForRecount(TaskType.PICKING, id))
@@ -553,6 +702,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Override
     public SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request) {
         SalesOrder order = lockForSeller(seller, id);
+        if (order.isWaitingForStock()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG308");
+        }
         if (order.getStatus() == SalesOrderStatus.AWAITING_PICKING) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG174");
         }
@@ -564,13 +716,19 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, SalesOrderLine> byProduct = matchLines(lines, parts,
                 request.lines().stream().map(ConfirmSalesOrderRequest.Line::productId).toList());
         Map<Long, Integer> delivered = new HashMap<>();
+        Set<Long> waitForRest = new HashSet<>();
         for (ConfirmSalesOrderRequest.Line line : request.lines()) {
             SalesOrderLine target = byProduct.get(line.productId());
-            if (line.deliveredQty() > target.getPickedQty()) {
+            // What already went to a waiting order is no longer on the line (GVHD 20/11).
+            int most = Math.min(target.getPickedQty(), target.getRequestedQty());
+            if (line.deliveredQty() > most) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG169", parts.get(line.productId()).getSku(),
-                        target.getPickedQty());
+                        most);
             }
             delivered.put(line.productId(), line.deliveredQty());
+            if (Boolean.TRUE.equals(line.waitForRest())) {
+                waitForRest.add(line.productId());
+            }
         }
         if (delivered.values().stream().allMatch(quantity -> quantity == 0)) {
             // BR-14: the reference total of the delivered goods must be greater than zero.
@@ -611,20 +769,187 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         order.confirm(seller.id(), now);
         orderLines.flush();
         int confirmedVersion = newVersion ? version + 1 : version;
+        // The waiting order of a first confirmation is not made again when the confirmation is redone.
+        Map<Long, Integer> waits = confirmed ? Map.of() : rest(lines, waitForRest);
+        Map<Long, Integer> requestedBefore = new HashMap<>();
+        lines.forEach(line -> requestedBefore.put(line.getProductId(), line.getRequestedQty()));
+        Long waitingId = waits.isEmpty() ? null : deferRest(seller, order, lines, waits, now);
+        // GVHD 20/11: what moved to the waiting order leaves the line, so it is unmet only there; the version saved
+        // below is the narrowed one.
+        List<SalesOrderLine> kept = new ArrayList<>(lines);
+        for (SalesOrderLine line : lines) {
+            if (!waits.containsKey(line.getProductId())) {
+                continue;
+            }
+            if (line.getDeliveredQty() == 0) {
+                orderLines.delete(line);
+                kept.remove(line);
+            } else {
+                line.narrowToDelivered();
+            }
+        }
+        orderLines.flush();
         if (newVersion) {
             auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(),
                     null, previous, SalesOrderHistory.snapshot(confirmedVersion, SalesOrderHistory.CAUSE_DELIVERY,
-                            order, lines), now));
+                            order, kept), now));
         }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("version", confirmedVersion);
         data.put("reference_total", totals.referenceTotal());
         data.put("total", totals.total());
-        data.put("lines", lines.stream().map(line -> Map.of("product_id", line.getProductId(),
-                "delivered_qty", line.getDeliveredQty())).toList());
+        data.put("lines", lines.stream().map(line -> {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("product_id", line.getProductId());
+            row.put("delivered_qty", line.getDeliveredQty());
+            if (waits.containsKey(line.getProductId())) {
+                row.put(SalesOrderHistory.REQUESTED_BEFORE, requestedBefore.get(line.getProductId()));
+            }
+            return row;
+        }).toList());
+        if (waitingId != null) {
+            data.put(SalesOrderHistory.WAITING_ORDER, waitingId);
+        }
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.CONFIRMED, seller.id(), null,
                 null, data, now));
-        return detail(seller, order);
+        SalesOrderDetail detail = detail(seller, order);
+        return waitingId == null ? detail
+                : detail.withSplit(new SalesOrderDetail.Split(id, waitingId, null, List.of()));
+    }
+
+    /** [product id → units not delivered] of the lines the customer waits for the rest of. */
+    private static Map<Long, Integer> rest(List<SalesOrderLine> lines, Set<Long> waitFor) {
+        Map<Long, Integer> rest = new LinkedHashMap<>();
+        lines.stream().filter(line -> waitFor.contains(line.getProductId())
+                        && line.getRequestedQty() > line.getDeliveredQty())
+                .forEach(line -> rest.put(line.getProductId(), line.getRequestedQty() - line.getDeliveredQty()));
+        return rest;
+    }
+
+    /**
+     * GVHD 20/11 (UC-58, "mai chị đến lấy nốt"): what was not delivered of the lines the customer will wait for goes
+     * to one new waiting order, at the prices in effect. The caller then narrows the original lines to what was
+     * delivered.
+     */
+    private Long deferRest(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
+                           Map<Long, Integer> waits, LocalDateTime now) {
+        List<SalesOrderLine> rest = lines.stream().filter(line -> waits.containsKey(line.getProductId())).toList();
+        Map<Long, Product> parts = byId(products.findAllById(rest.stream().map(SalesOrderLine::getProductId)
+                .toList()), Product::getId);
+        Map<Long, Long> prices = requireLinePrices(rest, parts, now);
+        SalesOrder waiting = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
+                order.getDiscountRate(), order.getNote(), seller.id(), now));
+        waiting.waitForStock();
+        List<SalesOrderLine> waitingLines = new ArrayList<>();
+        for (int i = 0; i < rest.size(); i++) {
+            SalesOrderLine line = rest.get(i);
+            int quantity = waits.get(line.getProductId());
+            long reference = prices.get(line.getProductId());
+            waitingLines.add(SalesOrderLine.create(waiting.getId(), i + 1, line.getProductId(), quantity, reference,
+                    OrderPricing.actualUnitPrice(reference, order.getDiscountRate())));
+        }
+        orderLines.saveAll(waitingLines);
+        orderLines.flush();
+        opened(seller, waiting, waitingLines, now, order.getId());
+        return waiting.getId();
+    }
+
+    // GVHD 20/11
+    @Transactional
+    @Override
+    public SalesOrderDetail release(AuthenticatedUser seller, long id, ReleaseWaitingOrderRequest request) {
+        SalesOrder order = lockForSeller(seller, id);
+        if (!order.isWaitingForStock()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG307", id);
+        }
+        List<SalesOrderLine> lines = orderLines.findBySalesOrderIdOrderByLineNoAsc(id);
+        Map<Long, SalesOrderLine> byId = byId(lines, SalesOrderLine::getId);
+        Map<Long, Integer> wanted = new LinkedHashMap<>();
+        for (int i = 0; i < request.lines().size(); i++) {
+            ReleaseWaitingOrderRequest.Line line = request.lines().get(i);
+            SalesOrderLine target = byId.get(line.lineId());
+            if (target == null || wanted.containsKey(line.lineId())) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG166", i + 1);
+            }
+            if (line.nowQty() > target.getRequestedQty()) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG305", i + 1, target.getRequestedQty());
+            }
+            wanted.put(line.lineId(), line.nowQty());
+        }
+        if (wanted.values().stream().allMatch(quantity -> quantity == 0)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG02");
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<Long> ids = lines.stream().map(SalesOrderLine::getProductId).sorted().toList();
+        balances.findByStoreForUpdate(order.getStoreId(), ids);
+        Map<Long, PickingGuide.Part> stock = guide.parts(order.getStoreId(), ids, now.toLocalDate());
+        Map<Long, Product> parts = byId(products.findAllById(ids), Product::getId);
+        Map<Long, Integer> released = new LinkedHashMap<>();
+        wanted.forEach((lineId, quantity) -> released.put(lineId,
+                Math.min(quantity, stock.get(byId.get(lineId).getProductId()).sellableQty())));
+        if (released.values().stream().allMatch(quantity -> quantity == 0)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG171", wanted.entrySet().stream()
+                    .filter(entry -> entry.getValue() > 0)
+                    .map(entry -> "%s cần %d, còn %d".formatted(parts.get(byId.get(entry.getKey()).getProductId())
+                            .getSku(), entry.getValue(), stock.get(byId.get(entry.getKey()).getProductId())
+                            .sellableQty()))
+                    .collect(Collectors.joining("; ")));
+        }
+        // BR-18: what is sold now takes the retail prices in effect, as a submitted draft does.
+        // Only what is released needs a retail price in effect; a line that stays waiting may be unpriced.
+        Map<Long, Long> prices = requireLinePrices(lines.stream()
+                .filter(line -> released.getOrDefault(line.getId(), 0) > 0).toList(), parts, now);
+        BigDecimal rate = order.getDiscountRate();
+        boolean whole = lines.stream().allMatch(line -> released.getOrDefault(line.getId(), 0)
+                == line.getRequestedQty());
+        int version = currentVersion(id);
+        Map<String, Object> previous = SalesOrderHistory.snapshot(version, null, order, lines);
+        if (whole) {
+            checkPricing(rate, lines.stream().map(line -> priced(line.getRequestedQty(),
+                    prices.get(line.getProductId()), rate)).toList(), now);
+            lines.forEach(line -> line.reprice(prices.get(line.getProductId()),
+                    OrderPricing.actualUnitPrice(prices.get(line.getProductId()), rate)));
+            order.release(now);
+            orderLines.flush();
+            auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(),
+                    null, previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
+                            lines), now));
+            notifyPicking(seller, order);
+            return detail(seller, order).withSplit(new SalesOrderDetail.Split(id, null, null, List.of()));
+        }
+        List<SalesOrderLine> taken = lines.stream().filter(line -> released.getOrDefault(line.getId(), 0) > 0)
+                .toList();
+        checkPricing(rate, taken.stream().map(line -> priced(released.get(line.getId()),
+                prices.get(line.getProductId()), rate)).toList(), now);
+        SalesOrder sold = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
+                rate, order.getNote(), seller.id(), now));
+        List<SalesOrderLine> soldLines = new ArrayList<>();
+        for (int i = 0; i < taken.size(); i++) {
+            SalesOrderLine line = taken.get(i);
+            long reference = prices.get(line.getProductId());
+            soldLines.add(SalesOrderLine.create(sold.getId(), i + 1, line.getProductId(), released.get(line.getId()),
+                    reference, OrderPricing.actualUnitPrice(reference, rate)));
+        }
+        orderLines.saveAll(soldLines);
+        List<SalesOrderLine> gone = taken.stream().filter(line -> released.get(line.getId())
+                == line.getRequestedQty()).toList();
+        taken.stream().filter(line -> !gone.contains(line))
+                .forEach(line -> line.keepWaiting(line.getRequestedQty() - released.get(line.getId())));
+        orderLines.deleteAll(gone);
+        orderLines.flush();
+        auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(), null,
+                previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
+                        orderLines.findBySalesOrderIdOrderByLineNoAsc(id)), now));
+        return opened(seller, sold, soldLines, now, id)
+                .withSplit(new SalesOrderDetail.Split(sold.getId(), id, null, List.of()));
+    }
+
+    /** UC-86: when the Owner sold it, the store's Branch Manager is told to give the picking to someone. */
+    private void notifyPicking(AuthenticatedUser seller, SalesOrder order) {
+        if (seller.role() == Role.OWNER) {
+            notifications.notifyStoreManagers(order.getStoreId(), "SALES_ORDER_CREATED",
+                    "Có đơn bán mới %s cần giao việc lấy hàng.".formatted(label(order)), REF_TYPE, order.getId());
+        }
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -801,10 +1126,33 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return byProduct;
     }
 
+    /**
+     * GVHD 20/11: each part asked for in more units than before (or newly added) must be sellable in the new quantity,
+     * leaving out what other open orders hold (MSG171 listing them).
+     */
+    private void checkMoreInStock(SalesOrder order, Map<Long, Integer> wanted, Map<Long, Integer> before,
+                                  Map<Long, Product> parts, LocalDate today) {
+        Set<Long> more = wanted.entrySet().stream()
+                .filter(entry -> entry.getValue() > before.getOrDefault(entry.getKey(), 0))
+                .map(Map.Entry::getKey).collect(Collectors.toSet());
+        if (more.isEmpty()) {
+            return;
+        }
+        balances.findByStoreForUpdate(order.getStoreId(), more.stream().sorted().toList());
+        Map<Long, PickingGuide.Part> stock = guide.parts(order.getStoreId(), more, today, order.getId());
+        String lacking = more.stream().sorted().filter(id -> wanted.get(id) > stock.get(id).sellableQty())
+                .map(id -> "%s cần %d, còn %d".formatted(parts.get(id).getSku(), wanted.get(id),
+                        stock.get(id).sellableQty()))
+                .collect(Collectors.joining("; "));
+        if (!lacking.isEmpty()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG171", lacking);
+        }
+    }
+
     /** UC-58 step 6, BR-31, BR-76: the store holds enough unexpired available goods for every delivered line. */
     private void checkStock(SalesOrder order, List<SalesOrderLine> lines, Map<Long, Product> parts,
                             Map<Long, Integer> delivered, LocalDate today) {
-        Map<Long, PickingGuide.Part> stock = guide.parts(order.getStoreId(), parts.keySet(), today);
+        Map<Long, PickingGuide.Part> stock = guide.parts(order.getStoreId(), parts.keySet(), today, order.getId());
         String lacking = lines.stream().filter(line -> delivered.get(line.getProductId())
                         > stock.get(line.getProductId()).sellableQty())
                 .map(line -> "%s cần %d, còn %d".formatted(parts.get(line.getProductId()).getSku(),
@@ -878,6 +1226,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
         return switch (order.getStatus()) {
             case DRAFT -> null;
+            case AWAITING_STOCK -> NextAction.RELEASE;
             // GVHD 20/11: the Owner sells like a Branch Manager, so they give the picking too.
             case AWAITING_PICKING -> picking == null ? NextAction.ASSIGN_PICKER : null;
             // K1 (PM 19/11): the seller confirms, even a Branch Manager who picked the goods themself.
@@ -904,7 +1253,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, Product> parts = byId(products.findAllById(productIds), Product::getId);
         boolean unfinished = order.isUnfinished();
         Map<Long, PickingGuide.Part> stock = unfinished
-                ? guide.parts(order.getStoreId(), productIds, now.toLocalDate()) : Map.of();
+                ? guide.parts(order.getStoreId(), productIds, now.toLocalDate(), id) : Map.of();
         Map<Long, String> reasons = shortReasons(steps, lines);
         boolean draft = order.isDraft();
         OrderCollections.Money collected = staff || draft ? null : collections.of(id);
@@ -949,7 +1298,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     staff ? null : line.getReferencePrice(), staff ? null : line.getActualUnitPrice(),
                     staff ? null : (long) quantity * line.getActualUnitPrice(),
                     held == null ? 0 : held.sellableQty(), held == null ? 0 : Math.max(0, needed - held.sellableQty()),
-                    held == null ? List.of() : held.pickFirst(needed)));
+                    held == null ? List.of() : held.pickFirst(needed), held == null ? 0 : held.heldByOthersQty()));
         }
         Totals totals = OrderPricing.totals(priced);
 
@@ -964,7 +1313,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         boolean creditAllowed = order.getCustomerId() != null && customers.findById(order.getCustomerId())
                 .filter(customer -> customer.getCreditStatus() == CreditStatus.ELIGIBLE).isPresent();
         // A draft is only edited, submitted or deleted by its creator (PM 13/11).
-        Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false)
+        Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false, false)
                 : new Actions(seller && unfinished,
                 seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
                 holdsTask && ((order.getStatus() == SalesOrderStatus.AWAITING_PICKING
@@ -979,7 +1328,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 seller && confirmedNow && settled && creditAllowed && money.remainingPayable() > 0
                         && money.overpaidAmount() == 0,
                 seller && confirmedNow && settled && money.remainingPayable() == 0 && money.overpaidAmount() == 0,
-                seller && unfinished);
+                seller && unfinished, seller && order.isWaitingForStock());
         Closing closing = staff ? null : new Closing(order.getCompletionType(), order.getCompletedBy(),
                 names.get(order.getCompletedBy()), order.getCompletedAt(), order.getCancelledBy(),
                 names.get(order.getCancelledBy()), order.getCancelledAt(), order.getCancellationReason());
@@ -995,7 +1344,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 delivered ? "DELIVERED" : "REQUESTED", staff ? null : totals.referenceTotal(),
                 staff ? null : totals.discountAmount(), staff ? null : totals.total(),
                 staff ? null : totals.invoiceDiscountRate(), staff ? null : pricing.discountThreshold(now), money,
-                closing, rows, actions, history);
+                closing, rows, actions, history, splitFrom(steps), null);
+    }
+
+    /** GVHD 20/11: the order this one was split from ("tách từ BH-xxx"), kept in its version 1 in audit_log. */
+    private static Long splitFrom(List<AuditLog> steps) {
+        return steps.stream().filter(step -> SalesOrderHistory.CREATED.equals(step.getAction()))
+                .map(step -> step.getNewData().get(SalesOrderHistory.SPLIT_FROM)).filter(Objects::nonNull)
+                .map(value -> SalesOrderHistory.number(value).longValue()).findFirst().orElse(null);
     }
 
     /** Screen 8.2.2: what the order holds of the customer's money, its payments and refunds, credit and receivable. */
