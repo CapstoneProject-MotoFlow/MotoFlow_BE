@@ -87,7 +87,7 @@ class ReferenceDataCacheTest extends ApiTestUsers {
         assertThat(stores.listStores(null, null, null)).singleElement()
                 .satisfies(s -> assertThat(s.managers()).extracting("fullName").containsExactly("Test bm"));
 
-        stores.updateStore(owner, store, new UpdateStoreRequest("Cầu Giấy 2", "Hà Nội", null, StoreStatus.ACTIVE, false));
+        stores.updateStore(owner, store, new UpdateStoreRequest("Cầu Giấy 2", "Hà Nội", null, StoreStatus.ACTIVE, false, null));
         assertThat(stores.listStores(null, null, null)).singleElement()
                 .satisfies(s -> assertThat(s.storeName()).isEqualTo("Cầu Giấy 2"));
     }

@@ -138,7 +138,9 @@ public class StoreServiceImpl implements StoreService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
-        Store store = saveNew(Store.create(name, request.address().strip(), phone, request.central(), now));
+        Store created = Store.create(name, request.address().strip(), phone, request.central(), now);
+        created.changeTaxCode(blankToNull(request.taxCode()), now);
+        Store store = saveNew(created);
         auditLog.save(AuditLog.record("STORE", store.getId(), "STORE_CREATED", actor.id(), null, now));
         return StoreResponse.from(store, List.of(), 0);
     }
@@ -198,6 +200,7 @@ public class StoreServiceImpl implements StoreService {
         LocalDateTime now = LocalDateTime.now(clock);
         String phone = blankToNull(request.phone());
         store.update(name, request.address().strip(), phone, request.status(), now);
+        store.changeTaxCode(blankToNull(request.taxCode()), now);
         if (request.central() && !isCentral) {
             store.makeCentral(now);
         }

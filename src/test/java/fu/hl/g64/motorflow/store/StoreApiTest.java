@@ -86,6 +86,23 @@ class StoreApiTest extends IntegrationTest {
     }
 
     @Test
+    void theStoreKeepsItsTaxCodeForTheSalesSlip() throws Exception {
+        Map<String, Object> body = new HashMap<>(store("ch01", false));
+        body.put("taxCode", "0101234567");
+        long id = createdId(createStore(body).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.taxCode").value("0101234567")));
+
+        Map<String, Object> change = update("PLANNED", false);
+        change.put("taxCode", "0101234567-001");
+        updateStore(id, change).andExpect(status().isOk()).andExpect(jsonPath("$.taxCode").value("0101234567-001"));
+        change.put("taxCode", "12345");
+        updateStore(id, change).andExpect(status().isBadRequest());
+        change.put("taxCode", "");
+        updateStore(id, change).andExpect(status().isOk()).andExpect(jsonPath("$.taxCode").doesNotExist());
+        assertThat(jdbc.queryForObject("SELECT tax_code FROM store WHERE id = ?", String.class, id)).isNull();
+    }
+
+    @Test
     void storeNameIsUniqueIgnoringCase() throws Exception {
         createStore(store("CH01", false)).andExpect(status().isCreated());
         createStore(store("ch01", false))

@@ -108,6 +108,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     public SettlementResult recordPayment(AuthenticatedUser seller, long orderId, OrderPaymentRequest request) {
         Long paymentId = transactions.execute(status -> {
             SalesOrder order = lockForSeller(seller, orderId);
+            requireNotWaiting(order);
             requireConfirmed(order);
             long total = total(orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId));
             long payable = collections.of(orderId).payable(total);
@@ -140,7 +141,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Override
     public SettlementResult recordRefund(AuthenticatedUser seller, long orderId, OrderRefundRequest request) {
         Long refundId = transactions.execute(status -> {
-            lockForSeller(seller, orderId);
+            requireNotWaiting(lockForSeller(seller, orderId));
             OrderCollections.Money money = collections.of(orderId);
             // BR-45: the same refund sent twice finds less still refundable.
             if (request.expectedRefundable() != money.refundable()) {
@@ -449,6 +450,16 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                 || (user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId()));
         if (!seller) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+    }
+
+    /**
+     * GVHD 20/11, PM 21/11: a waiting order takes no money but its deposit (POST /deposits), and gives deposit back
+     * only through its last release (MSG308).
+     */
+    private static void requireNotWaiting(SalesOrder order) {
+        if (order.isWaitingForStock()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG308");
         }
     }
 

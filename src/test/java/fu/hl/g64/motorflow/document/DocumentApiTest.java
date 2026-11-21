@@ -383,7 +383,10 @@ class DocumentApiTest extends SalesOrderTestData {
 
     @Test
     void aCompletedSalePrintsAsAnInvoiceAndAStockIssueNote() throws Exception {
+        // PM 21/11: the store's own tax code is printed as the seller's.
+        jdbc.update("UPDATE store SET tax_code = '0101234567' WHERE store_name = 'Gia Lâm'");
         print(managerToken, "SALES_ORDER", sale, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.store.taxCode").value("0101234567"))
                 .andExpect(jsonPath("$.form").value("SALES_INVOICE"))
                 .andExpect(jsonPath("$.number").value("#" + sale))
                 .andExpect(jsonPath("$.printedBy").value("Test bm"))

@@ -48,8 +48,10 @@ import fu.hl.g64.motorflow.sales.dto.SalesOrderView;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
+import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
+import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Priced;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
@@ -122,6 +124,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final OrderCollections collections;
     private final ReceivableRepository receivables;
     private final AttachmentService attachments;
+    private final OrderDeposits deposits;
     private final Clock clock;
 
     // UC-52
@@ -1279,12 +1282,17 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, String> reasons = shortReasons(steps, lines);
         boolean draft = order.isDraft();
         OrderCollections.Money collected = staff || draft ? null : collections.of(id);
+        OrderDeposits.State deposit = collected == null ? null : deposits.of(order, collected);
         Set<Long> people = new HashSet<>();
         people.add(order.getCreatedBy());
         people.add(order.getConfirmedBy());
         people.add(order.getCreditDecidedBy());
         people.add(order.getCompletedBy());
         people.add(order.getCancelledBy());
+        people.add(order.getDepositForfeitedBy());
+        if (deposit != null) {
+            deposit.changes().forEach(change -> people.add(change.getChangedBy()));
+        }
         if (collected != null) {
             collected.rows().forEach(row -> {
                 people.add(row.getRecordedBy());
@@ -1335,7 +1343,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         boolean creditAllowed = order.getCustomerId() != null && customers.findById(order.getCustomerId())
                 .filter(customer -> customer.getCreditStatus() == CreditStatus.ELIGIBLE).isPresent();
         // A draft is only edited, submitted or deleted by its creator (PM 13/11).
-        Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false, false)
+        boolean waiting = order.isWaitingForStock();
+        boolean depositHolds = waiting && deposit != null && deposit.status() != DepositStatus.EXPIRED
+                && !deposits.expired(order);
+        boolean storeManager = user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
+        Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false, false,
+                false, false)
                 : new Actions(seller && unfinished,
                 seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
                 holdsTask && ((order.getStatus() == SalesOrderStatus.AWAITING_PICKING
@@ -1346,11 +1359,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 // (GVHD 20/11). A seller is never Staff.
                 seller && (order.getStatus() == SalesOrderStatus.PICKED || confirmedNow),
                 seller && confirmedNow && money.payableNow() > 0,
-                seller && unfinished && money.refundable() > 0,
+                // A waiting order gives deposit back only through its last release (PM 21/11).
+                seller && unfinished && !waiting && money.refundable() > 0,
                 seller && confirmedNow && settled && creditAllowed && money.remainingPayable() > 0
                         && money.overpaidAmount() == 0,
                 seller && confirmedNow && settled && money.remainingPayable() == 0 && money.overpaidAmount() == 0,
-                seller && unfinished, seller && order.isWaitingForStock());
+                seller && unfinished, seller && waiting,
+                seller && depositHolds && order.getCustomerId() != null,
+                storeManager && depositHolds && order.getDepositExpiresOn() != null);
         Closing closing = staff ? null : new Closing(order.getCompletionType(), order.getCompletedBy(),
                 names.get(order.getCompletedBy()), order.getCompletedAt(), order.getCancelledBy(),
                 names.get(order.getCancelledBy()), order.getCancelledAt(), order.getCancellationReason());
@@ -1366,7 +1382,22 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 delivered ? "DELIVERED" : "REQUESTED", staff ? null : totals.referenceTotal(),
                 staff ? null : totals.discountAmount(), staff ? null : totals.total(),
                 staff ? null : totals.invoiceDiscountRate(), staff ? null : pricing.discountThreshold(now), money,
-                closing, rows, actions, history, splitFrom(steps), null);
+                closing, rows, actions, history, splitFrom(steps), null, deposit(order, deposit, names));
+    }
+
+    /** PM 21/11: the deposit block of the detail, null for Staff and for a draft. */
+    private static SalesOrderDetail.Deposit deposit(SalesOrder order, OrderDeposits.State state,
+                                                    Map<Long, String> names) {
+        if (state == null) {
+            return null;
+        }
+        List<SalesOrderDetail.ExpiryChange> changes = state.changes().stream()
+                .map(change -> new SalesOrderDetail.ExpiryChange(change.getOldDate(), change.getNewDate(),
+                        change.getChangedBy(), names.get(change.getChangedBy()), change.getChangedAt()))
+                .toList();
+        return new SalesOrderDetail.Deposit(state.total(), state.unverified(), state.applied(), state.refunded(),
+                state.remaining(), state.expiresOn(), state.status(), order.getDepositForfeitedAt(),
+                order.getDepositForfeitedBy(), names.get(order.getDepositForfeitedBy()), changes);
     }
 
     /** GVHD 20/11: the order this one was split from ("tách từ BH-xxx"), kept in its version 1 in audit_log. */

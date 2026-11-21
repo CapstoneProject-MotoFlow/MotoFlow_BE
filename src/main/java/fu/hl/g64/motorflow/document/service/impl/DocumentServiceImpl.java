@@ -612,9 +612,10 @@ public class DocumentServiceImpl implements DocumentService {
         if (id == null) {
             return null;
         }
-        return documents.row("SELECT id, store_name, address, phone FROM store WHERE id = :id", Map.of("id", id))
+        return documents.row("SELECT id, store_name, address, phone, tax_code FROM store WHERE id = :id",
+                        Map.of("id", id))
                 .map(found -> new Party(id, str(found, "store_name"), str(found, "address"), str(found, "phone"),
-                        null)).orElse(null);
+                        str(found, "tax_code"))).orElse(null);
     }
 
     private LocalDateTime now() {
