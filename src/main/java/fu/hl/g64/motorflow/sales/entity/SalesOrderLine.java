@@ -95,6 +95,18 @@ public class SalesOrderLine {
         requestedQty = quantity;
     }
 
+    /**
+     * UC-58, GVHD 20/11: the units not delivered moved to a waiting order, so this line asks for what it delivered
+     * (the unmet part is counted once, on the waiting order). The picked quantity follows, never above requested.
+     */
+    public void narrowToDelivered() {
+        if (deliveredQty == null || deliveredQty <= 0) {
+            throw new IllegalStateException("only a line with units delivered can be narrowed to them");
+        }
+        requestedQty = deliveredQty;
+        pickedQty = deliveredQty;
+    }
+
     /** UC-58: what the customer agreed to receive, from the picked quantity (BR-34). */
     public void deliver(int deliveredQty) {
         if (deliveredQty < 0 || pickedQty == null || deliveredQty > pickedQty) {

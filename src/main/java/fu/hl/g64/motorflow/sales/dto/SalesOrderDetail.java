@@ -41,8 +41,11 @@ public record SalesOrderDetail(
         BigDecimal discountThreshold, Money money, Closing closing, List<Line> lines, Actions actions,
         List<HistoryEntry> history, Long splitFromOrderId, Split split) {
 
-    /** GVHD 20/11: how one request was split. Either order id is null when nothing went to it. */
-    public record Split(Long salesOrderId, Long waitingOrderId, List<Declined> declined) {
+    /**
+     * GVHD 20/11: how one request was split. An order id is null when nothing went to it; {@code declinedOrderId} is
+     * the cancelled order that keeps what the customer declined.
+     */
+    public record Split(Long salesOrderId, Long waitingOrderId, Long declinedOrderId, List<Declined> declined) {
     }
 
     /** Units of a part the customer asked for and chose not to take. */

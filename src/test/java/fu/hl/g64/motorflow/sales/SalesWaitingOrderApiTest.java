@@ -126,48 +126,171 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
-    void whatIsNotDeliveredMayWaitAndIsNotUnmetTwice() throws Exception {
-        long order = createOrder(pad, 5);
-        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
-        pick(staffToken, order, 1, pad, 5, null).andExpect(status().isOk());
-        // The customer takes 3 today and comes back for 2 ("mai chị đến lấy nốt").
-        String body = mvc.perform(post("/api/v1/sales-orders/" + order + "/confirm")
-                        .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("version", 1, "customerAgreed", true, "lines", List.of(Map.of(
-                                "productId", pad, "deliveredQty", 3, "waitForRest", true))))))
-                .andExpect(status().isOk())
+    void whatTheCustomerDeclinedIsKeptAsACancelledOrderAndIsUnmetOnce() throws Exception {
+        createOrder(pad, 3);
+        // 7 wanted, 3 taken now, no waiting, 5 sellable: 3 sold, 4 declined and kept on a cancelled order.
+        String body = create(managerToken, order(null, customer, "RETAIL", null, List.of(line(pad, 7, 3, false))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(3))
+                .andExpect(jsonPath("$.split.waitingOrderId").value(nullValue()))
+                .andExpect(jsonPath("$.split.declined[0].quantity").value(4))
+                .andReturn().getResponse().getContentAsString();
+        long sold = id(body);
+        long declined = ((Number) JsonPath.read(body, "$.split.declinedOrderId")).longValue();
+        assertThat(declined).isNotEqualTo(sold);
+        detail(managerToken, declined)
+                .andExpect(jsonPath("$.status").value("CANCELLED"))
+                .andExpect(jsonPath("$.splitFromOrderId").value((int) sold))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(4));
+        assertThat(jdbc.queryForObject("SELECT cancellation_reason FROM sales_order WHERE id = ?", String.class,
+                declined)).isEqualTo("Khách không chờ hàng");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE entity_type = 'SALES_ORDER' "
+                + "AND entity_id = ? AND action = 'SALES_ORDER_CANCELLED'", Long.class, declined)).isEqualTo(1);
+        // It holds nothing and nobody is told to pick it: 8 - 3 - 3 = 2.
+        preview(lines(pad, 1)).andExpect(jsonPath("$.lines[0].sellableQty").value(2));
+        unmetDemand()
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].orderId").value((int) declined))
+                .andExpect(jsonPath("$.items[0].orderStatus").value("CANCELLED"))
+                .andExpect(jsonPath("$.items[0].missingQty").value(4));
+    }
+
+    @Test
+    void aShortDeliveryMovedToAWaitingOrderNarrowsTheLineAndCannotBeDeliveredAgain() throws Exception {
+        long order = pickedOrder(pad, 5);
+        String body = confirmWaiting(order, 1, pad, 3).andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andReturn().getResponse().getContentAsString();
         long waiting = ((Number) JsonPath.read(body, "$.split.waitingOrderId")).longValue();
+        detail(managerToken, order)
+                .andExpect(jsonPath("$.lines", hasSize(1)))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(3))
+                .andExpect(jsonPath("$.lines[0].deliveredQty").value(3))
+                .andExpect(jsonPath("$.total").value(300_000));
         detail(managerToken, waiting)
                 .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
                 .andExpect(jsonPath("$.splitFromOrderId").value((int) order))
                 .andExpect(jsonPath("$.lines[0].requestedQty").value(2));
+        String audit = jdbc.queryForObject("SELECT new_data::text FROM audit_log WHERE entity_type = 'SALES_ORDER' "
+                + "AND entity_id = ? AND action = 'SALES_ORDER_CONFIRMED'", String.class, order);
+        assertThat((Integer) JsonPath.read(audit, "$.lines[0].requested_before")).isEqualTo(5);
+        assertThat(((Number) JsonPath.read(audit, "$.waiting_order_id")).longValue()).isEqualTo(waiting);
+        // The version saved by the confirmation is the narrowed one.
+        assertThat((Integer) JsonPath.read(jdbc.queryForObject("SELECT new_data::text FROM audit_log WHERE "
+                + "entity_type = 'SALES_ORDER' AND entity_id = ? AND action = 'SALES_ORDER_VERSIONED'", String.class,
+                order), "$.lines[0].requested_qty")).isEqualTo(3);
+
         // A waiting order is neither picked nor confirmed until it is released.
-        mvc.perform(post("/api/v1/sales-orders/" + waiting + "/confirm")
-                        .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("version", 1, "customerAgreed", true, "lines", List.of(Map.of(
-                                "productId", pad, "deliveredQty", 2))))))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG308"));
-
-        // Confirming again cannot deliver the 2 that went to the waiting order (kept in the audit log).
-        mvc.perform(post("/api/v1/sales-orders/" + order + "/confirm")
-                        .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("version", 2, "customerAgreed", true, "lines", List.of(Map.of(
-                                "productId", pad, "deliveredQty", 5))))))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG169"));
-
+        confirm(managerToken, waiting, 1, pad, 2).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG308"));
+        // The 2 on the waiting order cannot be delivered here too, and redoing the confirmation adds no new order.
+        confirm(managerToken, order, 2, pad, 5).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG169"));
+        confirm(managerToken, order, 2, pad, 3).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order WHERE status = 'AWAITING_STOCK'",
+                Long.class)).isEqualTo(1);
         // The confirmed order holds its 3 delivered pads: 8 - 3 = 5 for others.
         preview(lines(pad, 1)).andExpect(jsonPath("$.lines[0].sellableQty").value(5));
+    }
 
-        // Paid and completed: its own holding does not stop it. Unmet shows the 2 once, on the completed order;
-        // the waiting order is not unmet demand.
+    @Test
+    void theRestOnAWaitingOrderIsUnmetOnlyIfThatOrderIsCancelled() throws Exception {
+        long order = pickedOrder(pad, 5);
+        String body = confirmWaiting(order, 1, pad, 3).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long waiting = ((Number) JsonPath.read(body, "$.split.waitingOrderId")).longValue();
+
         pay(order, 300_000).andExpect(status().isOk()).andExpect(jsonPath("$.completed").value(true));
-        mvc.perform(get("/api/v1/unmet-demand").header(HttpHeaders.AUTHORIZATION, managerToken))
+        unmetDemand().andExpect(jsonPath("$.items", hasSize(0)));
+
+        cancel(waiting).andExpect(status().isOk());
+        unmetDemand()
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].orderId").value((int) waiting))
+                .andExpect(jsonPath("$.items[0].orderStatus").value("CANCELLED"))
+                .andExpect(jsonPath("$.items[0].missingQty").value(2));
+    }
+
+    @Test
+    void aShortDeliveryWithoutWaitingStaysUnmet() throws Exception {
+        long order = pickedOrder(pad, 5);
+        confirm(managerToken, order, 1, pad, 3).andExpect(status().isOk());
+        detail(managerToken, order).andExpect(jsonPath("$.lines[0].requestedQty").value(5));
+        pay(order, 300_000).andExpect(status().isOk()).andExpect(jsonPath("$.completed").value(true));
+        unmetDemand()
                 .andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.items[0].orderId").value((int) order))
                 .andExpect(jsonPath("$.items[0].orderStatus").value("COMPLETED"))
                 .andExpect(jsonPath("$.items[0].missingQty").value(2));
+    }
+
+    @Test
+    void aLineDeliveredNothingThatWaitsLeavesTheOrderWhole() throws Exception {
+        long order = createOrder(pad, 2, oil, 2);
+        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
+        pick(staffToken, order, 1, pad, 2, null, oil, 2, null).andExpect(status().isOk());
+        String body = mvc.perform(post("/api/v1/sales-orders/" + order + "/confirm")
+                        .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("version", 1, "customerAgreed", true, "lines", List.of(
+                                Map.of("productId", pad, "deliveredQty", 0, "waitForRest", true),
+                                Map.of("productId", oil, "deliveredQty", 2))))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long waiting = ((Number) JsonPath.read(body, "$.split.waitingOrderId")).longValue();
+        detail(managerToken, order)
+                .andExpect(jsonPath("$.lines", hasSize(1)))
+                .andExpect(jsonPath("$.lines[0].productId").value((int) oil))
+                .andExpect(jsonPath("$.total").value(170_000));
+        detail(managerToken, waiting)
+                .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andExpect(jsonPath("$.lines", hasSize(1)))
+                .andExpect(jsonPath("$.lines[0].productId").value((int) pad))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(2));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order_line WHERE sales_order_id = ?", Long.class,
+                order)).isEqualTo(1);
+    }
+
+    @Test
+    void anOrderRevisedAfterDeferringPartIsDeliveredAgainWithoutTheOldDeferral() throws Exception {
+        long order = pickedOrder(pad, 5);
+        confirmWaiting(order, 1, pad, 3).andExpect(status().isOk());
+        // UC-55 on the confirmed order: it goes back to picking for 4 pads, which the picker takes again.
+        update(managerToken, order, 2, order(null, customer, "RETAIL", null, lines(pad, 4))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AWAITING_PICKING"));
+        pick(staffToken, order, 3, pad, 4, null).andExpect(status().isOk());
+        confirm(managerToken, order, 3, pad, 4).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        // Confirmed again for 3: the old deferral of 2 no longer caps the delivery.
+        confirm(managerToken, order, 3, pad, 3).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].deliveredQty").value(3));
+    }
+
+    @Test
+    void releaseChecksThePricesOfWhatItReleasesOnly() throws Exception {
+        long padHold = createOrder(pad, 8);
+        long oilHold = createOrder(oil, 4);
+        String body = create(managerToken, order(null, customer, "RETAIL", null, lines(pad, 3, oil, 2)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andReturn().getResponse().getContentAsString();
+        long waiting = id(body);
+        cancel(padHold).andExpect(status().isOk());
+        cancel(oilHold).andExpect(status().isOk());
+        // The retail price of the oil ends: it can no longer be released, the pads still can.
+        jdbc.update("UPDATE pricing_policy SET status = 'SUPERSEDED' WHERE policy_type = 'RETAIL_PRICE' "
+                + "AND product_id = ?", oil);
+        long oilLine = jdbc.queryForObject("SELECT id FROM sales_order_line WHERE sales_order_id = ? "
+                + "AND product_id = ?", Long.class, waiting, oil);
+        long padLine = jdbc.queryForObject("SELECT id FROM sales_order_line WHERE sales_order_id = ? "
+                + "AND product_id = ?", Long.class, waiting, pad);
+        release(waiting, oilLine, 2).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG160"));
+        release(waiting, padLine, 3).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
+                .andExpect(jsonPath("$.lines[0].productId").value((int) pad))
+                .andExpect(jsonPath("$.split.waitingOrderId").value((int) waiting));
+        detail(managerToken, waiting).andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andExpect(jsonPath("$.lines", hasSize(1)));
     }
 
     @Test
@@ -182,6 +305,26 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
                         .header(HttpHeaders.AUTHORIZATION, ownerToken))
                 .andExpect(jsonPath("$[?(@.storeId == " + store + ")].sellableQty", contains(3)));
         assertThat(lowStock.run()).isEqualTo(1);
+    }
+
+    /** A new order of one part, assigned to staff and picked in full. */
+    private long pickedOrder(long product, int quantity) throws Exception {
+        long order = createOrder(product, quantity);
+        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
+        pick(staffToken, order, 1, product, quantity, null).andExpect(status().isOk());
+        return order;
+    }
+
+    /** Confirms one line, delivering {@code delivered} and waiting for the rest ("mai chị đến lấy nốt"). */
+    private ResultActions confirmWaiting(long order, int version, long product, int delivered) throws Exception {
+        return mvc.perform(post("/api/v1/sales-orders/" + order + "/confirm")
+                .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("version", version, "customerAgreed", true, "lines", List.of(Map.of(
+                        "productId", product, "deliveredQty", delivered, "waitForRest", true))))));
+    }
+
+    private ResultActions unmetDemand() throws Exception {
+        return mvc.perform(get("/api/v1/unmet-demand").header(HttpHeaders.AUTHORIZATION, managerToken));
     }
 
     private static Map<String, Object> line(long product, int quantity, Integer nowQty, Boolean waitForRest) {
