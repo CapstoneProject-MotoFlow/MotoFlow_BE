@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.discrepancy.dto;
 
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ClosureType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.GoodsKind;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
@@ -29,6 +30,11 @@ import java.util.List;
  * not decided yet, which Owner may take into stock; {@code canRequestAcceptance} (Branch Manager of the store or
  * Owner) asks for it, {@code canApproveAcceptance} (Owner) does it; {@code pendingRequests} are the requests waiting for
  * Owner, one per kind at most, DAMAGED then WRONG_ITEM (empty when none).</p>
+ * <p>Góp ý UI 21/11: the return is agreed per kind: {@code wrongReturnRequiredQty} and {@code damagedReturnRequiredQty}
+ * (the rejected excess always goes back), and what is still to hand back is {@code excessOutstandingReturnQty},
+ * {@code wrongOutstandingReturnQty} and {@code damagedOutstandingReturnQty}; together they are
+ * {@code returnRequiredQty} and {@code outstandingReturnQty}. A return event has its {@code goodsKind} (null on returns
+ * recorded before).</p>
  */
 public record DiscrepancyCaseResponse(
         long id, long goodsReceiptNoteId, boolean replacementDelivery, long purchaseOrderId,
@@ -43,7 +49,9 @@ public record DiscrepancyCaseResponse(
         Long closedById, String closedByName, LocalDateTime closedAt,
         boolean canHandle, boolean canRecordReturn, boolean canWaiveReplacement, boolean canCreateReplacement,
         List<Event> events, int damagedUndecidedQty, int wrongUndecidedQty, boolean canRequestAcceptance,
-        boolean canApproveAcceptance, List<PendingRequest> pendingRequests) {
+        boolean canApproveAcceptance, List<PendingRequest> pendingRequests,
+        int wrongReturnRequiredQty, int damagedReturnRequiredQty, int excessOutstandingReturnQty,
+        int wrongOutstandingReturnQty, int damagedOutstandingReturnQty) {
 
     /** GVHD 20/11 (PR 5): a request to take held goods into stock, waiting for Owner. */
     public record PendingRequest(String type, Long productId, String sku, String partName, int quantity, String note,
@@ -56,6 +64,6 @@ public record DiscrepancyCaseResponse(
      */
     public record Event(long id, ResolutionType type, int quantity, Long goodsReceiptNoteId, String reason,
                         Long recordedById, String recordedByName, LocalDateTime occurredAt, boolean confirmed,
-                        LocalDateTime confirmedAt, List<AttachmentResponse> evidence) {
+                        LocalDateTime confirmedAt, List<AttachmentResponse> evidence, GoodsKind goodsKind) {
     }
 }

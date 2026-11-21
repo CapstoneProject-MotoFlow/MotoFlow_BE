@@ -53,8 +53,17 @@ public class DiscrepancyCase {
     @Column(name = "rejected_excess_qty", nullable = false)
     private int rejectedExcessQty;
 
+    /** The whole return: rejected excess + {@link #wrongReturnRequiredQty} + {@link #damagedReturnRequiredQty}. */
     @Column(name = "return_required_qty", nullable = false)
     private int returnRequiredQty;
+
+    /** Góp ý UI 21/11 (V21): the wrong items agreed to go back to the supplier. */
+    @Column(name = "wrong_return_required_qty", nullable = false)
+    private int wrongReturnRequiredQty;
+
+    /** Góp ý UI 21/11 (V21): the damaged goods agreed to go back to the supplier. */
+    @Column(name = "damaged_return_required_qty", nullable = false)
+    private int damagedReturnRequiredQty;
 
     @Column(name = "replacement_required_qty", nullable = false)
     private int replacementRequiredQty;
@@ -159,26 +168,31 @@ public class DiscrepancyCase {
      * agreed to go back (rejected excess is in the return from the start), within {@link #replacementLimit()}. On a
      * case not handled yet that is everything short and every wrong or damaged unit sent back.
      */
-    public int defaultReplacement(int returnRequired) {
-        return Math.min(replacementRequiredQty + Math.max(returnRequired - returnRequiredQty, 0), replacementLimit());
+    public int defaultReplacement(int wrongReturn, int damagedReturn) {
+        int added = Math.max(wrongReturn - wrongReturnRequiredQty, 0)
+                + Math.max(damagedReturn - damagedReturnRequiredQty, 0);
+        return Math.min(replacementRequiredQty + added, replacementLimit());
     }
 
     /**
-     * UC-46 step 6, BR-27: the return (rejected excess included) and the replacement agreed with the supplier, kept
-     * apart. The return may come down again (test report 20/11); the service keeps it above what went back already.
+     * UC-46 step 6, BR-27: the wrong items and the damaged goods to return (góp ý UI 21/11: kept apart, the rejected
+     * excess always goes back) and the replacement agreed with the supplier. The return may come down again (test
+     * report 20/11); the service keeps each kind above what went back already.
      */
-    public void agree(int returnRequired, int replacementRequired) {
+    public void agree(int wrongReturn, int damagedReturn, int replacementRequired) {
         requireOpen();
-        if (returnRequired < rejectedExcessQty || returnRequired > heldQty()) {
-            throw new IllegalArgumentException("return required " + returnRequired + " is outside "
-                    + rejectedExcessQty + ".." + heldQty());
+        if (wrongReturn < 0 || wrongReturn > wrongItemQty || damagedReturn < 0 || damagedReturn > damagedQty) {
+            throw new IllegalArgumentException("return " + wrongReturn + " wrong / " + damagedReturn
+                    + " damaged is outside 0.." + wrongItemQty + " / 0.." + damagedQty);
         }
         // Only Owner settles a shortage without replacement, by a waiver that leaves the requirement as it is.
         if (replacementRequired < shortQty || replacementRequired > replacementLimit()) {
             throw new IllegalArgumentException("replacement required " + replacementRequired + " is outside "
                     + shortQty + ".." + replacementLimit());
         }
-        returnRequiredQty = returnRequired;
+        wrongReturnRequiredQty = wrongReturn;
+        damagedReturnRequiredQty = damagedReturn;
+        returnRequiredQty = rejectedExcessQty + wrongReturn + damagedReturn;
         replacementRequiredQty = replacementRequired;
     }
 

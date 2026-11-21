@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.discrepancy.entity;
 
+import fu.hl.g64.motorflow.discrepancy.entity.enums.GoodsKind;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -36,6 +37,11 @@ public class DiscrepancyResolutionEvent {
     @Column(nullable = false)
     private int quantity;
 
+    /** Góp ý UI 21/11 (V21): on a return to the supplier, the goods it handed back; null on older returns. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "goods_kind", length = 15)
+    private GoodsKind goodsKind;
+
     @Column(name = "goods_receipt_note_id")
     private Long goodsReceiptNoteId;
 
@@ -66,6 +72,14 @@ public class DiscrepancyResolutionEvent {
         DiscrepancyResolutionEvent event = pending(caseId, type, quantity, null, reason, by, now);
         event.confirmedBy = by;
         event.confirmedAt = now;
+        return event;
+    }
+
+    /** UC-46 Step 1_Actual supplier return of {@code quantity} goods of one kind. */
+    public static DiscrepancyResolutionEvent returned(long caseId, GoodsKind kind, int quantity, String reason,
+                                                      long by, LocalDateTime now) {
+        DiscrepancyResolutionEvent event = done(caseId, ResolutionType.RETURNED_TO_SUPPLIER, quantity, reason, by, now);
+        event.goodsKind = kind;
         return event;
     }
 

@@ -443,9 +443,11 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                              LocalDateTime closedAt) {
         boolean closed = closedAt != null;
         jdbc.update("INSERT INTO discrepancy_case (source_type, goods_receipt_note_id, product_id, wrong_item_qty, "
-                        + "damaged_qty, return_required_qty, replacement_required_qty, status, opened_at, closure_type, "
-                        + "closed_by, closed_at) VALUES ('SUPPLIER', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", receipt, product,
-                wrongItem, damaged, wrongItem + damaged, wrongItem + damaged, closed ? "CLOSED" : "OPEN", openedAt,
+                        + "damaged_qty, return_required_qty, wrong_return_required_qty, damaged_return_required_qty, "
+                        + "replacement_required_qty, status, opened_at, closure_type, closed_by, closed_at) "
+                        + "VALUES ('SUPPLIER', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", receipt, product,
+                wrongItem, damaged, wrongItem + damaged, wrongItem, damaged, wrongItem + damaged,
+                closed ? "CLOSED" : "OPEN", openedAt,
                 closed ? "ALL_SETTLED" : null, closed ? owner.getId() : null, closedAt);
     }
 
