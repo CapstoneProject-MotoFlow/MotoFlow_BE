@@ -63,9 +63,10 @@ public class SalesDepositServiceImpl implements SalesDepositService {
         }
         OrderCollections.Money money = collections.of(orderId);
         OrderDeposits.State held = deposits.of(order, money);
-        // A rejected deposit leaves the date behind with nothing verified. That date is not a deposit,
-        // so it neither blocks a new one (MSG321) nor freezes the date (MSG323).
-        boolean fresh = held.total() == 0;
+        // A rejected deposit leaves the date behind with nothing recorded. That date is not a deposit,
+        // so it neither blocks a new one (MSG321) nor freezes the date (MSG323). Money still waiting
+        // to be verified does count, so a second deposit keeps the date and the recorded total.
+        boolean fresh = held.recorded() == 0;
         if (!fresh) {
             requireNotExpired(order);
         }
