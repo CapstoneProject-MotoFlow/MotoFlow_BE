@@ -19,6 +19,7 @@ import fu.hl.g64.motorflow.document.dto.DocumentSearch;
 import fu.hl.g64.motorflow.document.dto.DocumentType;
 import fu.hl.g64.motorflow.document.dto.PaymentContent;
 import fu.hl.g64.motorflow.document.dto.PrintForm;
+import fu.hl.g64.motorflow.document.dto.PrintLayout;
 import fu.hl.g64.motorflow.document.repository.DocumentQuery;
 import fu.hl.g64.motorflow.document.repository.DocumentQuery.Filter;
 import fu.hl.g64.motorflow.document.repository.DocumentQuery.Found;
@@ -28,6 +29,7 @@ import fu.hl.g64.motorflow.operation.service.AttachmentService;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentMethod;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
+import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.receiving.service.GoodsReceiptService;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
@@ -41,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -121,7 +124,8 @@ public class DocumentServiceImpl implements DocumentService {
     // UC-80
     @Transactional(readOnly = true)
     @Override
-    public DocumentPrint print(AuthenticatedUser user, DocumentType type, long id, PrintForm form) {
+    public DocumentPrint print(AuthenticatedUser user, DocumentType type, long id, PrintForm form,
+                               PrintLayout layout) {
         Found found = open(user, type, id);
         List<PrintForm> forms = formsOf(found.type(), found.status());
         PrintForm chosen = form == null && !forms.isEmpty() ? forms.getFirst() : form;
@@ -130,7 +134,7 @@ public class DocumentServiceImpl implements DocumentService {
         }
         DocumentRow row = row(found);
         return switch (chosen) {
-            case SALES_INVOICE -> salesInvoice(user, row);
+            case SALES_INVOICE -> salesInvoice(user, row, layout);
             case STOCK_ISSUE_NOTE -> type == DocumentType.SALES_ORDER ? salesIssueNote(user, row)
                     : transferIssueNote(user, row);
             case GOODS_RECEIPT_NOTE -> receiptNote(user, row);
@@ -444,7 +448,7 @@ public class DocumentServiceImpl implements DocumentService {
 
     // ---- UC-80 -------------------------------------------------------------------------------------------------------
 
-    private DocumentPrint salesInvoice(AuthenticatedUser user, DocumentRow row) {
+    private DocumentPrint salesInvoice(AuthenticatedUser user, DocumentRow row, PrintLayout layout) {
         Map<String, Object> order = salesOrder(row.id());
         List<Line> lines = new ArrayList<>();
         long reference = 0;
@@ -463,19 +467,26 @@ public class DocumentServiceImpl implements DocumentService {
                     str(found, "part_name"), str(found, "base_unit"), null, null, quantity, price, amount));
         }
         Map<String, Object> money = documents.row("""
-                SELECT COALESCE(SUM(CASE WHEN payment_type = 'REFUND' THEN -amount ELSE amount END), 0)
-                       + (SELECT COALESCE(SUM(a.amount), 0) FROM sales_deposit_application a
-                           WHERE a.sales_order_id = :id) AS paid
+                SELECT COALESCE(SUM(CASE WHEN payment_type = 'REFUND' THEN -amount ELSE amount END), 0) AS paid,
+                       (SELECT COALESCE(SUM(a.amount), 0) FROM sales_deposit_application a
+                         WHERE a.sales_order_id = :id) AS deposit
                   FROM payment WHERE sales_order_id = :id AND status = 'VERIFIED'
                    AND payment_type IN ('ORDER_PAYMENT', 'REFUND')""", Map.of("id", row.id()))
                 .orElseThrow();
+        long deposit = lng(money, "deposit");
+        long paid = lng(money, "paid");
         Long credit = documents.row("SELECT original_amount FROM receivable WHERE sales_order_id = :id",
                 Map.of("id", row.id())).map(debt -> lng(debt, "original_amount")).orElse(null);
+        // What is still unpaid after the deposit, the cash already taken and anything put on credit.
+        long amountDue = total - deposit - paid - (credit == null ? 0 : credit);
         Totals totals = new Totals(reference, reference - total, (BigDecimal) order.get("discount_rate"), total,
-                lng(money, "paid"), credit);
+                paid, credit, deposit, Math.max(0, amountDue));
+        // BE-9: a retail sale prints on the small receipt, a wholesale one on the A5 slip, unless the user picks.
+        PrintLayout chosen = layout != null ? layout
+                : PriceType.WHOLESALE.name().equals(str(order, "price_type")) ? PrintLayout.LARGE : PrintLayout.SMALL;
         return new DocumentPrint(PrintForm.SALES_INVOICE, row.type(), row.id(), row.number(), row.status(),
                 row.documentDate(), now(), user.fullName(), store(row.storeId()), customer(order), lines, totals,
-                null, str(order, "completion_type"));
+                null, str(order, "completion_type"), "Phiếu bán hàng", chosen);
     }
 
     private DocumentPrint salesIssueNote(AuthenticatedUser user, DocumentRow row) {
@@ -563,6 +574,11 @@ public class DocumentServiceImpl implements DocumentService {
 
     private DocumentPrint paymentReceipt(AuthenticatedUser user, DocumentRow row) {
         PaymentContent payment = payment(row.id());
+        boolean deposit = payment.paymentType() == PaymentType.DEPOSIT;
+        LocalDate expiresOn = !deposit ? null : documents.row(
+                        "SELECT deposit_expires_on FROM sales_order WHERE id = :id",
+                        Map.of("id", payment.salesOrderId()))
+                .map(found -> found.get("deposit_expires_on")).map(DocumentServiceImpl::day).orElse(null);
         Party customer = new Party(payment.customerId(), payment.customerName(), null, null, null);
         if (payment.salesOrderId() != null) {
             customer = customer(salesOrder(payment.salesOrderId()));
@@ -577,8 +593,22 @@ public class DocumentServiceImpl implements DocumentService {
                 new Totals(null, null, null, payment.amount(), null, null),
                 new DocumentPrint.Payment(payment.paymentType(), payment.paymentMethod(), payment.amount(),
                         payment.tenderedAmount(), payment.changeGiven(), payment.transactionReference(),
-                        payment.allocations()),
-                payment.salesOrderId() == null ? null : number(payment.salesOrderId()));
+                        payment.allocations(), expiresOn),
+                payment.salesOrderId() == null ? null : number(payment.salesOrderId()),
+                receiptTitle(payment.paymentType()), null);
+    }
+
+    /** PM 21/11 (BE-9): money in is a "Phiếu thu", a deposit a "Phiếu thu tiền cọc", money given back a "Phiếu chi". */
+    private static String receiptTitle(PaymentType type) {
+        return switch (type) {
+            case DEPOSIT -> "Phiếu thu tiền cọc";
+            case REFUND, DEPOSIT_REFUND -> "Phiếu chi";
+            case ORDER_PAYMENT, DEBT_PAYMENT -> "Phiếu thu";
+        };
+    }
+
+    private static LocalDate day(Object value) {
+        return value instanceof java.sql.Date date ? date.toLocalDate() : (LocalDate) value;
     }
 
     private DocumentPrint adjustmentNote(AuthenticatedUser user, DocumentRow row) {
@@ -599,7 +629,7 @@ public class DocumentServiceImpl implements DocumentService {
     private Map<String, Object> salesOrder(long id) {
         return documents.row("""
                 SELECT o.customer_id, o.customer_name_snapshot, o.customer_phone_snapshot, o.customer_address_snapshot,
-                       o.discount_rate, o.completion_type, c.tax_code
+                       o.discount_rate, o.completion_type, o.price_type, c.tax_code
                   FROM sales_order o LEFT JOIN customer c ON c.id = o.customer_id
                  WHERE o.id = :id""", Map.of("id", id)).orElseThrow();
     }

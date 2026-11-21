@@ -30,7 +30,7 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
     @Test
     void releasesTakeTheDepositIntoTheirOrdersAndTheLastOneGivesTheRestBack() throws Exception {
         long waiting = waitingOrder();
-        paidDeposit(waiting, 400_000, "2026-10-16");
+        long deposit = paidDeposit(waiting, 400_000, "2026-10-16");
 
         // 1 pad now (100,000): at most 100,000 of the 400,000 deposit goes into it.
         release(waiting, 1, 150_000L, null)
@@ -92,6 +92,35 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.closing.completionType").value("PAID"));
 
+        // BE-9: the invoice shows the deposit and what was left to pay; a retail sale prints small, wholesale large.
+        print("SALES_ORDER", sold, "").andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Phiếu bán hàng"))
+                .andExpect(jsonPath("$.layout").value("SMALL"))
+                .andExpect(jsonPath("$.totals.total").value(100_000))
+                .andExpect(jsonPath("$.totals.deposit").value(100_000))
+                .andExpect(jsonPath("$.totals.amountDue").value(0))
+                .andExpect(jsonPath("$.totals.paid").value(0));
+        // A short delivery can leave the deposit larger than the goods. The slip shows 0 still due, not a negative.
+        jdbc.update("UPDATE sales_order_line SET delivered_qty = 0 WHERE sales_order_id = ?", sold);
+        print("SALES_ORDER", sold, "")
+                .andExpect(jsonPath("$.totals.total").value(0))
+                .andExpect(jsonPath("$.totals.deposit").value(100_000))
+                .andExpect(jsonPath("$.totals.amountDue").value(0));
+        jdbc.update("UPDATE sales_order_line SET delivered_qty = 1 WHERE sales_order_id = ?", sold);
+        print("SALES_ORDER", sold, "&layout=LARGE").andExpect(jsonPath("$.layout").value("LARGE"));
+        jdbc.update("UPDATE sales_order SET price_type = 'WHOLESALE' WHERE id = ?", sold);
+        print("SALES_ORDER", sold, "").andExpect(jsonPath("$.layout").value("LARGE"));
+        print("PAYMENT", deposit, "").andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Phiếu thu tiền cọc"))
+                .andExpect(jsonPath("$.layout").value(nullValue()))
+                .andExpect(jsonPath("$.payment.paymentType").value("DEPOSIT"))
+                .andExpect(jsonPath("$.payment.depositExpiresOn").value("2026-10-16"))
+                .andExpect(jsonPath("$.totals.total").value(400_000));
+        long givenBack = jdbc.queryForObject("SELECT id FROM payment WHERE payment_type = 'DEPOSIT_REFUND'",
+                Long.class);
+        print("PAYMENT", givenBack, "").andExpect(jsonPath("$.title").value("Phiếu chi"))
+                .andExpect(jsonPath("$.payment.depositExpiresOn").value(nullValue()));
+
         // Sales report: the deposit came in once and 100,000 went back; what releases applied is shown apart.
         report("/sales-collection?storeId=" + store + "&from=2026-10-13&to=2026-10-13")
                 .andExpect(status().isOk())
@@ -136,6 +165,19 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.items[0].depositStatus").value(nullValue()))
                 .andExpect(jsonPath("$.items[0].depositRemaining").value(nullValue()));
+
+        // The customer then pays the 250,000 the deposit did not cover. The slip must not still say that is due.
+        pick(staffToken, waiting, 2, pad, 3, null).andExpect(status().isOk());
+        confirm(managerToken, waiting, 2, pad, 3).andExpect(status().isOk());
+        send(managerToken, "/api/v1/sales-orders/" + waiting + "/payments", Map.of("amount", 250_000,
+                "paymentMethod", "CASH", "verified", true, "expectedPayable", 250_000))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.completed").value(true));
+        print("SALES_ORDER", waiting, "")
+                .andExpect(jsonPath("$.totals.total").value(300_000))
+                .andExpect(jsonPath("$.totals.deposit").value(50_000))
+                .andExpect(jsonPath("$.totals.paid").value(250_000))
+                .andExpect(jsonPath("$.totals.amountDue").value(0));
     }
 
     @Test
@@ -282,6 +324,11 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
     private ResultActions forfeit(String token, long order) throws Exception {
         return mvc.perform(post("/api/v1/sales-orders/" + order + "/forfeit-deposit")
                 .header(HttpHeaders.AUTHORIZATION, token));
+    }
+
+    private ResultActions print(String type, long id, String parameters) throws Exception {
+        return mvc.perform(get("/api/v1/documents/" + type + "/" + id + "/print?form=" + (type.equals("PAYMENT")
+                ? "PAYMENT_RECEIPT" : "SALES_INVOICE") + parameters).header(HttpHeaders.AUTHORIZATION, managerToken));
     }
 
     private ResultActions report(String path) throws Exception {

@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.document.dto.DocumentRow;
 import fu.hl.g64.motorflow.document.dto.DocumentSearch;
 import fu.hl.g64.motorflow.document.dto.DocumentType;
 import fu.hl.g64.motorflow.document.dto.PrintForm;
+import fu.hl.g64.motorflow.document.dto.PrintLayout;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 
 /**
@@ -22,5 +23,5 @@ public interface DocumentService {
     DocumentDetail detail(AuthenticatedUser user, DocumentType type, long id);
 
     /** UC-80: {@code form} null takes the document's first form. */
-    DocumentPrint print(AuthenticatedUser user, DocumentType type, long id, PrintForm form);
+    DocumentPrint print(AuthenticatedUser user, DocumentType type, long id, PrintForm form, PrintLayout layout);
 }
