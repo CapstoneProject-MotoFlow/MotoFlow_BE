@@ -467,11 +467,18 @@ public class DocumentServiceImpl implements DocumentService {
                     str(found, "part_name"), str(found, "base_unit"), null, null, quantity, price, amount));
         }
         Map<String, Object> money = documents.row("""
-                SELECT COALESCE(SUM(CASE WHEN payment_type = 'REFUND' THEN -amount ELSE amount END), 0) AS paid,
+                SELECT COALESCE(SUM((CASE WHEN p.payment_type = 'REFUND' THEN -1 ELSE 1 END)
+                                    * (p.amount + COALESCE(c.change, 0))), 0) AS paid,
                        (SELECT COALESCE(SUM(a.amount), 0) FROM sales_deposit_application a
                          WHERE a.sales_order_id = :id) AS deposit
-                  FROM payment WHERE sales_order_id = :id AND status = 'VERIFIED'
-                   AND payment_type IN ('ORDER_PAYMENT', 'REFUND')""", Map.of("id", row.id()))
+                  FROM payment p
+                  -- BR-49: each payment counts with its applied corrections.
+                  LEFT JOIN (SELECT l.payment_id, SUM(l.amount_change) AS change FROM adjustment_amount_line l
+                               JOIN adjustment_request q ON q.id = l.adjustment_request_id
+                              WHERE q.status = 'APPLIED' AND l.payment_id IS NOT NULL
+                              GROUP BY l.payment_id) c ON c.payment_id = p.id
+                 WHERE p.sales_order_id = :id AND p.status = 'VERIFIED'
+                   AND p.payment_type IN ('ORDER_PAYMENT', 'REFUND')""", Map.of("id", row.id()))
                 .orElseThrow();
         long deposit = lng(money, "deposit");
         long paid = lng(money, "paid");
