@@ -113,7 +113,7 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG325"))
                 .andExpect(jsonPath("$.message").value(
                         "Đơn còn 20.000 đ tiền cọc chưa xác minh. Vui lòng xác minh hoặc từ chối khoản cọc đó trước."));
-        // A partial release may go ahead: only verified deposit is used.
+        // The unverified deposit is rejected, then the whole order is released on the verified 50,000.
         send(managerToken, "/api/v1/sales-orders/" + waiting + "/payments/" + unverified + "/reject",
                 Map.of("reason", "Không thấy tiền về")).andExpect(status().isOk());
 
