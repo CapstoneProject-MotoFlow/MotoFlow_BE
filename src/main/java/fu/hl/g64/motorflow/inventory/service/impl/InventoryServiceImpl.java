@@ -43,6 +43,7 @@ import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotStatus;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.helper.DefectiveArea;
 import fu.hl.g64.motorflow.inventory.repository.InventoryPeriodRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.helper.ExpiryWarning;
@@ -229,7 +230,11 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(readOnly = true)
     @Override
     public List<String> storageAreas(AuthenticatedUser user, Long storeId) {
-        return balances.findStorageAreas(scopeStoreId(user, storeId));
+        List<String> areas = new ArrayList<>(balances.findStorageAreas(scopeStoreId(user, storeId)));
+        if (areas.stream().noneMatch(DefectiveArea::is)) {
+            areas.add(DefectiveArea.NAME);
+        }
+        return areas;
     }
 
     // UC-47
@@ -336,7 +341,9 @@ public class InventoryServiceImpl implements InventoryService {
     public StockRowResponse updateLocation(AuthenticatedUser user, long storeId, long productId,
                                            StorageLocationRequest request) {
         StockBalance balance = editableBalance(user, storeId, productId);
-        balance.moveTo(blankToNull(request.storageArea()), blankToNull(request.binLocation()), LocalDateTime.now(clock));
+        // Stored in composed form (NFC), so the defective area typed with combining marks is still recognised.
+        balance.moveTo(blankToNull(DefectiveArea.nfc(request.storageArea())), blankToNull(request.binLocation()),
+                LocalDateTime.now(clock));
         return rows(user, List.of(balance)).getFirst();
     }
 
@@ -436,7 +443,8 @@ public class InventoryServiceImpl implements InventoryService {
     /** UC-47: the scope plus the stock filters the user switched on. */
     private Specification<StockBalance> stockFilter(Long storeId, StockSearch filter) {
         Specification<StockBalance> spec = stockScope(storeId, filter);
-        if (filter.hidesZeroStock()) {
+        // GVHD 20/11: the defective area lists parts with no available stock on purpose.
+        if (filter.hidesZeroStock() && !DefectiveArea.is(filter.storageArea())) {
             spec = spec.and(hasAvailable());
         }
         if (filter.lowStockOnly()) {
@@ -483,8 +491,14 @@ public class InventoryServiceImpl implements InventoryService {
                 where.add(root.get("productId").in(inCategory));
             }
             if (StringUtils.hasText(filter.storageArea())) {
-                where.add(cb.equal(cb.lower(root.get("storageArea")),
-                        filter.storageArea().strip().toLowerCase(Locale.ROOT)));
+                String area = DefectiveArea.nfc(filter.storageArea()).strip().toLowerCase(Locale.ROOT);
+                Predicate shelved = cb.equal(cb.lower(root.get("storageArea")), area);
+                // GVHD 20/11: the defective area also lists every part with goods that cannot be sold.
+                where.add(area.equals(DefectiveArea.NAME.toLowerCase(Locale.ROOT))
+                        ? cb.or(shelved, cb.greaterThan(root.get("wrongItemQty"), 0),
+                        cb.greaterThan(root.get("damagedQty"), 0),
+                        cb.greaterThan(root.get("awaitingSupplierReturnQty"), 0))
+                        : shelved);
             }
             return cb.and(where.toArray(Predicate[]::new));
         };
@@ -651,7 +665,8 @@ public class InventoryServiceImpl implements InventoryService {
                     p.getPartName(), p.getBaseUnit(), p.getStatus(), b.getStorageArea(), b.getBinLocation(),
                     b.getLowStockThreshold(), b.getAvailableQty(), b.getAwaitingInspectionQty(), b.getWrongItemQty(),
                     b.getDamagedQty(), b.getAwaitingSupplierReturnQty(), b.getInTransitQty(), b.onHandQty(), e[1], e[0],
-                    b.isLowStock(), value);
+                    b.isLowStock(), value, b.getWrongItemQty() + b.getDamagedQty()
+                    + b.getAwaitingSupplierReturnQty() > 0 ? DefectiveArea.NAME : null);
         }).toList();
     }
 

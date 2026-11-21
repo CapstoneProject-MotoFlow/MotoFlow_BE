@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.inventory.entity.StockCount;
 import fu.hl.g64.motorflow.inventory.entity.StockCountLine;
 import fu.hl.g64.motorflow.inventory.entity.enums.ScopeType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
+import fu.hl.g64.motorflow.inventory.helper.DefectiveArea;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository.CountedLot;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -14,8 +15,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,8 +35,10 @@ public class CountSheetServiceImpl implements CountSheetService {
     public List<StockCountLine> buildLines(StockCount count, List<Long> productIds) {
         List<Long> parts = partsInScope(count.getStoreId(), count.getScopeType(), count.getScopeNote(),
                 count.getPartCategoryId(), productIds);
+        Portion portion = portion(count);
         Map<Long, List<CountedLot>> lotsByPart = parts.isEmpty() ? Map.of()
                 : lotBalances.findCountedLots(count.getStoreId(), parts).stream()
+                .filter(lot -> portion.counted(lot) > 0)
                 .collect(Collectors.groupingBy(CountedLot::getProductId));
         List<StockCountLine> built = new ArrayList<>();
         for (Long part : parts) {
@@ -60,7 +65,8 @@ public class CountSheetServiceImpl implements CountSheetService {
                                    List<Long> productIds) {
         return switch (scopeType) {
             case WHOLE -> lotBalances.findProductIdsWithCountableStock(storeId);
-            case AREA -> stockBalances.findProductIdsByStorageArea(storeId, scopeNote);
+            case AREA -> defective(scopeType, scopeNote) ? defectiveParts(storeId, scopeNote)
+                    : stockBalances.findProductIdsByStorageArea(storeId, scopeNote);
             case PRODUCTS -> productIds;
             case CATEGORY -> lotBalances.findProductIdsWithStockInCategories(storeId,
                     categories.withDescendants(partCategoryId));
@@ -78,14 +84,15 @@ public class CountSheetServiceImpl implements CountSheetService {
         }
         List<Long> parts = targets.stream().map(StockCountLine::getProductId).distinct().toList();
         List<CountedLot> lots = lotBalances.findCountedLots(count.getStoreId(), parts);
+        Portion portion = portion(count);
         for (StockCountLine line : targets) {
             List<CountedLot> matched = lots.stream()
                     .filter(lot -> line.getLotId() == null
                             ? lot.getProductId().equals(line.getProductId()) && lot.getExpiryDate() == null
                             : lot.getLotId().equals(line.getLotId()))
                     .toList();
-            int book = matched.stream().mapToInt(lot -> lot.getAvailable() + lot.getDamaged()).sum();
-            int bookDamaged = matched.stream().mapToInt(CountedLot::getDamaged).sum();
+            int book = matched.stream().mapToInt(portion::counted).sum();
+            int bookDamaged = matched.stream().mapToInt(portion::damaged).sum();
             if (restart) {
                 line.restartRecount(book, bookDamaged);
             } else {
@@ -94,6 +101,51 @@ public class CountSheetServiceImpl implements CountSheetService {
         }
     }
     // endregion
+
+    /*
+     * GVHD 20/11: damaged goods are kept in the defective area, not on the shelf of their part. A count of the
+     * defective area counts them, and all the stock of the parts shelved there (the dented-goods variants); a count of
+     * another area counts only the sellable goods of its parts. So counting both areas never counts the same goods
+     * twice. A count of the whole warehouse, a category or listed parts counts both, as before.
+     */
+    private static boolean defective(ScopeType scopeType, String scopeNote) {
+        return scopeType == ScopeType.AREA && DefectiveArea.is(scopeNote);
+    }
+
+    private List<Long> defectiveParts(long storeId, String scopeNote) {
+        Set<Long> parts = new HashSet<>(stockBalances.findProductIdsByStorageAreaIgnoringCase(storeId, DefectiveArea.NAME));
+        parts.addAll(stockBalances.findProductIdsWithDamaged(storeId));
+        return parts.stream().sorted().toList();
+    }
+
+    private Portion portion(StockCount count) {
+        if (count.getScopeType() != ScopeType.AREA) {
+            return new Portion(Part.ALL, Set.of());
+        }
+        if (!defective(count.getScopeType(), count.getScopeNote())) {
+            return new Portion(Part.SELLABLE, Set.of());
+        }
+        return new Portion(Part.DAMAGED, Set.copyOf(
+                stockBalances.findProductIdsByStorageAreaIgnoringCase(count.getStoreId(), DefectiveArea.NAME)));
+    }
+
+    private enum Part { ALL, SELLABLE, DAMAGED }
+
+    /** What a count takes of one lot; the parts in {@code shelvedThere} are always counted whole. */
+    private record Portion(Part part, Set<Long> shelvedThere) {
+
+        int counted(CountedLot lot) {
+            return available(lot) + damaged(lot);
+        }
+
+        int available(CountedLot lot) {
+            return part != Part.DAMAGED || shelvedThere.contains(lot.getProductId()) ? lot.getAvailable() : 0;
+        }
+
+        int damaged(CountedLot lot) {
+            return part != Part.SELLABLE ? lot.getDamaged() : 0;
+        }
+    }
 
     // region needsApproval (owner: Z)
     @Override
