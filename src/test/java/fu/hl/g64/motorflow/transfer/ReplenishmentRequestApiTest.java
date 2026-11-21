@@ -459,8 +459,8 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
     @Test
     void purchaseOrdersOfTheRequestAreShownToWhoeverMayOpenIt() throws Exception {
         long id = created("bm", null);
-        long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) "
-                + "VALUES ('NCC001', 'Minh Phát') RETURNING id", Long.class);
+        long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_name) "
+                + "VALUES ('Minh Phát') RETURNING id", Long.class);
         long order = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, replenishment_request_id, "
                 + "created_by) VALUES (?, ?, ?, ?) RETURNING id", Long.class, supplier, branch, id, owner.getId());
         jdbc.update("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?)",

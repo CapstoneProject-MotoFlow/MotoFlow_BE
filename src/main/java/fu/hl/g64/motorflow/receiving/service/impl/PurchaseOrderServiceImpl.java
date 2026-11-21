@@ -192,7 +192,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
     private static PurchaseOrderSummary withDiscrepancy(PurchaseOrderSummary s,
                                                         PurchaseOrderSummary.Discrepancy discrepancy) {
-        return new PurchaseOrderSummary(s.id(), s.status(), s.supplierId(), s.supplierCode(), s.supplierName(),
+        return new PurchaseOrderSummary(s.id(), s.status(), s.supplierId(), s.supplierName(),
                 s.storeId(), s.storeName(), s.createdAt(), s.expectedArrival(), s.overdue(), s.lineCount(),
                 s.orderedValue(), s.openDiscrepancies(), discrepancy);
     }
@@ -476,7 +476,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             Supplier supplier = supplierById.get(order.getSupplierId());
             Object[] total = totals.get(order.getId());
             return new PurchaseOrderSummary(order.getId(), order.getStatus(), order.getSupplierId(),
-                    supplier.getSupplierCode(), supplier.getSupplierName(), order.getStoreId(),
+                    supplier.getSupplierName(), order.getStoreId(),
                     storeNames.get(order.getStoreId()), order.getCreatedAt(), order.getExpectedArrival(),
                     overdue(order, today), total == null ? 0 : (Long) total[1],
                     owner ? (total == null ? 0L : ((Number) total[2]).longValue()) : null,
@@ -557,7 +557,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         boolean canCreateReceipt = receiving && PurchaseOrderReceiving.receiptOpen(order, standing);
         boolean canCreateReplacement = receiving && caseRows.stream().anyMatch(c -> c.openReplacementQty() > 0);
 
-        return new PurchaseOrderDetail(id, order.getStatus(), supplier.getId(), supplier.getSupplierCode(),
+        return new PurchaseOrderDetail(id, order.getStatus(), supplier.getId(),
                 supplier.getSupplierName(), order.getStoreId(), storeName, order.getExpectedArrival(),
                 overdue(order, LocalDate.now(clock)), order.getNote(), order.getReplenishmentRequestId(),
                 order.getCreatedBy(), names.get(order.getCreatedBy()), order.getCreatedAt(), order.getUpdatedAt(),
@@ -603,7 +603,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                             part.getPartName(), c.openReplacementQty());
                 }).toList();
         return new PurchaseOrderReceivingView(id, "#" + order.getId(), order.getStatus(), supplier.getId(),
-                supplier.getSupplierCode(), supplier.getSupplierName(), order.getStoreId(), storeName,
+                supplier.getSupplierName(), order.getStoreId(), storeName,
                 order.getExpectedArrival(), open.receipt(), open.replacement(), lineRows, caseRows);
     }
 
@@ -684,7 +684,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 cb.equal(found.get("status"), DiscrepancyCaseStatus.OPEN));
     }
 
-    /** q: the PO number (12, #12, DNH-0012) or part of the supplier's name or code; everything when blank. */
+    /** q: the PO number (12, #12, DNH-0012) or part of the supplier's name; everything when blank. */
     private static Specification<PurchaseOrder> matchingText(String q) {
         return (root, query, cb) -> {
             if (!StringUtils.hasText(q)) {
@@ -694,9 +694,7 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             String like = SearchText.likePattern(q);
             Subquery<Long> bySupplier = query.subquery(Long.class);
             Root<Supplier> supplier = bySupplier.from(Supplier.class);
-            bySupplier.select(supplier.get("id")).where(cb.or(
-                    SearchText.like(cb, supplier.get("supplierName"), like),
-                    SearchText.like(cb, supplier.get("supplierCode"), like)));
+            bySupplier.select(supplier.get("id")).where(SearchText.like(cb, supplier.get("supplierName"), like));
             Predicate supplierMatches = root.get("supplierId").in(bySupplier);
             Long number = orderNumber(needle);
             return number == null ? supplierMatches : cb.or(cb.equal(root.get("id"), number), supplierMatches);

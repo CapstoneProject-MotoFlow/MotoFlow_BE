@@ -547,8 +547,8 @@ class WarehouseTaskApiTest extends ApiTestUsers {
 
     private long supplierReceipt(long storeId, String status) {
         suppliers++;
-        Long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES (?, ?) "
-                + "RETURNING id", Long.class, "NCC" + suppliers, "Minh Phát " + suppliers);
+        Long supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_name) VALUES (?) "
+                + "RETURNING id", Long.class, "Minh Phát " + suppliers);
         Long purchaseOrder = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, status, created_by) "
                 + "VALUES (?, ?, 'RECEIVING', ?) RETURNING id", Long.class, supplier, storeId, manager.getId());
         return receipt("SUPPLIER_DELIVERY", purchaseOrder, null, status);

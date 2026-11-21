@@ -47,7 +47,7 @@ class PurchaseOrderApiTest extends PurchaseOrderTestData {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("AWAITING_DELIVERY"))
                 .andExpect(jsonPath("$.supplierId").value(honda))
-                .andExpect(jsonPath("$.supplierCode").value("NCC-HD"))
+                .andExpect(jsonPath("$.supplierCode").doesNotExist())
                 .andExpect(jsonPath("$.supplierName").value("Honda Việt Nam"))
                 .andExpect(jsonPath("$.storeId").value(giaLam))
                 .andExpect(jsonPath("$.storeName").value("Gia Lâm"))

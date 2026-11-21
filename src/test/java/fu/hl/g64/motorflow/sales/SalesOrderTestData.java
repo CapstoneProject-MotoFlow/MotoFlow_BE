@@ -97,7 +97,7 @@ public abstract class SalesOrderTestData extends ApiTestUsers {
         limit("DISCOUNT_THRESHOLD", "10");
         limit("MINIMUM_MARGIN", "5");
 
-        supplier = id("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Honda') RETURNING id");
+        supplier = id("INSERT INTO supplier (supplier_name) VALUES ('Honda') RETURNING id");
         purchaseOrder = id("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) "
                 + "RETURNING id", supplier, store, owner.getId());
         padSoon = lot(pad, 3, 60_000, LocalDate.of(2026, 12, 1));

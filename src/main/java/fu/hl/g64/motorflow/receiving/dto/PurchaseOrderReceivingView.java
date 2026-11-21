@@ -11,7 +11,7 @@ import java.util.List;
  * be recorded; {@code canCreateReplacement}: a replacement delivery for {@code openCases} can be recorded.
  */
 public record PurchaseOrderReceivingView(long id, String code, PurchaseOrderStatus status, long supplierId,
-                                         String supplierCode, String supplierName, long storeId, String storeName,
+                                         String supplierName, long storeId, String storeName,
                                          LocalDate expectedArrival, boolean canCreateReceipt,
                                          boolean canCreateReplacement, List<Line> lines, List<OpenCase> openCases) {
 

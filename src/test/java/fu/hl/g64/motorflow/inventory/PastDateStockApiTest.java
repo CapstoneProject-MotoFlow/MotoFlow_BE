@@ -68,7 +68,7 @@ class PastDateStockApiTest extends ApiTestUsers {
                 + "VALUES ('Má phanh', 'MOTORCYCLE', ?) RETURNING id", Long.class, category);
         alpha = product("AAA-1", "Xích 428", category);
         beta = product("BBB-1", "Má phanh trước", childCategory);
-        supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Honda') "
+        supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_name) VALUES ('Honda') "
                 + "RETURNING id", Long.class);
         po = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) "
                 + "RETURNING id", Long.class, supplier, central, owner.getId());

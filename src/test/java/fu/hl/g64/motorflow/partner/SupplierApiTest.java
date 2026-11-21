@@ -56,12 +56,12 @@ class SupplierApiTest extends IntegrationTest {
     }
 
     @Test
-    void createsAnActiveSupplierWithAGeneratedCodeAndAUniqueName() throws Exception {
+    void createsAnActiveSupplierWithAUniqueName() throws Exception {
         Map<String, Object> body = supplier("Công ty Phụ tùng Minh Phát");
-        body.put("supplierCode", "TU-NHAP"); // Ignored: the code is generated.
+        body.put("supplierCode", "TU-NHAP"); // Ignored: a supplier is identified by its id and unique name.
         String location = send(post("/api/v1/suppliers"), body)
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.supplierCode").value("NCC001"))
+                .andExpect(jsonPath("$.supplierCode").doesNotExist())
                 .andExpect(jsonPath("$.supplierName").value("Công ty Phụ tùng Minh Phát"))
                 .andExpect(jsonPath("$.contactName").value("Anh Minh"))
                 .andExpect(jsonPath("$.taxCode").value("0101234567"))
@@ -79,23 +79,14 @@ class SupplierApiTest extends IntegrationTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG78"));
         send(post("/api/v1/suppliers"), supplier("  Nhớt   Đông Á "))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.supplierCode").value("NCC002"))
                 .andExpect(jsonPath("$.supplierName").value("Nhớt Đông Á"));
     }
 
     @Test
     void theDatabaseAlsoRejectsADuplicateSupplierName() {
-        jdbc.update("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Minh Phát')");
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO supplier (supplier_code, supplier_name) "
-                + "VALUES ('NCC002', 'MINH PHÁT')")).isInstanceOf(DuplicateKeyException.class);
-    }
-
-    @Test
-    void codesContinueAfterTheCodesAlreadyInUse() throws Exception {
-        jdbc.update("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC041', 'Có sẵn')");
-        jdbc.execute("SELECT setval('supplier_code_seq', 42, false)");
-        send(post("/api/v1/suppliers"), supplier("Minh Phát"))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.supplierCode").value("NCC042"));
+        jdbc.update("INSERT INTO supplier (supplier_name) VALUES ('Minh Phát')");
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO supplier (supplier_name) VALUES ('MINH PHÁT')"))
+                .isInstanceOf(DuplicateKeyException.class);
     }
 
     @Test
@@ -121,7 +112,7 @@ class SupplierApiTest extends IntegrationTest {
     }
 
     @Test
-    void anUpdateKeepsTheCodeAndTheSupplierCanBeDeactivated() throws Exception {
+    void anUpdateChangesTheDetailsAndTheSupplierCanBeDeactivated() throws Exception {
         long id = createdId(send(post("/api/v1/suppliers"), supplier("Minh Phát")));
         createdId(send(post("/api/v1/suppliers"), supplier("Hưng Thịnh")));
         Map<String, Object> body = supplier("Minh Phát mới");
@@ -131,7 +122,8 @@ class SupplierApiTest extends IntegrationTest {
 
         send(put("/api/v1/suppliers/{id}", id), body)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.supplierCode").value("NCC001"))
+                .andExpect(jsonPath("$.id").value(id))
+                .andExpect(jsonPath("$.supplierCode").doesNotExist())
                 .andExpect(jsonPath("$.supplierName").value("Minh Phát mới"))
                 .andExpect(jsonPath("$.contactName").value("Chị Lan"))
                 .andExpect(jsonPath("$.taxCode").value("0101234567-001"));
@@ -156,26 +148,29 @@ class SupplierApiTest extends IntegrationTest {
     }
 
     @Test
-    void theListFindsByCodeNameOrPhoneAndPages() throws Exception {
-        createdId(send(post("/api/v1/suppliers"), supplier("Nhớt Đông Á")));
+    void theListFindsByNameOrPhoneSortsByNameAndPages() throws Exception {
+        // Created out of name order, so the list order shows it sorts by name rather than by id.
+        long closed = createdId(send(post("/api/v1/suppliers"), supplier("Vỏ xe Sao Vàng")));
+        send(post("/api/v1/suppliers/{id}/deactivate", closed)).andExpect(status().isNoContent());
+        long dongA = createdId(send(post("/api/v1/suppliers"), supplier("Nhớt Đông Á")));
         Map<String, Object> second = supplier("Phụ tùng Hưng Thịnh");
         second.put("phone", "0912 345 678");
         long hungThinh = createdId(send(post("/api/v1/suppliers"), second));
-        long closed = createdId(send(post("/api/v1/suppliers"), supplier("Vỏ xe Sao Vàng")));
-        send(post("/api/v1/suppliers/{id}/deactivate", closed)).andExpect(status().isNoContent());
 
         send(get("/api/v1/suppliers"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC001", "NCC002", "NCC003")))
+                .andExpect(jsonPath("$.items[*].id", contains((int) dongA, (int) hungThinh, (int) closed)))
+                .andExpect(jsonPath("$.items[*].supplierName",
+                        contains("Nhớt Đông Á", "Phụ tùng Hưng Thịnh", "Vỏ xe Sao Vàng")))
                 .andExpect(jsonPath("$.totalItems").value(3));
         send(get("/api/v1/suppliers?q=PHỤ TÙNG")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
         send(get("/api/v1/suppliers?q=phu tung")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
         send(get("/api/v1/suppliers?q=_")).andExpect(jsonPath("$.items", hasSize(0)));
         send(get("/api/v1/suppliers?q=0912345678")).andExpect(jsonPath("$.items[*].id", contains((int) hungThinh)));
-        send(get("/api/v1/suppliers?q=ncc0")).andExpect(jsonPath("$.items", hasSize(3)));
+        send(get("/api/v1/suppliers?q=NCC001")).andExpect(jsonPath("$.items", hasSize(0)));
         send(get("/api/v1/suppliers?status=INACTIVE")).andExpect(jsonPath("$.items[*].id", contains((int) closed)));
         send(get("/api/v1/suppliers?size=2&page=1"))
-                .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC003")))
+                .andExpect(jsonPath("$.items[*].id", contains((int) closed)))
                 .andExpect(jsonPath("$.totalItems").value(3))
                 .andExpect(jsonPath("$.page").value(1));
     }
@@ -203,7 +198,7 @@ class SupplierApiTest extends IntegrationTest {
 
         send(get("/api/v1/suppliers/{id}", supplier))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.supplier.supplierCode").value("NCC001"))
+                .andExpect(jsonPath("$.supplier.supplierName").value("Minh Phát"))
                 .andExpect(jsonPath("$.purchaseOrderCount").value(2))
                 .andExpect(jsonPath("$.purchaseOrders[*].id", contains((int) newerOrder, (int) order)))
                 .andExpect(jsonPath("$.purchaseOrders[1].storeName").value("Cửa hàng CH01"))

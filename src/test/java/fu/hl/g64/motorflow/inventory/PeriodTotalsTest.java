@@ -59,7 +59,7 @@ class PeriodTotalsTest extends IntegrationTest {
                 + "RETURNING id");
         alpha = id("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
                 + "VALUES ('AAA-1', 'Xích 428', " + category + ", 'cái', " + owner + ") RETURNING id");
-        supplier = id("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Honda') RETURNING id");
+        supplier = id("INSERT INTO supplier (supplier_name) VALUES ('Honda') RETURNING id");
         po = id("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (" + supplier + ", " + source
                 + ", " + owner + ") RETURNING id");
     }
