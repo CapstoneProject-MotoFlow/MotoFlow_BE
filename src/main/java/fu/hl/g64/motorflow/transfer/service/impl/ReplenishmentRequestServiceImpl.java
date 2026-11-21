@@ -239,8 +239,9 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
             if (unallocated > 0) {
                 changes.add(passToPurchase(line, Math.toIntExact(line.getToPurchaseQty() + unallocated)));
             }
-            // A transfer order planned while the Owner had the PO open: the PO would buy more or less than is short.
-            if (quantities.getOrDefault(line.getProductId(), 0) != line.getToPurchaseQty()) {
+            // A transfer order planned while the Owner had the PO open: the PO would buy less than is short. Buying
+            // more than is short is allowed (GVHD 20/11).
+            if (quantities.getOrDefault(line.getProductId(), 0) < line.getToPurchaseQty()) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG262", id,
                         products.findById(line.getProductId()).map(Product::getSku).orElseThrow(),
                         line.getToPurchaseQty());
