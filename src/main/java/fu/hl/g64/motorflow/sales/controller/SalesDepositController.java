@@ -43,11 +43,11 @@ public class SalesDepositController {
     }
 
     @Operation(summary = "Change the expiry date of a deposit",
-            description = "Only the store's Branch Manager (403 for Owner and Staff). The order still waits for "
-                    + "stock (MSG319), has a deposit (MSG324) that has not expired (MSG321); the new date is after "
-                    + "today (MSG322). No limit on the number of changes; each one is listed in "
-                    + "deposit.expiryChanges.")
-    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+            description = "Owner or the store's Branch Manager (403 for Staff and another store's manager). The "
+                    + "order still waits for stock (MSG319), has a deposit (MSG324) that has not expired (MSG321); "
+                    + "the new date is after today (MSG322). No limit on the number of changes; each one is listed "
+                    + "in deposit.expiryChanges.")
+    @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
     @PatchMapping("/deposit-expiry")
     public SalesOrderDetail changeExpiry(@AuthenticationPrincipal AuthenticatedUser manager, @PathVariable long id,
                                          @Valid @RequestBody DepositExpiryRequest request) {

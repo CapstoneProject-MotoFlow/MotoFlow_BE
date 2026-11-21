@@ -132,20 +132,19 @@ class SalesDepositApiTest extends SalesOrderTestData {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG324"));
         deposit(managerToken, order, 1_000_000, "CASH", null, true, "2026-10-15", 0).andExpect(status().isOk());
         detail(managerToken, order).andExpect(jsonPath("$.actions.canChangeDepositExpiry").value(true));
-        detail(ownerToken, order).andExpect(jsonPath("$.actions.canChangeDepositExpiry").value(false));
+        detail(ownerToken, order).andExpect(jsonPath("$.actions.canChangeDepositExpiry").value(true));
 
         expiry(managerToken, order, "2026-10-18").andExpect(status().isOk())
                 .andExpect(jsonPath("$.deposit.expiresOn").value("2026-10-18"));
-        expiry(managerToken, order, "2026-10-14").andExpect(status().isOk())
+        expiry(ownerToken, order, "2026-10-14").andExpect(status().isOk())
                 .andExpect(jsonPath("$.deposit.expiresOn").value("2026-10-14"))
                 .andExpect(jsonPath("$.deposit.expiryChanges", hasSize(2)))
                 .andExpect(jsonPath("$.deposit.expiryChanges[0].oldDate").value("2026-10-15"))
                 .andExpect(jsonPath("$.deposit.expiryChanges[0].newDate").value("2026-10-18"))
                 .andExpect(jsonPath("$.deposit.expiryChanges[1].newDate").value("2026-10-14"))
-                .andExpect(jsonPath("$.deposit.expiryChanges[1].changedBy").value(manager.getFullName()));
+                .andExpect(jsonPath("$.deposit.expiryChanges[1].changedBy").value(owner.getFullName()));
         expiry(managerToken, order, "2026-10-13")
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG322"));
-        expiry(ownerToken, order, "2026-10-19").andExpect(status().isForbidden());
         expiry(staffToken, order, "2026-10-19").andExpect(status().isForbidden());
         expiry(otherManagerToken, order, "2026-10-19")
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));

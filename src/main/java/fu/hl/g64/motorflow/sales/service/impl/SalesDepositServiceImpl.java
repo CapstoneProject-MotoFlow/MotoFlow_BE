@@ -115,8 +115,10 @@ public class SalesDepositServiceImpl implements SalesDepositService {
     @Override
     public SalesOrderDetail changeExpiry(AuthenticatedUser manager, long orderId, DepositExpiryRequest request) {
         SalesOrder order = lockWaiting(orderId);
-        // PM 21/11: only the store's Branch Manager (Owner and Staff are refused, E12 waits for PM).
-        if (manager.role() != Role.BRANCH_MANAGER || !Objects.equals(manager.storeId(), order.getStoreId())) {
+        // The same people who record a deposit: Owner, or the Branch Manager of this store.
+        boolean storeSeller = manager.role() == Role.OWNER || (manager.role() == Role.BRANCH_MANAGER
+                && Objects.equals(manager.storeId(), order.getStoreId()));
+        if (!storeSeller) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         requireWaiting(order);
