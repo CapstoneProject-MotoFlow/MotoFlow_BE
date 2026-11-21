@@ -1,0 +1,23 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/customers"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "customerName": "Khách thử Postman"
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 400', () => pm.response.to.have.status(400));
+      const b = pm.response.json();
+      pm.test('Báo lỗi số điện thoại', () => pm.expect(b.fieldErrors.phone).to.eql('Vui lòng nhập số điện thoại.'));
+    language: text/javascript
+order: 1000
