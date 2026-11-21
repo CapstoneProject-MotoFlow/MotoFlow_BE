@@ -19,7 +19,7 @@ import java.util.List;
 public record GoodsReceiptDetail(
         long id, ReceiptType receiptType, GoodsReceiptNoteStatus status, boolean replacement,
         List<Long> replacementForCaseIds,
-        long purchaseOrderId, long supplierId, String supplierCode, String supplierName,
+        long purchaseOrderId, long supplierId, String supplierName,
         long storeId, String storeName,
         String deliveryDocumentNo, LocalDate deliveryDocumentDate, String delivererName, String vehiclePlateNo,
         LocalDateTime arrivedAt, Assignee assignee,

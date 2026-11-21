@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
  * Branch Manager (BR-72). {@code openDiscrepancies}: supplier discrepancy cases of the PO not closed yet.
  * {@code discrepancy} is filled on the DISCREPANCY_OPEN tab only (GVHD 20/11, PR 6), null elsewhere.
  */
-public record PurchaseOrderSummary(long id, PurchaseOrderStatus status, long supplierId, String supplierCode,
+public record PurchaseOrderSummary(long id, PurchaseOrderStatus status, long supplierId,
                                    String supplierName, long storeId, String storeName, LocalDateTime createdAt,
                                    LocalDate expectedArrival, boolean overdue, long lineCount, Long orderedValue,
                                    long openDiscrepancies, Discrepancy discrepancy) {

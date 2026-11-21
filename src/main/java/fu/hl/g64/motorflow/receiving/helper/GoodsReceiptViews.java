@@ -152,7 +152,7 @@ public class GoodsReceiptViews {
                 && lines.stream().anyMatch(line -> line.getExcessDecision() == ExcessDecision.AWAITING_OWNER);
 
         return new GoodsReceiptDetail(id, receipt.getReceiptType(), receipt.getStatus(), !replacements.isEmpty(),
-                replacementFor, order.getId(), supplier.getId(), supplier.getSupplierCode(),
+                replacementFor, order.getId(), supplier.getId(),
                 supplier.getSupplierName(), order.getStoreId(), storeName, receipt.getDeliveryDocumentNo(),
                 receipt.getDeliveryDocumentDate(), receipt.getDelivererName(), receipt.getVehiclePlateNo(),
                 receipt.getArrivedAt(), task == null ? null : new Assignee(task.getAssignedTo(),
