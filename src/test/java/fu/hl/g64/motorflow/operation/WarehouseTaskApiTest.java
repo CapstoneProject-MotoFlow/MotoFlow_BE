@@ -51,6 +51,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
 
     private long store;
     private long otherStore;
+    private UserAccount ownerUser;
     private UserAccount manager;
     private UserAccount staff1;
     private UserAccount staff2;
@@ -64,7 +65,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
         resetDatabaseAndClock();
         store = createStore("Gia Lâm");
         otherStore = createStore("Long Biên");
-        createUser("owner", Role.OWNER, null);
+        ownerUser = createUser("owner", Role.OWNER, null);
         manager = createUser("bm", Role.BRANCH_MANAGER, store);
         createUser("bm2", Role.BRANCH_MANAGER, otherStore);
         staff2 = createUser("staff2", Role.STAFF, store);
@@ -320,7 +321,7 @@ class WarehouseTaskApiTest extends ApiTestUsers {
     }
 
     @Test
-    void onlyTheBranchManagerOfTheDocumentsStoreAssigns() throws Exception {
+    void onlyTheStoresBranchManagerOrTheOwnerForPickingAssigns() throws Exception {
         long order = order("AWAITING_PICKING");
 
         // The Owner manages the picking of a sales order (GVHD 20/11, below), no other task.
@@ -340,6 +341,18 @@ class WarehouseTaskApiTest extends ApiTestUsers {
                     .andExpect(jsonPath("$.code").value("MSG05"));
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM warehouse_task", Long.class)).isZero();
+    }
+
+    @Test
+    void theOwnerTakingPickingThemselfGetsNoMsg40() throws Exception {
+        long order = order("AWAITING_PICKING");
+
+        // MSG40 promises the Owner is told, which is false when the Owner is the one who took the task.
+        assign(signIn("owner"), TaskType.PICKING, order, ownerUser.getId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.assigneeId").value(ownerUser.getId()))
+                .andExpect(jsonPath("$.current.selfAssigned").value(true))
+                .andExpect(jsonPath("$.noticeCode").doesNotExist());
     }
 
     @Test
