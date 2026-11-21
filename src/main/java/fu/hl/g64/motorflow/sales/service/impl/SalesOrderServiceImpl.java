@@ -103,6 +103,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
 
     /** notification.ref_type of a sales order, so that opening the notification opens it. */
     private static final String REF_TYPE = "SALES_ORDER";
+    private static final String DECLINED_REASON = "Khách không chờ hàng";
     private static final Locale VIETNAMESE = Locale.forLanguageTag("vi");
 
     private final SalesOrderRepository orders;
@@ -389,11 +390,13 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 .toList(), now);
         List<SalesOrderDetail.Declined> declined = shares.stream().filter(share -> share.declinedQty() > 0)
                 .map(share -> new SalesOrderDetail.Declined(share.line().productId(), share.declinedQty())).toList();
+        List<Share> refused = shares.stream().filter(share -> share.declinedQty() > 0).toList();
         if (sold.isEmpty()) {
             order.waitForStock();
             List<SalesOrderLine> lines = saveShares(order, waiting, Share::waitQty, content);
             SalesOrderDetail detail = opened(seller, order, lines, now);
-            return detail.withSplit(new SalesOrderDetail.Split(null, order.getId(), declined));
+            Long declinedId = declineRest(seller, order, refused, content, now);
+            return detail.withSplit(new SalesOrderDetail.Split(null, order.getId(), declinedId, declined));
         }
         List<SalesOrderLine> lines = saveShares(order, sold, Share::sellNow, content);
         SalesOrderDetail detail = opened(seller, order, lines, now);
@@ -405,10 +408,37 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             opened(seller, rest, saveShares(rest, waiting, Share::waitQty, content), now, order.getId());
             waitingId = rest.getId();
         }
-        if (waitingId == null && declined.isEmpty()) {
+        Long declinedId = declineRest(seller, order, refused, content, now);
+        if (waitingId == null && declinedId == null) {
             return detail;
         }
-        return detail.withSplit(new SalesOrderDetail.Split(order.getId(), waitingId, declined));
+        return detail.withSplit(new SalesOrderDetail.Split(order.getId(), waitingId, declinedId, declined));
+    }
+
+    /**
+     * GVHD 20/11: what the customer declined is kept as an order of its own, cancelled at once ("Khách không chờ
+     * hàng"), so the unmet-demand report (UC-59) shows it. It is split from {@code order}, holds nothing, is not
+     * picked, notifies nobody and is not checked against the discount threshold (it is never sold).
+     */
+    private Long declineRest(AuthenticatedUser seller, SalesOrder order, List<Share> refused, Content content,
+                             LocalDateTime now) {
+        if (refused.isEmpty()) {
+            return null;
+        }
+        SalesOrder gone = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
+                content.rate(), order.getNote(), seller.id(), now));
+        List<SalesOrderLine> lines = saveShares(gone, refused, Share::declinedQty, content);
+        Map<String, Object> first = SalesOrderHistory.snapshot(1, null, gone, lines);
+        first.put(SalesOrderHistory.SPLIT_FROM, order.getId());
+        auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, gone.getId(), SalesOrderHistory.CREATED, seller.id(),
+                null, null, first, now));
+        gone.cancel(seller.id(), DECLINED_REASON, now);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("refund_id", null);
+        data.put("refunded", 0);
+        auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, gone.getId(), SalesOrderHistory.CANCELLED,
+                seller.id(), DECLINED_REASON, null, data, now));
+        return gone.getId();
     }
 
     private List<SalesOrderLine> saveShares(SalesOrder order, List<Share> shares,
@@ -687,12 +717,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 request.lines().stream().map(ConfirmSalesOrderRequest.Line::productId).toList());
         Map<Long, Integer> delivered = new HashMap<>();
         Set<Long> waitForRest = new HashSet<>();
-        Map<Long, Integer> deferred = order.getStatus() == SalesOrderStatus.CONFIRMED ? deferred(id) : Map.of();
         for (ConfirmSalesOrderRequest.Line line : request.lines()) {
             SalesOrderLine target = byProduct.get(line.productId());
-            // What already went to a waiting order is not delivered here (GVHD 20/11).
-            int most = Math.min(target.getPickedQty(),
-                    target.getRequestedQty() - deferred.getOrDefault(line.productId(), 0));
+            // What already went to a waiting order is no longer on the line (GVHD 20/11).
+            int most = Math.min(target.getPickedQty(), target.getRequestedQty());
             if (line.deliveredQty() > most) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG169", parts.get(line.productId()).getSku(),
                         most);
@@ -741,14 +769,31 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         order.confirm(seller.id(), now);
         orderLines.flush();
         int confirmedVersion = newVersion ? version + 1 : version;
+        // The waiting order of a first confirmation is not made again when the confirmation is redone.
+        Map<Long, Integer> waits = confirmed ? Map.of() : rest(lines, waitForRest);
+        Map<Long, Integer> requestedBefore = new HashMap<>();
+        lines.forEach(line -> requestedBefore.put(line.getProductId(), line.getRequestedQty()));
+        Long waitingId = waits.isEmpty() ? null : deferRest(seller, order, lines, waits, now);
+        // GVHD 20/11: what moved to the waiting order leaves the line, so it is unmet only there; the version saved
+        // below is the narrowed one.
+        List<SalesOrderLine> kept = new ArrayList<>(lines);
+        for (SalesOrderLine line : lines) {
+            if (!waits.containsKey(line.getProductId())) {
+                continue;
+            }
+            if (line.getDeliveredQty() == 0) {
+                orderLines.delete(line);
+                kept.remove(line);
+            } else {
+                line.narrowToDelivered();
+            }
+        }
+        orderLines.flush();
         if (newVersion) {
             auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(),
                     null, previous, SalesOrderHistory.snapshot(confirmedVersion, SalesOrderHistory.CAUSE_DELIVERY,
-                            order, lines), now));
+                            order, kept), now));
         }
-        // The waiting order of a first confirmation is not made again when the confirmation is redone.
-        Map<Long, Integer> waits = confirmed ? Map.of() : rest(lines, waitForRest);
-        Long waitingId = waits.isEmpty() ? null : deferRest(seller, order, lines, waits, now);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("version", confirmedVersion);
         data.put("reference_total", totals.referenceTotal());
@@ -758,7 +803,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             row.put("product_id", line.getProductId());
             row.put("delivered_qty", line.getDeliveredQty());
             if (waits.containsKey(line.getProductId())) {
-                row.put(SalesOrderHistory.DEFERRED_QTY, waits.get(line.getProductId()));
+                row.put(SalesOrderHistory.REQUESTED_BEFORE, requestedBefore.get(line.getProductId()));
             }
             return row;
         }).toList());
@@ -769,7 +814,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 null, data, now));
         SalesOrderDetail detail = detail(seller, order);
         return waitingId == null ? detail
-                : detail.withSplit(new SalesOrderDetail.Split(id, waitingId, List.of()));
+                : detail.withSplit(new SalesOrderDetail.Split(id, waitingId, null, List.of()));
     }
 
     /** [product id → units not delivered] of the lines the customer waits for the rest of. */
@@ -782,25 +827,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     }
 
     /**
-     * [product id → units moved to a waiting order] at the order's first confirmation, read from its CONFIRMED rows
-     * in audit_log (GVHD 20/11: no column keeps it).
-     */
-    private Map<Long, Integer> deferred(long id) {
-        Map<Long, Integer> deferred = new HashMap<>();
-        auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(SalesOrderHistory.ENTITY, id,
-                        List.of(SalesOrderHistory.CONFIRMED)).stream()
-                .filter(step -> step.getNewData().get(SalesOrderHistory.WAITING_ORDER) != null)
-                .forEach(step -> SalesOrderHistory.lines(step.getNewData()).stream()
-                        .filter(line -> line.get(SalesOrderHistory.DEFERRED_QTY) != null)
-                        .forEach(line -> deferred.put(SalesOrderHistory.number(line.get("product_id")).longValue(),
-                                SalesOrderHistory.number(line.get(SalesOrderHistory.DEFERRED_QTY)).intValue())));
-        return deferred;
-    }
-
-    /**
      * GVHD 20/11 (UC-58, "mai chị đến lấy nốt"): what was not delivered of the lines the customer will wait for goes
-     * to one new waiting order, at the prices in effect. The confirmation keeps it in audit_log, so a confirmation
-     * redone cannot deliver it here too.
+     * to one new waiting order, at the prices in effect. The caller then narrows the original lines to what was
+     * delivered.
      */
     private Long deferRest(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
                            Map<Long, Integer> waits, LocalDateTime now) {
@@ -867,7 +896,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     .collect(Collectors.joining("; ")));
         }
         // BR-18: what is sold now takes the retail prices in effect, as a submitted draft does.
-        Map<Long, Long> prices = requireLinePrices(lines, parts, now);
+        // Only what is released needs a retail price in effect; a line that stays waiting may be unpriced.
+        Map<Long, Long> prices = requireLinePrices(lines.stream()
+                .filter(line -> released.getOrDefault(line.getId(), 0) > 0).toList(), parts, now);
         BigDecimal rate = order.getDiscountRate();
         boolean whole = lines.stream().allMatch(line -> released.getOrDefault(line.getId(), 0)
                 == line.getRequestedQty());
@@ -884,7 +915,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     null, previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
                             lines), now));
             notifyPicking(seller, order);
-            return detail(seller, order).withSplit(new SalesOrderDetail.Split(id, null, List.of()));
+            return detail(seller, order).withSplit(new SalesOrderDetail.Split(id, null, null, List.of()));
         }
         List<SalesOrderLine> taken = lines.stream().filter(line -> released.getOrDefault(line.getId(), 0) > 0)
                 .toList();
@@ -910,7 +941,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
                         orderLines.findBySalesOrderIdOrderByLineNoAsc(id)), now));
         return opened(seller, sold, soldLines, now, id)
-                .withSplit(new SalesOrderDetail.Split(sold.getId(), id, List.of()));
+                .withSplit(new SalesOrderDetail.Split(sold.getId(), id, null, List.of()));
     }
 
     /** UC-86: when the Owner sold it, the store's Branch Manager is told to give the picking to someone. */
