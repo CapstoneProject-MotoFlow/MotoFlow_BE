@@ -231,7 +231,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public List<String> storageAreas(AuthenticatedUser user, Long storeId) {
         List<String> areas = new ArrayList<>(balances.findStorageAreas(scopeStoreId(user, storeId)));
-        if (areas.stream().noneMatch(DefectiveArea.NAME::equalsIgnoreCase)) {
+        if (areas.stream().noneMatch(DefectiveArea::is)) {
             areas.add(DefectiveArea.NAME);
         }
         return areas;
@@ -341,7 +341,9 @@ public class InventoryServiceImpl implements InventoryService {
     public StockRowResponse updateLocation(AuthenticatedUser user, long storeId, long productId,
                                            StorageLocationRequest request) {
         StockBalance balance = editableBalance(user, storeId, productId);
-        balance.moveTo(blankToNull(request.storageArea()), blankToNull(request.binLocation()), LocalDateTime.now(clock));
+        // Stored in composed form (NFC), so the defective area typed with combining marks is still recognised.
+        balance.moveTo(blankToNull(DefectiveArea.nfc(request.storageArea())), blankToNull(request.binLocation()),
+                LocalDateTime.now(clock));
         return rows(user, List.of(balance)).getFirst();
     }
 
@@ -441,7 +443,8 @@ public class InventoryServiceImpl implements InventoryService {
     /** UC-47: the scope plus the stock filters the user switched on. */
     private Specification<StockBalance> stockFilter(Long storeId, StockSearch filter) {
         Specification<StockBalance> spec = stockScope(storeId, filter);
-        if (filter.hidesZeroStock()) {
+        // GVHD 20/11: the defective area lists parts with no available stock on purpose.
+        if (filter.hidesZeroStock() && !DefectiveArea.is(filter.storageArea())) {
             spec = spec.and(hasAvailable());
         }
         if (filter.lowStockOnly()) {
@@ -488,7 +491,7 @@ public class InventoryServiceImpl implements InventoryService {
                 where.add(root.get("productId").in(inCategory));
             }
             if (StringUtils.hasText(filter.storageArea())) {
-                String area = filter.storageArea().strip().toLowerCase(Locale.ROOT);
+                String area = DefectiveArea.nfc(filter.storageArea()).strip().toLowerCase(Locale.ROOT);
                 Predicate shelved = cb.equal(cb.lower(root.get("storageArea")), area);
                 // GVHD 20/11: the defective area also lists every part with goods that cannot be sold.
                 where.add(area.equals(DefectiveArea.NAME.toLowerCase(Locale.ROOT))

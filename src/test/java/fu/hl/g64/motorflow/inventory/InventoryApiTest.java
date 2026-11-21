@@ -186,6 +186,19 @@ class InventoryApiTest extends ApiTestUsers {
     }
 
     @Test
+    void theDefectiveAreaKeepsAPartWithNothingAvailableAndAcceptsADecomposedName() throws Exception {
+        place(central, chain, "Kệ A", null);
+        jdbc.update("UPDATE stock_balance SET available_qty = 0, damaged_qty = 2 WHERE store_id = ? AND product_id = ?",
+                central, chain);
+        stock("owner", "?storageArea=Khu hàng lỗi&storeId=" + central)
+                .andExpect(jsonPath("$.items[*].sku", contains("XICH-428")))
+                .andExpect(jsonPath("$.items[0].availableQty").value(0));
+        stock("owner", "?storageArea=" + java.text.Normalizer.normalize("Khu hàng lỗi", java.text.Normalizer.Form.NFD)
+                + "&storeId=" + central)
+                .andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
+    }
+
+    @Test
     void zeroStockIsHiddenUnlessAskedFor() throws Exception {
         placeWithThreshold(branch, chain, 4);
         stock("bm", "").andExpect(jsonPath("$.items[*].sku", contains("MA-PHANH")));
