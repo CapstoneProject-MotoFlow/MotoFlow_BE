@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -12,14 +13,17 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * The money an order holds (BR-49): verified payments less verified refunds, each with its applied corrections. Every
- * use case of the order reads it here, so the payment dialog, completion, credit and cancellation agree.
+ * The money an order holds (BR-49): verified payments less verified refunds, each with its applied corrections, and
+ * the deposit its release put into it (PM 21/11). Every use case of the order reads it here, so the payment dialog,
+ * completion, credit and cancellation agree. The deposit payments of a waiting order are its deposit, read by
+ * {@link OrderDeposits}, not money paid for the order.
  */
 @Component
 @RequiredArgsConstructor
 public class OrderCollections {
 
     private final PaymentRepository payments;
+    private final SalesDepositApplicationRepository depositApplications;
 
     /** The order's payments and refunds, oldest first, with what they add up to. */
     public Money of(long orderId) {
@@ -33,6 +37,12 @@ public class OrderCollections {
         long unverifiedRefunded = 0;
         int unverified = 0;
         for (Payment row : rows) {
+            if (row.getPaymentType() == PaymentType.DEPOSIT || row.getPaymentType() == PaymentType.DEPOSIT_REFUND) {
+                if (row.getStatus() == PaymentStatus.UNVERIFIED) {
+                    unverified++;
+                }
+                continue;
+            }
             long amount = row.getAmount() + corrections.getOrDefault(row.getId(), 0L);
             boolean refund = row.getPaymentType() == PaymentType.REFUND;
             if (row.getStatus() == PaymentStatus.VERIFIED) {
@@ -50,18 +60,22 @@ public class OrderCollections {
                 }
             }
         }
-        return new Money(rows, corrections, paid, refunded, unverifiedPaid, unverifiedRefunded, unverified);
+        long fromDeposit = depositApplications.sumAppliedTo(orderId);
+        return new Money(rows, corrections, paid, refunded, unverifiedPaid, unverifiedRefunded, unverified,
+                fromDeposit);
     }
 
     /**
      * {@code netCollected} is what the store holds of the customer's money. Unverified rows do not count (BR-46) but
-     * are kept apart, so nobody records the same money twice while waiting for verification.
+     * are kept apart, so nobody records the same money twice while waiting for verification. {@code unverifiedCount}
+     * counts deposits too, since an unverified deposit also waits for someone. {@code depositApplied} is the deposit of
+     * the waiting order this one was released from, which pays for it like a verified payment (BE-6).
      */
     public record Money(List<Payment> rows, Map<Long, Long> corrections, long verifiedPaid, long verifiedRefunded,
-                        long unverifiedPaid, long unverifiedRefunded, int unverifiedCount) {
+                        long unverifiedPaid, long unverifiedRefunded, int unverifiedCount, long depositApplied) {
 
         public long netCollected() {
-            return verifiedPaid - verifiedRefunded;
+            return verifiedPaid + depositApplied - verifiedRefunded;
         }
 
         /** BR-47: what may still be recorded as paid for an order of this total. */

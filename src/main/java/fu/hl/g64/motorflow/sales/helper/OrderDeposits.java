@@ -18,7 +18,8 @@ import java.util.List;
 /**
  * PM 21/11: the deposit of a waiting order. The deposit is DEPOSIT payments on the waiting order itself; releases take
  * parts of it into the orders they open (sales_deposit_application) and the last release gives any surplus back as a
- * REFUND on the waiting order. Only verified money counts (BR-46).
+ * DEPOSIT_REFUND on the waiting order. Only verified money counts (BR-46). What is left when the order is cancelled
+ * or its deposit expires is kept by the store (FORFEITED).
  */
 @Component
 @RequiredArgsConstructor
@@ -32,7 +33,11 @@ public class OrderDeposits {
     public State of(SalesOrder order, OrderCollections.Money money) {
         long total = 0;
         long unverified = 0;
+        long refunded = 0;
         for (Payment row : money.rows()) {
+            if (row.getPaymentType() == PaymentType.DEPOSIT_REFUND && row.getStatus() == PaymentStatus.VERIFIED) {
+                refunded += money.amountOf(row);
+            }
             if (row.getPaymentType() != PaymentType.DEPOSIT) {
                 continue;
             }
@@ -42,27 +47,35 @@ public class OrderDeposits {
                 unverified += money.amountOf(row);
             }
         }
-        boolean waiting = order.isWaitingForStock();
         long applied = total == 0 ? 0 : applications.sumAppliedFrom(order.getId());
-        // While the order waits, every refund on it gives deposit back; once it is released whole, the deposit pays it.
-        long refunded = waiting ? money.verifiedRefunded() : 0;
-        long remaining = waiting && order.getDepositForfeitedAt() == null ? Math.max(0, total - applied - refunded) : 0;
+        boolean forfeited = order.getDepositForfeitedAt() != null;
+        long remaining = forfeited ? 0 : Math.max(0, total - applied - refunded);
         LocalDate expiresOn = order.getDepositExpiresOn();
-        DepositStatus status;
-        if (order.getDepositForfeitedAt() != null) {
-            status = DepositStatus.FORFEITED;
-        } else if (total == 0) {
-            status = DepositStatus.NONE;
-        } else if (remaining == 0) {
-            status = DepositStatus.SETTLED;
-        } else if (expiresOn != null && LocalDate.now(clock).isAfter(expiresOn)) {
-            status = DepositStatus.EXPIRED;
-        } else {
-            status = DepositStatus.ACTIVE;
-        }
+        DepositStatus status = status(forfeited, total, remaining, expiresOn, LocalDate.now(clock));
         List<SalesDepositExpiryChange> changes = expiresOn == null ? List.of()
                 : expiryChanges.findBySalesOrderIdOrderByChangedAtAscIdAsc(order.getId());
         return new State(total, unverified, applied, refunded, remaining, expiresOn, status, changes);
+    }
+
+    /**
+     * One rule for the detail, the list and its filter: lost, none verified, all used or given back, past its last
+     * day, else active.
+     */
+    public static DepositStatus status(boolean forfeited, long total, long remaining, LocalDate expiresOn,
+                                       LocalDate today) {
+        if (forfeited) {
+            return DepositStatus.FORFEITED;
+        }
+        if (total == 0) {
+            return DepositStatus.NONE;
+        }
+        if (remaining == 0) {
+            return DepositStatus.SETTLED;
+        }
+        if (expiresOn != null && today.isAfter(expiresOn)) {
+            return DepositStatus.EXPIRED;
+        }
+        return DepositStatus.ACTIVE;
     }
 
     /** True when today is after the deposit's last day. */

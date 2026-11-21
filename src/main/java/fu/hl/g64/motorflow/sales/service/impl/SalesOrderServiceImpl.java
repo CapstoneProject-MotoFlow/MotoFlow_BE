@@ -26,8 +26,10 @@ import fu.hl.g64.motorflow.partner.entity.enums.CreditStatus;
 import fu.hl.g64.motorflow.partner.repository.CustomerRepository;
 import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.entity.Receivable;
+import fu.hl.g64.motorflow.receivable.entity.enums.PaymentMethod;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
+import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.ReleaseWaitingOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.NextAction;
@@ -45,6 +47,7 @@ import fu.hl.g64.motorflow.sales.dto.SalesOrderSummary;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderUpdateRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderVersion;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderView;
+import fu.hl.g64.motorflow.sales.entity.SalesDepositApplication;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
@@ -57,6 +60,7 @@ import fu.hl.g64.motorflow.sales.helper.OrderPricing.Priced;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -80,6 +84,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.NumberFormat;
+import java.time.format.DateTimeFormatter;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -107,6 +112,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private static final String REF_TYPE = "SALES_ORDER";
     private static final String DECLINED_REASON = "Khách không chờ hàng";
     private static final Locale VIETNAMESE = Locale.forLanguageTag("vi");
+    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private final SalesOrderRepository orders;
     private final SalesOrderLineRepository orderLines;
@@ -125,6 +131,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final ReceivableRepository receivables;
     private final AttachmentService attachments;
     private final OrderDeposits deposits;
+    private final SalesDepositApplicationRepository depositApplications;
+    private final TransactionReferences references;
     private final Clock clock;
 
     // UC-52
@@ -162,7 +170,22 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             to = to != null ? to : (from != null && from.isAfter(today) ? from : today);
             from = from != null ? from : to;
         }
-        Page<SalesOrder> found = orders.findAll(matching(search.q(), storeId, pickerId, statuses, from, to), pageable);
+        Specification<SalesOrder> where = matching(search.q(), storeId, pickerId, statuses, from, to);
+        if (search.depositStatus() != null) {
+            // BE-8: the deposit state is worked out from the money, so the orders are picked by id.
+            LocalDate today = LocalDate.now(clock);
+            DepositStatus wanted = search.depositStatus();
+            Map<Long, DepositFigures> figures = depositFigures(orders.depositFigures(storeId));
+            Set<Long> picked = figures.entrySet().stream()
+                    .filter(entry -> (entry.getValue().status(today) == wanted) != (wanted == DepositStatus.NONE))
+                    .map(Map.Entry::getKey).collect(Collectors.toSet());
+            if (wanted != DepositStatus.NONE && picked.isEmpty()) {
+                return PageResponse.of(Page.empty(pageable), List.of());
+            }
+            where = where.and((root, query, cb) -> picked.isEmpty() ? cb.conjunction()
+                    : wanted == DepositStatus.NONE ? cb.not(root.get("id").in(picked)) : root.get("id").in(picked));
+        }
+        Page<SalesOrder> found = orders.findAll(where, pageable);
         return PageResponse.of(found, summaries(user, found.getContent()));
     }
 
@@ -887,6 +910,11 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         if (!order.isWaitingForStock()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG307", id);
         }
+        // PM 21/11 (BE-5): after its last day the deposit waits for the Branch Manager's forfeit, not a release.
+        OrderDeposits.State deposit = deposits.of(order, collections.of(id));
+        if (deposit.status() == DepositStatus.EXPIRED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG321", order.getDepositExpiresOn().format(DAY));
+        }
         List<SalesOrderLine> lines = orderLines.findBySalesOrderIdOrderByLineNoAsc(id);
         Map<Long, SalesOrderLine> byId = byId(lines, SalesOrderLine::getId);
         Map<Long, Integer> wanted = new LinkedHashMap<>();
@@ -930,12 +958,15 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         int version = currentVersion(id);
         Map<String, Object> previous = SalesOrderHistory.snapshot(version, null, order, lines);
         if (whole) {
-            checkPricing(rate, lines.stream().map(line -> priced(line.getRequestedQty(),
-                    prices.get(line.getProductId()), rate)).toList(), now);
+            List<Priced> all = lines.stream().map(line -> priced(line.getRequestedQty(),
+                    prices.get(line.getProductId()), rate)).toList();
+            checkPricing(rate, all, now);
+            DepositUse use = depositUse(deposit, OrderPricing.totals(all).total(), true, request);
             lines.forEach(line -> line.reprice(prices.get(line.getProductId()),
                     OrderPricing.actualUnitPrice(prices.get(line.getProductId()), rate)));
             order.release(now);
             orderLines.flush();
+            applyDeposit(seller, id, id, use, request.depositRefund(), now);
             auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(),
                     null, previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
                             lines), now));
@@ -944,8 +975,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         }
         List<SalesOrderLine> taken = lines.stream().filter(line -> released.getOrDefault(line.getId(), 0) > 0)
                 .toList();
-        checkPricing(rate, taken.stream().map(line -> priced(released.get(line.getId()),
-                prices.get(line.getProductId()), rate)).toList(), now);
+        List<Priced> nowTaken = taken.stream().map(line -> priced(released.get(line.getId()),
+                prices.get(line.getProductId()), rate)).toList();
+        checkPricing(rate, nowTaken, now);
+        DepositUse use = depositUse(deposit, OrderPricing.totals(nowTaken).total(), false, request);
         SalesOrder sold = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
                 rate, order.getNote(), seller.id(), now));
         List<SalesOrderLine> soldLines = new ArrayList<>();
@@ -956,6 +989,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     reference, OrderPricing.actualUnitPrice(reference, rate)));
         }
         orderLines.saveAll(soldLines);
+        applyDeposit(seller, id, sold.getId(), use, null, now);
         List<SalesOrderLine> gone = taken.stream().filter(line -> released.get(line.getId())
                 == line.getRequestedQty()).toList();
         taken.stream().filter(line -> !gone.contains(line))
@@ -967,6 +1001,56 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                         orderLines.findBySalesOrderIdOrderByLineNoAsc(id)), now));
         return opened(seller, sold, soldLines, now, id)
                 .withSplit(new SalesOrderDetail.Split(sold.getId(), id, null, List.of()));
+    }
+
+    /** What a release puts of the deposit into the order it opens, and what it gives back of it. */
+    private record DepositUse(long applied, long refunded) {
+    }
+
+    /**
+     * PM 21/11 (BE-5): a release puts 0 up to the deposit left and the order's total into the order it opens (MSG327).
+     * The last one puts in all it can (MSG326), gives the rest back (MSG328) and needs every deposit verified (MSG325),
+     * so nothing of the deposit is left on the waiting order.
+     */
+    private static DepositUse depositUse(OrderDeposits.State deposit, long total, boolean last,
+                                         ReleaseWaitingOrderRequest request) {
+        long most = Math.min(deposit.remaining(), total);
+        if (!last) {
+            long amount = request.depositAmount() == null ? 0 : request.depositAmount();
+            if (amount > most) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG327", money(most));
+            }
+            return new DepositUse(amount, 0);
+        }
+        if (deposit.unverified() > 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG325", money(deposit.unverified()));
+        }
+        if (request.depositAmount() != null && request.depositAmount() != most) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG326", money(most));
+        }
+        long surplus = deposit.remaining() - most;
+        if (surplus > 0 && request.depositRefund() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG328", money(surplus));
+        }
+        return new DepositUse(most, surplus);
+    }
+
+    /** Records the deposit the release put into {@code salesOrderId} and the part given back on the waiting order. */
+    private void applyDeposit(AuthenticatedUser seller, long waitingId, long salesOrderId, DepositUse use,
+                              ReleaseWaitingOrderRequest.DepositRefund refund, LocalDateTime now) {
+        if (use.applied() > 0) {
+            depositApplications.save(SalesDepositApplication.of(waitingId, salesOrderId, use.applied(), seller.id(),
+                    now));
+        }
+        if (use.refunded() > 0) {
+            String reference = TransactionReferences.clean(refund.transactionReference());
+            if (refund.paymentMethod() == PaymentMethod.BANK_TRANSFER && reference == null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG154");
+            }
+            references.requireUnused(reference);
+            references.save(Payment.depositRefund(waitingId, use.refunded(), refund.paymentMethod(), reference,
+                    seller.id(), now));
+        }
     }
 
     /** UC-86: when the Owner sold it, the store's Branch Manager is told to give the picking to someone. */
@@ -1228,17 +1312,49 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, String> names = names(pickings.values().stream().map(WarehouseTask::getAssignedTo)
                 .collect(Collectors.toSet()));
         boolean staff = user.role() == Role.STAFF;
+        List<Long> withDeposit = page.stream().filter(order -> order.getDepositExpiresOn() != null)
+                .map(SalesOrder::getId).toList();
+        Map<Long, DepositFigures> deposited = staff || withDeposit.isEmpty() ? Map.of()
+                : depositFigures(orders.depositFiguresOf(withDeposit));
+        LocalDate today = LocalDate.now(clock);
 
         return page.stream().map(order -> {
             WarehouseTask picking = pickings.get(order.getId());
+            DepositFigures deposit = deposited.get(order.getId());
             return new SalesOrderSummary(order.getId(), 1 + versions.getOrDefault(order.getId(), 0L).intValue(),
                     order.getStatus(), order.getStoreId(), storeNames.get(order.getStoreId()), order.getCustomerId(),
                     order.getCustomerNameSnapshot(), staff ? null : order.getCustomerPhoneSnapshot(),
                     order.getCreatedAt(), staff ? null : totals.getOrDefault(order.getId(), 0L),
                     picking == null ? null : picking.getAssignedTo(),
                     picking == null ? null : names.get(picking.getAssignedTo()),
-                    nextAction(user, order, picking));
+                    nextAction(user, order, picking), deposit == null ? null : deposit.status(today),
+                    deposit == null ? null : deposit.remaining(), deposit == null ? null : deposit.expiresOn());
         }).toList();
+    }
+
+    /** PM 21/11 (BE-8): the deposit of an order in the list, read as {@link OrderDeposits} reads it. */
+    private record DepositFigures(LocalDate expiresOn, boolean forfeited, long total, long refunded, long applied) {
+
+        long remaining() {
+            return forfeited ? 0 : Math.max(0, total - applied - refunded);
+        }
+
+        DepositStatus status(LocalDate today) {
+            return OrderDeposits.status(forfeited, total, remaining(), expiresOn, today);
+        }
+    }
+
+    private static Map<Long, DepositFigures> depositFigures(List<Object[]> rows) {
+        Map<Long, DepositFigures> figures = new HashMap<>();
+        for (Object[] row : rows) {
+            figures.put(((Number) row[0]).longValue(), new DepositFigures(day(row[1]), (Boolean) row[2],
+                    ((Number) row[3]).longValue(), ((Number) row[4]).longValue(), ((Number) row[5]).longValue()));
+        }
+        return figures;
+    }
+
+    private static LocalDate day(Object value) {
+        return value instanceof java.sql.Date date ? date.toLocalDate() : (LocalDate) value;
     }
 
     private static NextAction nextAction(AuthenticatedUser user, SalesOrder order, WarehouseTask picking) {
@@ -1348,7 +1464,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 && !deposits.expired(order);
         boolean storeManager = user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
         Actions actions = draft ? new Actions(true, false, false, false, false, false, false, false, false, false,
-                false, false)
+                false, false, false)
                 : new Actions(seller && unfinished,
                 seller && order.getStatus() == SalesOrderStatus.AWAITING_PICKING,
                 holdsTask && ((order.getStatus() == SalesOrderStatus.AWAITING_PICKING
@@ -1366,7 +1482,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 seller && confirmedNow && settled && money.remainingPayable() == 0 && money.overpaidAmount() == 0,
                 seller && unfinished, seller && waiting,
                 seller && depositHolds && order.getCustomerId() != null,
-                storeManager && depositHolds && order.getDepositExpiresOn() != null);
+                storeManager && depositHolds && order.getDepositExpiresOn() != null,
+                storeManager && waiting && deposit != null && deposit.status() == DepositStatus.EXPIRED);
         Closing closing = staff ? null : new Closing(order.getCompletionType(), order.getCompletedBy(),
                 names.get(order.getCompletedBy()), order.getCompletedAt(), order.getCancelledBy(),
                 names.get(order.getCancelledBy()), order.getCancelledAt(), order.getCancellationReason());
@@ -1396,7 +1513,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                         change.getChangedBy(), names.get(change.getChangedBy()), change.getChangedAt()))
                 .toList();
         return new SalesOrderDetail.Deposit(state.total(), state.unverified(), state.applied(), state.refunded(),
-                state.remaining(), state.expiresOn(), state.status(), order.getDepositForfeitedAt(),
+                state.remaining(), state.expiresOn(), state.status(), order.getDepositForfeitedAmount(),
+                order.getDepositForfeitedAt(),
                 order.getDepositForfeitedBy(), names.get(order.getDepositForfeitedBy()), changes);
     }
 
@@ -1436,7 +1554,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return new SalesOrderDetail.Money(total, held.verifiedPaid(), held.verifiedRefunded(), net,
                 unfinished ? Math.max(0, total - net) : 0, unfinished ? Math.max(0, net - total) : 0,
                 unfinished ? held.refundable() : 0, confirmed ? held.payable(total) : 0, held.unverifiedCount(),
-                rows, credit, debt);
+                rows, credit, debt, held.depositApplied());
     }
 
     /** The picker's note on each line of the last picking result: why it is short, or any remark when picked in full. */

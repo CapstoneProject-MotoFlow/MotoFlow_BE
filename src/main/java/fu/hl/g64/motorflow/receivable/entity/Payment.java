@@ -113,6 +113,15 @@ public class Payment {
         return payment;
     }
 
+    /**
+     * PM 21/11 (BE-5): the part of a deposit larger than the order its last release opens, handed back to the
+     * customer then, so it is recorded verified like the refund of a cancellation.
+     */
+    public static Payment depositRefund(long orderId, long amount, PaymentMethod method, String transactionReference,
+                                        long seller, LocalDateTime now) {
+        return forOrder(PaymentType.DEPOSIT_REFUND, orderId, amount, method, transactionReference, true, seller, now);
+    }
+
     /** UC-56, UC-60 Step 7_Net collection exceeds the total: money given back to the customer before completion. */
     public static Payment refund(long orderId, long amount, PaymentMethod method, String transactionReference,
                                  boolean verified, long seller, LocalDateTime now) {

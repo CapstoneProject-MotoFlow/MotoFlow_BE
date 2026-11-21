@@ -7,18 +7,21 @@ import fu.hl.g64.motorflow.operation.service.AttachmentService;
 import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentMethod;
 import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
+import fu.hl.g64.motorflow.sales.dto.CancelSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.DepositExpiryRequest;
 import fu.hl.g64.motorflow.sales.dto.DepositPaymentRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SettlementResult;
 import fu.hl.g64.motorflow.sales.entity.SalesDepositExpiryChange;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
+import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
 import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesDepositService;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
+import fu.hl.g64.motorflow.sales.service.SalesOrderSettlementService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -36,6 +39,8 @@ import java.util.Objects;
 public class SalesDepositServiceImpl implements SalesDepositService {
 
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+    /** The cancellation reason of an order whose deposit expired (PM 21/11). */
+    static final String FORFEIT_REASON = "Hết hạn cọc";
 
     private final SalesOrderRepository orders;
     private final TransactionReferences references;
@@ -44,6 +49,7 @@ public class SalesDepositServiceImpl implements SalesDepositService {
     private final OrderCollections collections;
     private final OrderDeposits deposits;
     private final SalesOrderService salesOrders;
+    private final SalesOrderSettlementService settlements;
     private final Clock clock;
 
     // BE-3
@@ -122,6 +128,27 @@ public class SalesDepositServiceImpl implements SalesDepositService {
             expiryChanges.save(SalesDepositExpiryChange.of(orderId, old, next, manager.id(), now));
         }
         return salesOrders.get(manager, orderId);
+    }
+
+    // BE-7
+    @Transactional
+    @Override
+    public SalesOrderDetail forfeit(AuthenticatedUser manager, long orderId) {
+        SalesOrder order = lockWaiting(orderId);
+        // PM 21/11: the store's Branch Manager declares the deposit lost, as they change its expiry date.
+        if (manager.role() != Role.BRANCH_MANAGER || !Objects.equals(manager.storeId(), order.getStoreId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        requireWaiting(order);
+        OrderDeposits.State deposit = deposits.of(order, collections.of(orderId));
+        if (deposit.status() == DepositStatus.ACTIVE) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG329", order.getDepositExpiresOn().format(DAY));
+        }
+        if (deposit.status() != DepositStatus.EXPIRED) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG330");
+        }
+        // The order is cancelled as any waiting order its customer gave up, which keeps the deposit left.
+        return settlements.cancel(manager, orderId, new CancelSalesOrderRequest(FORFEIT_REASON, null));
     }
 
     private SalesOrder lockWaiting(long orderId) {

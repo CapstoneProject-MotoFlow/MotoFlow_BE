@@ -41,7 +41,8 @@ public class AccountingWorkbook {
 
             Sheet revenue = sheet(book, styles, "Doanh thu", title, "Ngày", "Đơn hoàn tất", "Doanh thu",
                     "Thu tiền đơn", "Hoàn tiền", "Thu nợ", "Tổng thu", "Bán chịu", "Điều chỉnh doanh thu",
-                    "Điều chỉnh thu tiền", "Điều chỉnh công nợ");
+                    "Điều chỉnh thu tiền", "Điều chỉnh công nợ", "Thu cọc", "Trả lại cọc", "Cọc dùng cho đơn",
+                    "Cọc khách mất");
             int r = 3;
             for (SalesCollectionReport.PeriodRow p : daily.periods()) {
                 figures(revenue.createRow(r++), styles, p.from(), p.figures());
@@ -108,7 +109,10 @@ public class AccountingWorkbook {
                 text(row, 6, p.get("payment_method"), null);
                 text(row, 7, p.get("transaction_reference"), null);
                 long amount = number(p.get("amount"));
-                money(row, 8, "REFUND".equals(p.get("payment_type")) ? -amount : amount, styles);
+                // Money given back (a refund, a deposit given back) leaves the store.
+                Object type = p.get("payment_type");
+                boolean givenBack = "REFUND".equals(type) || "DEPOSIT_REFUND".equals(type);
+                money(row, 8, givenBack ? -amount : amount, styles);
             }
 
             Sheet adjusted = sheet(book, styles, "Chứng từ điều chỉnh", title, "Đề nghị", "Ngày áp dụng", "Loại",
@@ -162,7 +166,8 @@ public class AccountingWorkbook {
     private static void figuresFrom(Row row, int from, Styles styles, Figures f) {
         long[] values = {f.completedOrders(), f.revenue(), f.orderPayments(), f.refunds(), f.debtCollected(),
                 f.totalCollected(), f.creditSales(), f.revenueCorrections(), f.collectionCorrections(),
-                f.receivableCorrections()};
+                f.receivableCorrections(), f.depositsReceived(), f.depositsRefunded(), f.depositsApplied(),
+                f.depositsForfeited()};
         for (int i = 0; i < values.length; i++) {
             money(row, from + i, values[i], styles);
         }

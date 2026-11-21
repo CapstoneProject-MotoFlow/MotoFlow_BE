@@ -12,6 +12,7 @@ import fu.hl.g64.motorflow.sales.dto.SalesOrderSummary;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderUpdateRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderVersion;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderView;
+import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
@@ -59,9 +60,11 @@ public class SalesOrderController {
                                                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdFrom,
                                                 @RequestParam(required = false)
                                                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate createdTo,
+                                                @RequestParam(required = false) DepositStatus depositStatus,
                                                 @RequestParam(defaultValue = "0") int page,
                                                 @RequestParam(defaultValue = "20") int size) {
-        return salesOrders.list(user, new SalesOrderSearch(storeId, view, status, q, createdFrom, createdTo), page, size);
+        return salesOrders.list(user, new SalesOrderSearch(storeId, view, status, q, createdFrom, createdTo,
+                depositStatus), page, size);
     }
 
     @Operation(summary = "Prices, totals, discount threshold and stock of an order being filled in; nothing is saved "
@@ -117,7 +120,11 @@ public class SalesOrderController {
 
     @Operation(summary = "Release a waiting order to picking, in part or in full (GVHD 20/11)",
             description = "Only an AWAITING_STOCK order (MSG307). Each line sells at most what it waits for (MSG305) "
-                    + "and what the store can sell now; MSG171 if nothing can be sold.")
+                    + "and what the store can sell now; MSG171 if nothing can be sold. With a deposit (PM 21/11): "
+                    + "refused once it EXPIRED (MSG321); depositAmount goes into the order opened, at most the "
+                    + "deposit left and its total (MSG327). The last release (nothing left waiting) puts in all it can "
+                    + "(MSG326), needs every deposit verified (MSG325) and gives the rest back as depositRefund "
+                    + "(MSG328, MSG154), recorded as a verified DEPOSIT_REFUND on the waiting order.")
     @PostMapping("/{id}/release")
     public SalesOrderDetail release(@AuthenticationPrincipal AuthenticatedUser seller, @PathVariable long id,
                                     @Valid @RequestBody ReleaseWaitingOrderRequest request) {

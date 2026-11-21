@@ -41,6 +41,7 @@ import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.CompletionType;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
+import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Priced;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
@@ -96,6 +97,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     private final AttachmentService attachments;
     private final InventoryPostingService inventory;
     private final OrderCollections collections;
+    private final OrderDeposits deposits;
     private final OrderPricing pricing;
     private final PickingGuide guide;
     private final SalesOrderService salesOrders;
@@ -278,6 +280,12 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         if (held != 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG185", money(held));
         }
+        // PM 21/11 (BE-7): the customer who gives up a waiting order loses the deposit it still holds; what releases
+        // already put into other orders stays with them.
+        long forfeited = order.isWaitingForStock() ? deposits.of(order, money).remaining() : 0;
+        if (forfeited > 0) {
+            order.forfeitDeposit(forfeited, seller.id(), now);
+        }
         List<WarehouseTask> picking = tasks.findOpenPickings(List.of(orderId));
         String reason = request.reason().strip();
         order.cancel(seller.id(), reason, now);
@@ -285,6 +293,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("refund_id", refundId);
         data.put("refunded", refund == null ? 0 : refund.amount());
+        data.put("deposit_forfeited", forfeited);
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, orderId, SalesOrderHistory.CANCELLED, seller.id(),
                 reason, null, data, now));
         picking.stream().map(WarehouseTask::getAssignedTo).filter(picker -> picker != seller.id()).distinct()

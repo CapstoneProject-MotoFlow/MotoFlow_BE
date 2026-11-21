@@ -42,18 +42,46 @@ public class ReportQueries {
                 params(storeId, from, to).addValue("unit", unit));
     }
 
-    /** [store_id, day, order_payments, refunds] of order payments and refunds verified in the period. */
+    /**
+     * [store_id, day, order_payments, refunds, deposits_received, deposits_refunded] of order payments, refunds,
+     * deposits and deposits given back (PM 21/11) verified in the period.
+     */
     public List<Map<String, Object>> orderCollections(Long storeId, LocalDateTime from, LocalDateTime to,
                                                       String unit) {
         return jdbc.queryForList("""
                 SELECT o.store_id, CAST(date_trunc(:unit, p.verified_at) AS DATE) AS day,
                        coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'ORDER_PAYMENT'), 0) AS order_payments,
-                       coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'REFUND'), 0) AS refunds
+                       coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'REFUND'), 0) AS refunds,
+                       coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'DEPOSIT'), 0) AS deposits_received,
+                       coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'DEPOSIT_REFUND'), 0) AS deposits_refunded
                 FROM payment p
                 JOIN sales_order o ON o.id = p.sales_order_id
-                WHERE p.status = 'VERIFIED' AND p.payment_type IN ('ORDER_PAYMENT', 'REFUND')
+                WHERE p.status = 'VERIFIED'
+                  AND p.payment_type IN ('ORDER_PAYMENT', 'REFUND', 'DEPOSIT', 'DEPOSIT_REFUND')
                   AND p.verified_at >= :from AND p.verified_at < :to AND %s
                 GROUP BY 1, 2""".formatted(STORE.formatted("o.store_id")),
+                params(storeId, from, to).addValue("unit", unit));
+    }
+
+    /**
+     * [store_id, day, deposits_applied, deposits_forfeited] (PM 21/11): deposit that releases put into the orders they
+     * opened, and deposit the store kept when a waiting order was cancelled or its deposit expired, in the period.
+     */
+    public List<Map<String, Object>> depositMovements(Long storeId, LocalDateTime from, LocalDateTime to,
+                                                      String unit) {
+        return jdbc.queryForList("""
+                SELECT m.store_id, CAST(date_trunc(:unit, m.at) AS DATE) AS day,
+                       coalesce(sum(m.applied), 0) AS deposits_applied,
+                       coalesce(sum(m.forfeited), 0) AS deposits_forfeited
+                FROM (SELECT o.store_id, a.applied_at AS at, a.amount AS applied, 0 AS forfeited
+                      FROM sales_deposit_application a
+                      JOIN sales_order o ON o.id = a.waiting_order_id
+                      UNION ALL
+                      SELECT o.store_id, o.deposit_forfeited_at, 0, o.deposit_forfeited_amount
+                      FROM sales_order o
+                      WHERE o.deposit_forfeited_at IS NOT NULL) m
+                WHERE m.at >= :from AND m.at < :to AND %s
+                GROUP BY 1, 2""".formatted(STORE.formatted("m.store_id")),
                 params(storeId, from, to).addValue("unit", unit));
     }
 
@@ -242,7 +270,7 @@ public class ReportQueries {
                 params(storeId, from, to));
     }
 
-    /** Payments verified in the period: order payments, refunds and debt payments. */
+    /** Payments verified in the period: order payments, refunds, debt payments, deposits and deposits given back. */
     public List<Map<String, Object>> payments(Long storeId, LocalDateTime from, LocalDateTime to) {
         return jdbc.queryForList("""
                 SELECT p.id, p.verified_at, p.payment_type, p.sales_order_id, p.payment_method,

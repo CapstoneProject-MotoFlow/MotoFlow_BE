@@ -53,4 +53,16 @@ public class SalesDepositController {
                                          @Valid @RequestBody DepositExpiryRequest request) {
         return deposits.changeExpiry(manager, id, request);
     }
+
+    @Operation(summary = "Declare an expired deposit lost and cancel the waiting order",
+            description = "Only the store's Branch Manager (403 for Owner and Staff). The order still waits for "
+                    + "stock (MSG319) and its deposit has EXPIRED: MSG329 while it holds, MSG330 when no deposit is "
+                    + "left. The order is cancelled with the reason \"Hết hạn cọc\"; nothing is refunded and "
+                    + "deposit.forfeitedAmount is what the store keeps. Cancelling a waiting order before the expiry "
+                    + "(POST /cancel) keeps the deposit left too.")
+    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    @PostMapping("/forfeit-deposit")
+    public SalesOrderDetail forfeit(@AuthenticationPrincipal AuthenticatedUser manager, @PathVariable long id) {
+        return deposits.forfeit(manager, id);
+    }
 }
