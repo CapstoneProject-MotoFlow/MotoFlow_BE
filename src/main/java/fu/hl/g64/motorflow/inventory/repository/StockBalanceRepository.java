@@ -143,6 +143,7 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
                                             fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.CONFIRMED)), 0) as int)
                   < b.lowStockThreshold
               and p.status = fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus.ACTIVE
+              and p.variantOfProductId is null
               and s.status = fu.hl.g64.motorflow.store.entity.enums.StoreStatus.ACTIVE
             order by b.storeId, p.sku""")
     List<LowStockRow> findBelowThreshold(LocalDate today);

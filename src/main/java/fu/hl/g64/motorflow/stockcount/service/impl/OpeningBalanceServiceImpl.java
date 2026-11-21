@@ -66,6 +66,10 @@ public class OpeningBalanceServiceImpl implements OpeningBalanceService {
         if (parts.size() != partIds.size()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG242");
         }
+        // GVHD 20/11 (PR 5): a dented-goods variant is never counted as opening stock.
+        parts.values().stream().filter(part -> part.getVariantOfProductId() != null).findFirst().ifPresent(part -> {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG316", part.getSku());
+        });
         Set<SimpleEntry<Long, LocalDate>> seen = new HashSet<>();
         for (OpeningLinesSaveRequest.Line item : sent) {
             if (!seen.add(new SimpleEntry<>(item.productId(), item.expiryDate()))) {

@@ -70,14 +70,15 @@ public class Lot {
 
     /**
      * A new lot. A receipt lot points at its goods receipt note line and supplier; an opening or count-surplus lot
-     * points at its stock count (CHECKs in the schema).
+     * points at its stock count; a discrepancy lot (GVHD 20/11) has the supplier and neither (CHECKs in the schema).
      */
     public static Lot create(Long productId, LotSourceType sourceType, Long goodsReceiptNoteLineId, Long stockCountId,
                              Long supplierId, Long storeId, LocalDate receivedDate, long purchaseUnitPrice,
                              String manufacturerLotNo, LocalDate manufactureDate, LocalDate expiryDate) {
         boolean receipt = sourceType == LotSourceType.RECEIPT;
-        if (receipt != (goodsReceiptNoteLineId != null) || receipt == (stockCountId != null)
-                || (!receipt && supplierId != null) || purchaseUnitPrice < 0) {
+        boolean counted = sourceType == LotSourceType.OPENING || sourceType == LotSourceType.COUNT_SURPLUS;
+        if (receipt != (goodsReceiptNoteLineId != null) || counted != (stockCountId != null)
+                || (counted && supplierId != null) || purchaseUnitPrice < 0) {
             throw new IllegalArgumentException("lot source does not match its source type");
         }
         Lot lot = new Lot();

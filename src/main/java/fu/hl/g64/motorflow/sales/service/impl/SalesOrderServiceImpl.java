@@ -232,6 +232,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, Long> prices = pricing.retailPrices(parts.keySet(), now);
         Map<Long, PickingGuide.Part> stock = guide.parts(store.getId(), parts.keySet(), now.toLocalDate());
         BigDecimal threshold = pricing.discountThreshold(now);
+        Map<Long, SalesOrderPreview.Variant> variants = variants(store.getId(), parts.keySet(), now);
 
         List<SalesOrderPreview.Line> lines = new ArrayList<>();
         List<Priced> priced = new ArrayList<>();
@@ -248,7 +249,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     part.getStatus(), line.quantity(), reference, actual,
                     actual == null ? null : (long) line.quantity() * actual, sellable,
                     Math.max(0, line.quantity() - sellable), held.heldByOthersQty(),
-                    Math.min(line.quantity(), sellable)));
+                    Math.min(line.quantity(), sellable), variants.get(part.getId())));
         }
         Totals totals = OrderPricing.totals(priced);
         boolean within = true;
@@ -260,6 +261,27 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return new SalesOrderPreview(store.getId(), request.priceType(), rate, threshold,
                 priced.size() == lines.size(), within, totals.referenceTotal(), totals.discountAmount(),
                 totals.total(), totals.invoiceDiscountRate(), lines);
+    }
+
+    /** GVHD 20/11 (PR 5): [part id → its dented-goods variant] for the parts whose variant the store can sell. */
+    private Map<Long, SalesOrderPreview.Variant> variants(long storeId, Collection<Long> productIds,
+                                                          LocalDateTime now) {
+        List<Product> found = products.findByVariantOfProductIdIn(productIds);
+        if (found.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = found.stream().map(Product::getId).toList();
+        Map<Long, PickingGuide.Part> stock = guide.parts(storeId, ids, now.toLocalDate());
+        Map<Long, Long> prices = pricing.retailPrices(ids, now);
+        Map<Long, SalesOrderPreview.Variant> variants = new HashMap<>();
+        for (Product variant : found) {
+            int sellable = stock.get(variant.getId()).sellableQty();
+            if (sellable > 0) {
+                variants.put(variant.getVariantOfProductId(), new SalesOrderPreview.Variant(variant.getId(),
+                        variant.getSku(), sellable, prices.get(variant.getId())));
+            }
+        }
+        return variants;
     }
 
     // UC-53

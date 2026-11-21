@@ -36,23 +36,38 @@ public class DiscrepancySettlement {
     private final DiscrepancyResolutionEventRepository events;
     private final GoodsReceiptNoteLineRepository receiptLines;
 
-    /** What was done on one case; {@code lastWaiverReason} is the reason of the latest waiver, if any. */
+    /**
+     * What was done on one case; {@code lastWaiverReason} is the reason of the latest waiver, if any. GVHD 20/11 (PR 5):
+     * {@code acceptedDamaged} were taken into stock as the dented-goods variant, {@code acceptedWrong} as the part they
+     * really are; both settle held goods like a write-off.
+     */
     public record Progress(int returned, int writtenOff, int replaced, int waived, int pendingReplacement,
-                           String lastWaiverReason) {
-        public static final Progress NONE = new Progress(0, 0, 0, 0, 0, null);
+                           String lastWaiverReason, int acceptedDamaged, int acceptedWrong) {
+        public static final Progress NONE = new Progress(0, 0, 0, 0, 0, null, 0, 0);
+
+        /** Held goods settled by being kept: written off or taken into stock as another part. */
+        public int kept() {
+            return writtenOff + acceptedDamaged + acceptedWrong;
+        }
 
         private Progress add(DiscrepancyResolutionEvent event) {
             int q = event.getQuantity();
             return switch (event.getResolutionType()) {
-                case RETURNED_TO_SUPPLIER ->
-                        new Progress(returned + q, writtenOff, replaced, waived, pendingReplacement, lastWaiverReason);
-                case APPROVED_LOSS ->
-                        new Progress(returned, writtenOff + q, replaced, waived, pendingReplacement, lastWaiverReason);
+                case RETURNED_TO_SUPPLIER -> new Progress(returned + q, writtenOff, replaced, waived,
+                        pendingReplacement, lastWaiverReason, acceptedDamaged, acceptedWrong);
+                case APPROVED_LOSS -> new Progress(returned, writtenOff + q, replaced, waived, pendingReplacement,
+                        lastWaiverReason, acceptedDamaged, acceptedWrong);
                 case REPLACEMENT_RECEIVED, LATE_DELIVERY_RECEIVED -> event.isConfirmed()
-                        ? new Progress(returned, writtenOff, replaced + q, waived, pendingReplacement, lastWaiverReason)
-                        : new Progress(returned, writtenOff, replaced, waived, pendingReplacement + q, lastWaiverReason);
-                case CLOSED_BY_AGREEMENT ->
-                        new Progress(returned, writtenOff, replaced, waived + q, pendingReplacement, event.getReason());
+                        ? new Progress(returned, writtenOff, replaced + q, waived, pendingReplacement, lastWaiverReason,
+                        acceptedDamaged, acceptedWrong)
+                        : new Progress(returned, writtenOff, replaced, waived, pendingReplacement + q, lastWaiverReason,
+                        acceptedDamaged, acceptedWrong);
+                case CLOSED_BY_AGREEMENT -> new Progress(returned, writtenOff, replaced, waived + q,
+                        pendingReplacement, event.getReason(), acceptedDamaged, acceptedWrong);
+                case ACCEPTED_AS_VARIANT -> new Progress(returned, writtenOff, replaced, waived, pendingReplacement,
+                        lastWaiverReason, acceptedDamaged + q, acceptedWrong);
+                case RECEIVED_AS_OTHER_PRODUCT -> new Progress(returned, writtenOff, replaced, waived,
+                        pendingReplacement, lastWaiverReason, acceptedDamaged, acceptedWrong + q);
                 // Moving goods to awaiting return changes no obligation; the case records it in return_required_qty.
                 case MOVED_TO_AWAITING_RETURN, RELEASED_FROM_AWAITING_RETURN, RECEIVED_BACK_AT_SOURCE -> this;
             };
@@ -78,11 +93,31 @@ public class DiscrepancySettlement {
         }
 
         /**
-         * Wrong, damaged or rejected goods held at the store that are not to be returned and were not written off:
-         * they wait for a loss or damage request (UC-46 Step 3_Goods cannot be returned).
+         * Wrong, damaged or rejected goods held at the store that are not to be returned, were not written off and were
+         * not taken as another part: they wait for a loss or damage request (UC-46 Step 3_Goods cannot be returned) or
+         * for Owner to take them (GVHD 20/11).
          */
         public int heldUndecided() {
-            return Math.max(found.heldQty() - found.getReturnRequiredQty() - progress.writtenOff(), 0);
+            return Math.max(found.heldQty() - found.getReturnRequiredQty() - progress.kept(), 0);
+        }
+
+        /**
+         * GVHD 20/11 (PR 5): damaged goods held and not decided, which Owner may take as the dented-goods variant. The
+         * return takes the rejected excess first, then the wrong items, then the damaged goods (UC-46).
+         */
+        public int damagedUndecided() {
+            int moved = Math.max(found.getReturnRequiredQty() - found.getRejectedExcessQty(), 0);
+            int damagedMoved = Math.max(moved - found.getWrongItemQty(), 0);
+            return Math.min(Math.max(found.getDamagedQty() - damagedMoved - progress.acceptedDamaged(), 0),
+                    heldUndecided());
+        }
+
+        /** GVHD 20/11 (PR 5): wrong items held and not decided, which Owner may take as the part they really are. */
+        public int wrongUndecided() {
+            int moved = Math.max(found.getReturnRequiredQty() - found.getRejectedExcessQty(), 0);
+            int wrongMoved = Math.min(moved, found.getWrongItemQty());
+            return Math.min(Math.max(found.getWrongItemQty() - wrongMoved - progress.acceptedWrong(), 0),
+                    heldUndecided());
         }
 
         /**

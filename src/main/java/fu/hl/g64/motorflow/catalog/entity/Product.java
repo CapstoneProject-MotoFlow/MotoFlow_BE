@@ -73,6 +73,10 @@ public class Product {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    /** GVHD 20/11 (PR 5, V15): the part this one is the dented-goods variant of ("<SKU>-M"); null for a normal part. */
+    @Column(name = "variant_of_product_id")
+    private Long variantOfProductId;
+
     /** UC-15. Creating a part never creates stock (DBR-02). */
     public static Product create(String sku, String partName, Long categoryId, String brand, String countryOfOrigin,
                                  String baseUnit, String specifications, Long createdBy, LocalDateTime now) {
@@ -84,6 +88,21 @@ public class Product {
         product.update(partName, categoryId, brand, countryOfOrigin, baseUnit, specifications, now);
         return product;
     }
+
+    /**
+     * GVHD 20/11 (PR 5): the dented-goods variant of {@code original}: SKU "<SKU>-M", name "<name> (hàng móp)", the
+     * same category, brand, origin, unit and specifications. It is sold and priced as a part of its own.
+     */
+    public static Product damagedVariantOf(Product original, Long createdBy, LocalDateTime now) {
+        Product variant = create(original.sku + VARIANT_SKU_SUFFIX, original.partName + VARIANT_NAME_SUFFIX,
+                original.categoryId, original.brand, original.countryOfOrigin, original.baseUnit,
+                original.specifications, createdBy, now);
+        variant.variantOfProductId = original.id;
+        return variant;
+    }
+
+    public static final String VARIANT_SKU_SUFFIX = "-M";
+    public static final String VARIANT_NAME_SUFFIX = " (hàng móp)";
 
     /** UC-16. The SKU never changes, so stock and documents keep pointing at the same part. */
     public void update(String newPartName, Long newCategoryId, String newBrand, String newCountryOfOrigin,

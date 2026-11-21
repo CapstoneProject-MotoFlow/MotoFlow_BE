@@ -100,7 +100,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                     p.purchaseUnitPrice());
         }
 
-        Long stockCountId = p.sourceType() == LotSourceType.RECEIPT ? null : p.source().id();
+        boolean counted = p.sourceType() == LotSourceType.OPENING || p.sourceType() == LotSourceType.COUNT_SURPLUS;
+        Long stockCountId = counted ? p.source().id() : null;
         Lot lot = lots.save(Lot.create(p.productId(), p.sourceType(), p.goodsReceiptNoteLineId(), stockCountId,
                 p.supplierId(), p.storeId(), p.receivedDate(), p.purchaseUnitPrice(), p.manufacturerLotNo(),
                 p.manufactureDate(), p.expiryDate()));

@@ -19,9 +19,15 @@ public record SalesOrderPreview(long storeId, PriceType priceType, BigDecimal di
     /**
      * GVHD 20/11: {@code sellableQty} is what the store can sell now, less what other open orders hold
      * ({@code heldByOthersQty}); {@code suggestedNowQty} = min(quantity, sellableQty), the default "lấy ngay".
+     * {@code variant} (PR 5) is the part's dented-goods variant when the store can sell some of it ("Có N hàng móp"),
+     * otherwise null; it is sold as a part of its own.
      */
     public record Line(long productId, String sku, String partName, String baseUnit, ProductStatus productStatus,
                        int quantity, Long retailPrice, Long actualUnitPrice, Long lineTotal, int sellableQty,
-                       int shortQty, int heldByOthersQty, int suggestedNowQty) {
+                       int shortQty, int heldByOthersQty, int suggestedNowQty, Variant variant) {
+    }
+
+    /** GVHD 20/11 (PR 5): the dented-goods variant of a part, with what the store can sell of it and its price. */
+    public record Variant(long productId, String sku, int sellableQty, Long retailPrice) {
     }
 }

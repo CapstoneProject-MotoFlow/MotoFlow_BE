@@ -7,11 +7,19 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpecificationExecutor<Product> {
 
     boolean existsBySku(String sku);
+
+    /** GVHD 20/11 (PR 5): the dented-goods variant of a part, if it has one. */
+    Optional<Product> findByVariantOfProductId(Long productId);
+
+    /** GVHD 20/11 (PR 5): the dented-goods variants of these parts. */
+    List<Product> findByVariantOfProductIdIn(Collection<Long> productIds);
 
     boolean existsByCategoryId(Long categoryId);
 

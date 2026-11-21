@@ -15,5 +15,9 @@ public enum MovementType {
     TRANSFER_RECEIPT,
     ADJUSTMENT,
     COUNT_ADJUSTMENT,
-    OPENING_BALANCE
+    OPENING_BALANCE,
+    /** GVHD 20/11 (PR 5, V15): damaged goods leave the part and come in as its dented-goods variant. */
+    DAMAGED_TO_VARIANT,
+    /** GVHD 20/11 (PR 5, V15): wrong items leave the part ordered and come in as the part they really are. */
+    WRONG_ITEM_RECLASSIFIED
 }

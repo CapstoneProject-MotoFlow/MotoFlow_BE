@@ -1,9 +1,13 @@
 package fu.hl.g64.motorflow.discrepancy.service;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
+import fu.hl.g64.motorflow.discrepancy.dto.AcceptAsVariantRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.AcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancySearch;
+import fu.hl.g64.motorflow.discrepancy.dto.ReceiveWrongItemsRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.RejectAcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.SupplierReturnRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.WaiveReplacementRequest;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
@@ -46,4 +50,27 @@ public interface DiscrepancyService {
      * left to waive, MSG144 for a quantity above it.
      */
     DiscrepancyCaseResponse waiveReplacement(AuthenticatedUser owner, long id, WaiveReplacementRequest request);
+
+    /**
+     * GVHD 20/11 (PR 5): the receiving Branch Manager (or Owner) asks Owner to take held damaged or wrong goods into
+     * stock; Owner is told. MSG309 for more than is held and not decided of that kind.
+     */
+    DiscrepancyCaseResponse requestAcceptance(AuthenticatedUser user, long id, AcceptanceRequest request);
+
+    /** GVHD 20/11 (PR 5), Owner only: refuses the pending request (MSG29 if none); the store's managers are told. */
+    DiscrepancyCaseResponse rejectAcceptance(AuthenticatedUser owner, long id, RejectAcceptanceRequest request);
+
+    /**
+     * GVHD 20/11 (PR 5), Owner only: dented goods come into stock as the part's "-M" variant, made the first time
+     * (MSG312), at the given cost, with the given retail price (MSG311 if the variant has none). MSG309 for more than
+     * is held and not decided.
+     */
+    DiscrepancyCaseResponse acceptAsVariant(AuthenticatedUser owner, long id, AcceptAsVariantRequest request);
+
+    /**
+     * GVHD 20/11 (PR 5), Owner only: wrong items come into stock as the part they really are (MSG57, MSG310, MSG313),
+     * waiving the replacement owed for them unless {@code replacementNeeded}. MSG309 for more than is held and not
+     * decided.
+     */
+    DiscrepancyCaseResponse receiveWrongItems(AuthenticatedUser owner, long id, ReceiveWrongItemsRequest request);
 }
