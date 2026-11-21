@@ -145,8 +145,10 @@ public class SalesDepositServiceImpl implements SalesDepositService {
     @Override
     public SalesOrderDetail forfeit(AuthenticatedUser manager, long orderId) {
         SalesOrder order = lockWaiting(orderId);
-        // PM 21/11: the store's Branch Manager declares the deposit lost, as they change its expiry date.
-        if (manager.role() != Role.BRANCH_MANAGER || !Objects.equals(manager.storeId(), order.getStoreId())) {
+        // The same people who change the expiry date: Owner, or the Branch Manager of this store.
+        boolean storeSeller = manager.role() == Role.OWNER || (manager.role() == Role.BRANCH_MANAGER
+                && Objects.equals(manager.storeId(), order.getStoreId()));
+        if (!storeSeller) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         requireWaiting(order);

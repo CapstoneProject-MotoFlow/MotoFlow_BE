@@ -151,7 +151,8 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.message").value("Cọc của đơn còn hạn đến 14/10/2026 nên chưa xử lý mất cọc được."));
         forfeit(managerToken, none)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG330"));
-        forfeit(ownerToken, expiring).andExpect(status().isForbidden());
+        forfeit(ownerToken, expiring)
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG329"));
         forfeit(otherManagerToken, expiring)
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
 
@@ -167,7 +168,7 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.deposit.forfeitedBy").value(manager.getFullName()))
                 .andExpect(jsonPath("$.deposit.remaining").value(0));
 
-        // 15/10: the first deposit has expired. It is listed, cannot be released and the Branch Manager forfeits it.
+        // 15/10: the first deposit has expired. It is listed, cannot be released and the Owner forfeits it.
         clock.advance(Duration.ofDays(2));
         signInAll();
         list(managerToken, "depositStatus", "EXPIRED")
@@ -184,11 +185,9 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.actions.canRelease").value(false))
                 .andExpect(jsonPath("$.actions.canForfeitDeposit").value(true))
                 .andExpect(jsonPath("$.actions.cancelForfeitsDeposit").value(true));
-        send(ownerToken, "/api/v1/sales-orders/" + expiring + "/cancel", Map.of("reason", "Hết hàng"))
-                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
-        detail(ownerToken, expiring).andExpect(jsonPath("$.actions.canForfeitDeposit").value(false));
+        detail(ownerToken, expiring).andExpect(jsonPath("$.actions.canForfeitDeposit").value(true));
 
-        forfeit(managerToken, expiring)
+        forfeit(ownerToken, expiring)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
                 .andExpect(jsonPath("$.closing.cancellationReason").value("Hết hạn cọc"))
