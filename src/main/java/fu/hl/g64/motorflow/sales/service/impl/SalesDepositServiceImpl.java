@@ -1,0 +1,155 @@
+package fu.hl.g64.motorflow.sales.service.impl;
+
+import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
+import fu.hl.g64.motorflow.operation.service.AttachmentService;
+import fu.hl.g64.motorflow.receivable.entity.Payment;
+import fu.hl.g64.motorflow.receivable.entity.enums.PaymentMethod;
+import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
+import fu.hl.g64.motorflow.sales.dto.DepositExpiryRequest;
+import fu.hl.g64.motorflow.sales.dto.DepositPaymentRequest;
+import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
+import fu.hl.g64.motorflow.sales.dto.SettlementResult;
+import fu.hl.g64.motorflow.sales.entity.SalesDepositExpiryChange;
+import fu.hl.g64.motorflow.sales.entity.SalesOrder;
+import fu.hl.g64.motorflow.sales.helper.OrderCollections;
+import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
+import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
+import fu.hl.g64.motorflow.sales.service.SalesDepositService;
+import fu.hl.g64.motorflow.sales.service.SalesOrderService;
+import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Objects;
+
+@Service
+@RequiredArgsConstructor
+public class SalesDepositServiceImpl implements SalesDepositService {
+
+    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
+    private final SalesOrderRepository orders;
+    private final TransactionReferences references;
+    private final AttachmentService attachments;
+    private final SalesDepositExpiryChangeRepository expiryChanges;
+    private final OrderCollections collections;
+    private final OrderDeposits deposits;
+    private final SalesOrderService salesOrders;
+    private final Clock clock;
+
+    // BE-3
+    @Transactional
+    @Override
+    public SettlementResult recordDeposit(AuthenticatedUser seller, long orderId, DepositPaymentRequest request) {
+        SalesOrder order = lockWaiting(orderId);
+        boolean storeSeller = seller.role() == Role.OWNER || (seller.role() == Role.BRANCH_MANAGER
+                && Objects.equals(seller.storeId(), order.getStoreId()));
+        if (!storeSeller) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        requireWaiting(order);
+        // Mạnh 21/11: a deposit belongs to a customer profile, so the store knows whose money it is.
+        if (order.getCustomerId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG320");
+        }
+        OrderCollections.Money money = collections.of(orderId);
+        OrderDeposits.State held = deposits.of(order, money);
+        // A rejected deposit leaves the date behind with nothing recorded. That date is not a deposit,
+        // so it neither blocks a new one (MSG321) nor freezes the date (MSG323). Money still waiting
+        // to be verified does count, so a second deposit keeps the date and the recorded total.
+        boolean fresh = held.recorded() == 0;
+        if (!fresh) {
+            requireNotExpired(order);
+        }
+        LocalDate today = LocalDate.now(clock);
+        LocalDate expiry = request.depositExpiresOn();
+        if (fresh || order.getDepositExpiresOn() == null) {
+            if (expiry == null || !expiry.isAfter(today)) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG322");
+            }
+        } else if (expiry != null && !expiry.equals(order.getDepositExpiresOn())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG323", order.getDepositExpiresOn().format(DAY));
+        }
+        // BR-45: the same deposit sent twice finds more already recorded.
+        if (request.expectedDepositRecorded() != held.recorded()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG194");
+        }
+        Long tendered = request.tenderedAmount();
+        if (tendered != null && (request.paymentMethod() != PaymentMethod.CASH || tendered < request.amount())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG182");
+        }
+        String reference = TransactionReferences.clean(request.transactionReference());
+        if (request.paymentMethod() == PaymentMethod.BANK_TRANSFER && reference == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG154");
+        }
+        references.requireUnused(reference);
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (fresh || order.getDepositExpiresOn() == null) {
+            order.setDepositExpiry(expiry, now);
+        }
+        Payment payment = references.save(Payment.deposit(orderId, request.amount(), tendered,
+                request.paymentMethod(), reference, request.verified(), seller.id(), now));
+        if (request.evidence() != null && !request.evidence().isEmpty()) {
+            attachments.attach(OwnerType.PAYMENT, payment.getId(), request.evidence(), seller.id());
+        }
+        return new SettlementResult(salesOrders.get(seller, orderId), payment.getId(), false, null, null);
+    }
+
+    // BE-4
+    @Transactional
+    @Override
+    public SalesOrderDetail changeExpiry(AuthenticatedUser manager, long orderId, DepositExpiryRequest request) {
+        SalesOrder order = lockWaiting(orderId);
+        // The same people who record a deposit: Owner, or the Branch Manager of this store.
+        boolean storeSeller = manager.role() == Role.OWNER || (manager.role() == Role.BRANCH_MANAGER
+                && Objects.equals(manager.storeId(), order.getStoreId()));
+        if (!storeSeller) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        requireWaiting(order);
+        LocalDate old = order.getDepositExpiresOn();
+        // A rejected first deposit still leaves the date behind, with nothing verified to extend (MSG324).
+        if (old == null || deposits.of(order, collections.of(orderId)).total() == 0) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG324");
+        }
+        requireNotExpired(order);
+        LocalDate next = request.depositExpiresOn();
+        if (!next.isAfter(LocalDate.now(clock))) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG322");
+        }
+        if (!next.equals(old)) {
+            LocalDateTime now = LocalDateTime.now(clock);
+            order.setDepositExpiry(next, now);
+            expiryChanges.save(SalesDepositExpiryChange.of(orderId, old, next, manager.id(), now));
+        }
+        return salesOrders.get(manager, orderId);
+    }
+
+    private SalesOrder lockWaiting(long orderId) {
+        return orders.findByIdForUpdate(orderId).filter(found -> !found.isDraft())
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG156"));
+    }
+
+    /** A deposit belongs to a waiting order only (MSG319). */
+    private static void requireWaiting(SalesOrder order) {
+        if (!order.isWaitingForStock()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG319", order.getId());
+        }
+    }
+
+    /** After its last day a deposit takes no more money and keeps its date (MSG321). */
+    private void requireNotExpired(SalesOrder order) {
+        if (deposits.expired(order)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG321", order.getDepositExpiresOn().format(DAY));
+        }
+    }
+}

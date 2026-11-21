@@ -8,6 +8,7 @@ import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.sales.entity.enums.CompletionType;
 import fu.hl.g64.motorflow.sales.entity.enums.CreditDecision;
+import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide.LotToPick;
@@ -30,6 +31,8 @@ import java.util.List;
  * <p>GVHD 20/11: {@code splitFromOrderId} is the order this one came from ("tách từ BH-xxx"), read from audit_log.
  * {@code split} is filled only in the answer of the call that split the request: the order sold now, the waiting
  * order and the units the customer declined.</p>
+ *
+ * <p>PM 21/11: {@code deposit} is the deposit of a waiting order (null for Staff and for a draft).</p>
  */
 public record SalesOrderDetail(
         long id, int version, SalesOrderStatus status, long storeId, String storeName,
@@ -39,7 +42,7 @@ public record SalesOrderDetail(
         Long confirmedById, String confirmedBy, LocalDateTime confirmedAt,
         String quantityBasis, Long referenceTotal, Long discountAmount, Long total, BigDecimal invoiceDiscountRate,
         BigDecimal discountThreshold, Money money, Closing closing, List<Line> lines, Actions actions,
-        List<HistoryEntry> history, Long splitFromOrderId, Split split) {
+        List<HistoryEntry> history, Long splitFromOrderId, Split split, Deposit deposit) {
 
     /**
      * GVHD 20/11: how one request was split. An order id is null when nothing went to it; {@code declinedOrderId} is
@@ -58,7 +61,24 @@ public record SalesOrderDetail(
                 customerAddress, note, priceType, discountRate, picker, createdById, createdBy, createdAt, updatedAt,
                 confirmedById, confirmedBy, confirmedAt, quantityBasis, referenceTotal, discountAmount, total,
                 invoiceDiscountRate, discountThreshold, money, closing, lines, actions, history, splitFromOrderId,
-                made);
+                made, deposit);
+    }
+
+    /**
+     * PM 21/11: the deposit of a waiting order. {@code total} is the verified DEPOSIT money ({@code unverified} waits
+     * for verification and does not count yet, BR-46); {@code applied} what releases took into their orders,
+     * {@code refunded} what went back to the customer and {@code remaining} what the order still holds.
+     * {@code status} is worked out on reading: EXPIRED once today is after {@code expiresOn}.
+     * {@code expiryChanges} lists every change of the expiry date by the Branch Manager, oldest first.
+     */
+    public record Deposit(long total, long unverified, long applied, long refunded, long remaining,
+                          LocalDate expiresOn, DepositStatus status, LocalDateTime forfeitedAt, Long forfeitedById,
+                          String forfeitedBy, List<ExpiryChange> expiryChanges) {
+    }
+
+    /** One change of a deposit's expiry date. */
+    public record ExpiryChange(LocalDate oldDate, LocalDate newDate, Long changedById, String changedBy,
+                               LocalDateTime changedAt) {
     }
 
     /** Who holds the picking task and where it stands. */
@@ -79,10 +99,16 @@ public record SalesOrderDetail(
                        List<LotToPick> pickFirst, int heldByOthersQty) {
     }
 
-    /** What the signed-in user may do with the order now. */
+    /**
+     * What the signed-in user may do with the order now. PM 21/11: {@code canRecordDeposit} for a seller of a waiting
+     * order with a customer profile whose deposit has not expired; {@code canChangeDepositExpiry} for the Owner or
+     * the store's Branch Manager while a verified deposit still holds. A date left behind by a rejected deposit is
+     * not enough.
+     */
     public record Actions(boolean canUpdate, boolean canAssignPicker, boolean canRecordPicking, boolean canConfirm,
                           boolean canRecordPayment, boolean canRefund, boolean canRecordCredit, boolean canComplete,
-                          boolean canCancel, boolean canRelease) {
+                          boolean canCancel, boolean canRelease, boolean canRecordDeposit,
+                          boolean canChangeDepositExpiry) {
     }
 
     /**

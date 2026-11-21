@@ -17,6 +17,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Objects;
 
@@ -108,6 +109,17 @@ public class SalesOrder {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    /** PM 21/11: the last day the deposit of a waiting order holds; null while the order has no deposit. */
+    @Column(name = "deposit_expires_on")
+    private LocalDate depositExpiresOn;
+
+    /** PM 21/11: when and by whom the customer's remaining deposit was declared lost. */
+    @Column(name = "deposit_forfeited_at")
+    private LocalDateTime depositForfeitedAt;
+
+    @Column(name = "deposit_forfeited_by")
+    private Long depositForfeitedBy;
+
     /**
      * UC-53: a new order of the store, waiting for picking (version 1). {@code customerId} is null for a walk-in sale;
      * the snapshot keeps what the customer was called when the order was taken.
@@ -179,6 +191,15 @@ public class SalesOrder {
             throw new IllegalStateException("order " + id + " is " + status + ", not waiting for stock");
         }
         status = SalesOrderStatus.AWAITING_PICKING;
+        updatedAt = now;
+    }
+
+    /** PM 21/11: the deposit of this waiting order holds until {@code date} (set with the first deposit or by BM). */
+    public void setDepositExpiry(LocalDate date, LocalDateTime now) {
+        if (status != SalesOrderStatus.AWAITING_STOCK) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not waiting for stock");
+        }
+        depositExpiresOn = date;
         updatedAt = now;
     }
 

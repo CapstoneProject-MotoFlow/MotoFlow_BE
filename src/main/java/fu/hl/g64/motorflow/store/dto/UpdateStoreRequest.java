@@ -6,7 +6,11 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** UC-06. The store id never changes; the name stays unique. {@code central} can only be switched on while the chain has no central warehouse. */
+/**
+ * UC-06. The store id never changes; the name stays unique. {@code central} can only be switched on while the chain
+ * has no central warehouse. {@code taxCode} (PM 21/11): null leaves the current code unchanged, so a form
+ * that does not send it cannot wipe the code; empty clears it.
+ */
 public record UpdateStoreRequest(
         @NotBlank(message = "Vui lòng nhập tên cửa hàng.")
         @Size(max = 150, message = "Tên cửa hàng tối đa 150 ký tự.")
@@ -22,5 +26,8 @@ public record UpdateStoreRequest(
         @NotNull(message = "Vui lòng chọn trạng thái.")
         StoreStatus status,
 
-        boolean central) {
+        boolean central,
+
+        @Pattern(regexp = "^$|^[0-9]{10}(-?[0-9]{3})?$", message = "Mã số thuế gồm 10 hoặc 13 chữ số.")
+        String taxCode) {
 }

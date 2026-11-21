@@ -1,0 +1,17 @@
+package fu.hl.g64.motorflow.sales.service;
+
+import fu.hl.g64.motorflow.sales.dto.DepositExpiryRequest;
+import fu.hl.g64.motorflow.sales.dto.DepositPaymentRequest;
+import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
+import fu.hl.g64.motorflow.sales.dto.SettlementResult;
+import fu.hl.g64.motorflow.security.AuthenticatedUser;
+
+/** PM 21/11: the deposit of a waiting order (BE-3, BE-4). */
+public interface SalesDepositService {
+
+    /** Records a deposit, first or additional; a verified one counts at once. Verify and reject as any payment. */
+    SettlementResult recordDeposit(AuthenticatedUser seller, long orderId, DepositPaymentRequest request);
+
+    /** The store's Branch Manager moves the last day of a deposit that has not expired yet. */
+    SalesOrderDetail changeExpiry(AuthenticatedUser manager, long orderId, DepositExpiryRequest request);
+}

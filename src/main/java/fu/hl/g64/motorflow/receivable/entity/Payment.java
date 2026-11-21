@@ -101,6 +101,18 @@ public class Payment {
         return payment;
     }
 
+    /**
+     * PM 21/11: a deposit the customer leaves on a waiting order. Like an order payment it counts only once verified
+     * (BR-46), and {@code tenderedAmount} is the cash handed over (BR-47).
+     */
+    public static Payment deposit(long orderId, long amount, Long tenderedAmount, PaymentMethod method,
+                                  String transactionReference, boolean verified, long seller, LocalDateTime now) {
+        Payment payment = forOrder(PaymentType.DEPOSIT, orderId, amount, method, transactionReference, verified,
+                seller, now);
+        payment.tenderedAmount = tenderedAmount;
+        return payment;
+    }
+
     /** UC-56, UC-60 Step 7_Net collection exceeds the total: money given back to the customer before completion. */
     public static Payment refund(long orderId, long amount, PaymentMethod method, String transactionReference,
                                  boolean verified, long seller, LocalDateTime now) {

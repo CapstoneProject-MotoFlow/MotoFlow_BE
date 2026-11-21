@@ -35,6 +35,10 @@ public class Store {
     @Column(length = 20)
     private String phone;
 
+    /** PM 21/11: the store's tax code, printed as the seller on a sales slip; null when it has none. */
+    @Column(name = "tax_code", length = 20)
+    private String taxCode;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private StoreStatus status;
@@ -82,6 +86,12 @@ public class Store {
         address = newAddress;
         phone = newPhone;
         status = newStatus;
+        updatedAt = now;
+    }
+
+    /** PM 21/11: {@code taxCode} null when the store has none. */
+    public void changeTaxCode(String newTaxCode, LocalDateTime now) {
+        taxCode = newTaxCode;
         updatedAt = now;
     }
 
