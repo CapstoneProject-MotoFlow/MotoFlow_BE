@@ -288,7 +288,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                 }
             } else if (deposit != null && depositLeft > 0 && deposit.status() == DepositStatus.EXPIRED
                     && !storeManager(seller, order)) {
-                // Forfeiting an expired deposit is the Branch Manager's /forfeit-deposit, not an Owner cancel.
+                // Forfeiting an expired deposit by cancelling is for the Owner or this store's Branch Manager.
                 throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
             }
         } else if (refund != null) {
@@ -431,9 +431,10 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         return references.save(Payment.depositRefund(orderId, amount, method, reference, seller.id(), now));
     }
 
-    /** The store's Branch Manager: the only role that may declare a deposit lost. */
+    /** Owner, or the store's Branch Manager: the people who may declare a deposit lost. */
     private static boolean storeManager(AuthenticatedUser user, SalesOrder order) {
-        return user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId());
+        return user.role() == Role.OWNER
+                || (user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId()));
     }
 
     /** BR-48: a refund of at most what the order holds, less refunds still waiting for verification. */
