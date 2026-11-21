@@ -477,7 +477,7 @@ public class DocumentServiceImpl implements DocumentService {
         Long credit = documents.row("SELECT original_amount FROM receivable WHERE sales_order_id = :id",
                 Map.of("id", row.id())).map(debt -> lng(debt, "original_amount")).orElse(null);
         Totals totals = new Totals(reference, reference - total, (BigDecimal) order.get("discount_rate"), total,
-                lng(money, "paid"), credit, deposit, total - deposit);
+                lng(money, "paid"), credit, deposit, Math.max(0, total - deposit));
         // BE-9: a retail sale prints on the small receipt, a wholesale one on the A5 slip, unless the user picks.
         PrintLayout chosen = layout != null ? layout
                 : PriceType.WHOLESALE.name().equals(str(order, "price_type")) ? PrintLayout.LARGE : PrintLayout.SMALL;

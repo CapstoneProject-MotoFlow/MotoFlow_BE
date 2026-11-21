@@ -100,6 +100,13 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.totals.deposit").value(100_000))
                 .andExpect(jsonPath("$.totals.amountDue").value(0))
                 .andExpect(jsonPath("$.totals.paid").value(0));
+        // A short delivery can leave the deposit larger than the goods. The slip shows 0 still due, not a negative.
+        jdbc.update("UPDATE sales_order_line SET delivered_qty = 0 WHERE sales_order_id = ?", sold);
+        print("SALES_ORDER", sold, "")
+                .andExpect(jsonPath("$.totals.total").value(0))
+                .andExpect(jsonPath("$.totals.deposit").value(100_000))
+                .andExpect(jsonPath("$.totals.amountDue").value(0));
+        jdbc.update("UPDATE sales_order_line SET delivered_qty = 1 WHERE sales_order_id = ?", sold);
         print("SALES_ORDER", sold, "&layout=LARGE").andExpect(jsonPath("$.layout").value("LARGE"));
         jdbc.update("UPDATE sales_order SET price_type = 'WHOLESALE' WHERE id = ?", sold);
         print("SALES_ORDER", sold, "").andExpect(jsonPath("$.layout").value("LARGE"));

@@ -40,7 +40,8 @@ public record DocumentPrint(PrintForm form, DocumentType documentType, long id, 
     /**
      * Retail invoice: {@code referenceTotal} at reference prices, {@code discountAmount}, the order
      * {@code discountRate}, {@code total} to pay, {@code deposit} the deposit of the waiting order it was released from
-     * (PM 21/11), {@code amountDue} = total − deposit (what was left to pay, "còn phải trả"), {@code paid} (verified
+     * (PM 21/11), {@code amountDue} = max(0, total − deposit) (what was left to pay, "còn phải trả"; a short pick
+     * does not print a negative), {@code paid} (verified
      * payments minus refunds, without the deposit) and {@code credit} (put on the customer's debt). Other forms fill
      * {@code total} only, when it has a meaning for the reader.
      */
