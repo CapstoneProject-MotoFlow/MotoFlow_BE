@@ -204,7 +204,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         if (task.getAssignedTo() == confirmer.id()) {
             // K1, BR-26: a Branch Manager who took the task may confirm it; the Owner is told. Picking too since PM
             // 19/11: a Branch Manager selling alone picks the goods themself and confirms the order.
-            if (open.isPresent()) {
+            // The Owner confirming their own picking has nobody above to tell.
+            if (open.isPresent() && confirmer.role() != Role.OWNER) {
                 notifications.notifyOwners("TASK_SELF_CONFIRMED",
                         "Branch Manager %s đã tự xác nhận kết quả %s do chính mình thực hiện."
                                 .formatted(confirmer.fullName(), describe(type, documentId)),
@@ -279,11 +280,19 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
         return type == TaskType.SUPPLIER_RECEIVING ? task.getPurchaseOrderId() : task.getTransferOrderId();
     }
 
-    /** The document, if the user is a Branch Manager of its store (MSG05 otherwise, MSG120 if it does not exist). */
+    /**
+     * The document, if the user manages it: the Branch Manager of its store, or the Owner for the picking of any
+     * store's sales order (GVHD 20/11); every other task type stays with the store's Branch Manager. MSG05
+     * otherwise, MSG120 if the document does not exist.
+     */
     private Document requireManagedDocument(AuthenticatedUser manager, TaskType type, long documentId) {
         Document document = find(type, documentId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG120"));
-        if (manager.role() != Role.BRANCH_MANAGER || !Objects.equals(manager.storeId(), document.storeId())) {
+        // GVHD 20/11: the Owner sells at every store like its Branch Manager, so they manage its picking too.
+        boolean owner = manager.role() == Role.OWNER && type == TaskType.PICKING;
+        boolean branchManager = manager.role() == Role.BRANCH_MANAGER
+                && Objects.equals(manager.storeId(), document.storeId());
+        if (!owner && !branchManager) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         return document;
@@ -354,8 +363,8 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
     }
 
     /**
-     * UC-86 step 4: an active Staff account of the document's store, or the Branch Manager themself (MSG40; they
-     * already passed {@link #requireManagedDocument}).
+     * UC-86 step 4: an active Staff account of the document's store, or the manager themself (a Branch Manager
+     * gets MSG40; the Owner may take picking too, GVHD 20/11). They already passed {@link #requireManagedDocument}.
      */
     private UserAccount requireEligibleAssignee(AuthenticatedUser manager, TaskType type, long assigneeId,
                                                 long storeId) {
@@ -388,8 +397,10 @@ public class WarehouseTaskServiceImpl implements WarehouseTaskService {
                         || task.getStatus() == WarehouseTaskStatus.RESULT_SUBMITTED)
                 .findFirst();
         String blocked = blockedCode(document, open);
-        // MSG40 speaks to the Branch Manager who took the task, so only they get it.
-        String notice = open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
+        // MSG40 speaks to the Branch Manager who took the task, so only they get it: it promises the Owner is told,
+        // and the Owner confirming their own picking has nobody above to tell.
+        String notice = manager.role() == Role.BRANCH_MANAGER
+                && open.filter(task -> task.getAssignedTo() == manager.id()).isPresent() ? "MSG40" : null;
 
         Collator byName = Collator.getInstance(VIETNAMESE);
         List<UserAccount> staff = users.findByRoleAndStoreIdAndStatus(Role.STAFF, document.storeId(),

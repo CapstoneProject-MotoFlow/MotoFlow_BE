@@ -76,12 +76,12 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.customerName").value("Chị Lan"))
                 .andExpect(jsonPath("$.lines[0].stockShortQty").value(12));
 
-        // Owner chooses the store; its Branch Manager is asked to assign the picking.
+        // Owner chooses the store; its Branch Manager is asked to assign the picking, the Owner may too (GVHD 20/11).
         create(ownerToken, order(null, customer, "RETAIL", null, lines(pad, 1)))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG157"));
         create(ownerToken, order(store, customer, "RETAIL", null, lines(pad, 1)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.actions.canAssignPicker").value(false));
+                .andExpect(jsonPath("$.actions.canAssignPicker").value(true));
         assertThat(notifications(manager, "SALES_ORDER_CREATED")).isEqualTo(1);
     }
 
@@ -417,6 +417,26 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.status").value("CONFIRMED"));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = "
                 + "'TASK_SELF_CONFIRMED' AND ref_id = ?", Long.class, order)).isEqualTo(1);
+    }
+
+    @Test
+    void theOwnerGivesOrTakesThePickingLikeABranchManager() throws Exception {
+        // GVHD 20/11: the Owner sells like a Branch Manager, so they also give the picking or pick themself.
+        long given = createOrder(pad, 1);
+        detail(ownerToken, given).andExpect(jsonPath("$.actions.canAssignPicker").value(true));
+        assign(ownerToken, "PICKING", given, staff).andExpect(status().isOk());
+        pick(staffToken, given, 1, pad, 1, null).andExpect(status().isOk());
+
+        long order = createOrder(pad, 1);
+        assign(ownerToken, "PICKING", order, owner).andExpect(status().isOk());
+        detail(ownerToken, order).andExpect(jsonPath("$.actions.canRecordPicking").value(true));
+        pick(ownerToken, order, 1, pad, 1, null).andExpect(status().isOk());
+        detail(ownerToken, order).andExpect(jsonPath("$.actions.canConfirm").value(true));
+        confirm(ownerToken, order, 1, pad, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"));
+        // Nobody above the Owner to tell.
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = "
+                + "'TASK_SELF_CONFIRMED' AND ref_id = ?", Long.class, order)).isZero();
     }
 
     @Test
