@@ -12,7 +12,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
-import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.empty;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -35,7 +35,7 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.damagedUndecidedQty").value(2))
                 .andExpect(jsonPath("$.canRequestAcceptance").value(true))
                 .andExpect(jsonPath("$.canApproveAcceptance").value(false))
-                .andExpect(jsonPath("$.pendingRequest").value(nullValue()));
+                .andExpect(jsonPath("$.pendingRequests", empty()));
 
         // The Branch Manager asks for at most what is held; Owner is told.
         request(managerToken, found, "DAMAGED", null, 3)
@@ -43,9 +43,9 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.message").value("Chỉ còn 2 hàng đang giữ chưa quyết định để nhận vào kho."));
         request(managerToken, found, "DAMAGED", null, 2)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.pendingRequest.type").value("DAMAGED"))
-                .andExpect(jsonPath("$.pendingRequest.quantity").value(2))
-                .andExpect(jsonPath("$.pendingRequest.requestedByName").value("Test bm"))
+                .andExpect(jsonPath("$.pendingRequests[0].type").value("DAMAGED"))
+                .andExpect(jsonPath("$.pendingRequests[0].quantity").value(2))
+                .andExpect(jsonPath("$.pendingRequests[0].requestedByName").value("Test bm"))
                 .andExpect(jsonPath("$.canRequestAcceptance").value(false));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = "
                 + "'DISCREPANCY_ACCEPTANCE_REQUESTED' AND recipient_id = ?", Long.class, owner.getId())).isEqualTo(1);
@@ -59,7 +59,7 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("OPEN"))
                 .andExpect(jsonPath("$.damagedUndecidedQty").value(1))
-                .andExpect(jsonPath("$.pendingRequest").value(nullValue()))
+                .andExpect(jsonPath("$.pendingRequests", empty()))
                 .andExpect(jsonPath("$.events[*].type", contains("ACCEPTED_AS_VARIANT")));
         long variant = jdbc.queryForObject("SELECT id FROM product WHERE variant_of_product_id = ?", Long.class, pad);
         assertThat(jdbc.queryForMap("SELECT sku, part_name, category_id, base_unit FROM product WHERE id = ?",
@@ -119,13 +119,16 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
         // A request Owner refuses: the goods stay held and the store is told.
         request(managerToken, found, "WRONG_ITEM", lamp, 2)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.pendingRequest.sku").value("DEN-01"));
-        reject(managerToken, found).andExpect(status().isForbidden());
-        reject(ownerToken, found)
+                .andExpect(jsonPath("$.pendingRequests[0].sku").value("DEN-01"));
+        reject(managerToken, found, "WRONG_ITEM").andExpect(status().isForbidden());
+        reject(ownerToken, found, "WRONG_ITEM")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.pendingRequest").value(nullValue()))
+                .andExpect(jsonPath("$.pendingRequests", empty()))
                 .andExpect(jsonPath("$.wrongUndecidedQty").value(2));
-        reject(ownerToken, found).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG29"));
+        reject(ownerToken, found, "WRONG_ITEM").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG315"))
+                .andExpect(jsonPath("$.message").value(
+                        "Hồ sơ không có đề nghị nhận hàng giao sai nào đang chờ duyệt."));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = "
                 + "'DISCREPANCY_ACCEPTANCE_REJECTED' AND recipient_id = ?", Long.class, manager.getId())).isEqualTo(1);
         assertThat(stock(giaLam, oil, "WRONG_ITEM")).isEqualTo(2);
@@ -163,8 +166,149 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
         long lot = jdbc.queryForObject("SELECT min(id) FROM lot WHERE product_id = ?", Long.class, lamp);
         String detail = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .get("/api/v1/inventory/lots/" + lot).header(HttpHeaders.AUTHORIZATION, ownerToken))
+                .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat((String) JsonPath.read(detail, "$.sourceDocument.type")).isEqualTo("DISCREPANCY_RESOLUTION_EVENT");
+    }
+
+    @Test
+    void requestsArePendingPerKindAndOneKindAnsweredLeavesTheOther() throws Exception {
+        long found = caseWithDamagedAndWrong();
+        request(managerToken, found, "DAMAGED", null, 2).andExpect(status().isOk());
+        request(managerToken, found, "WRONG_ITEM", lamp, 2)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pendingRequests.length()").value(2))
+                .andExpect(jsonPath("$.pendingRequests[*].type", contains("DAMAGED", "WRONG_ITEM")))
+                .andExpect(jsonPath("$.canRequestAcceptance").value(false));
+        request(managerToken, found, "DAMAGED", null, 1)
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG314"))
+                .andExpect(jsonPath("$.message").value("Hồ sơ đã có đề nghị nhận hàng móp đang chờ Owner duyệt."));
+
+        // Owner refuses the wrong items only: the dented goods are still waiting and the store is told.
+        reject(ownerToken, found, "WRONG_ITEM")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pendingRequests.length()").value(1))
+                .andExpect(jsonPath("$.pendingRequests[0].type").value("DAMAGED"))
+                .andExpect(jsonPath("$.canRequestAcceptance").value(true));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = "
+                + "'DISCREPANCY_ACCEPTANCE_REJECTED' AND recipient_id = ?", Long.class, manager.getId())).isEqualTo(1);
+        reject(ownerToken, found, "WRONG_ITEM").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG315"));
+        // A refused kind may be asked for again.
+        request(managerToken, found, "WRONG_ITEM", lamp, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.pendingRequests.length()").value(2));
+        reject(ownerToken, found, "WRONG_ITEM").andExpect(status().isOk());
+
+        // Owner taking the dented goods answers their request only.
+        reject(ownerToken, found, "DAMAGED").andExpect(status().isOk())
+                .andExpect(jsonPath("$.pendingRequests", empty()));
+        request(managerToken, found, "DAMAGED", null, 2).andExpect(status().isOk());
+        request(managerToken, found, "WRONG_ITEM", lamp, 2).andExpect(status().isOk());
+        acceptAsVariant(ownerToken, found, 2, 60_000, 90_000L)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pendingRequests.length()").value(1))
+                .andExpect(jsonPath("$.pendingRequests[0].type").value("WRONG_ITEM"))
+                .andExpect(jsonPath("$.status").value("OPEN"));
+    }
+
+    @Test
+    void rejectingNeedsTheKindOfRequest() throws Exception {
+        long found = caseWithDamagedAndWrong();
+        mvc.perform(post("/api/v1/discrepancy-cases/" + found + "/acceptance-requests/reject")
+                        .header(HttpHeaders.AUTHORIZATION, ownerToken).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("reason", "Trả lại nhà cung cấp"))))
+                .andExpect(status().isBadRequest());
+        reject(ownerToken, found, "DAMAGED").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG315"));
+    }
+
+    @Test
+    void waivingTheReplacementOfWrongItemsNeverWaivesWhatTheShortUnitsStillOwe() throws Exception {
+        long grn = receive("PX-001");
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 0),
+                counted(lineOf(grn, oil), 24, 22, 2, 0))).andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        long found = caseOf(grn, oil);
+        discrepancy(managerToken, found).andExpect(jsonPath("$.shortQty").value(2))
+                .andExpect(jsonPath("$.wrongItemQty").value(2));
+        handle(managerToken, grn, List.of(handling(found, 0, 4))).andExpect(status().isOk());
+
+        receiveWrong(ownerToken, found, lamp, 2, false)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("OPEN"))
+                .andExpect(jsonPath("$.waivedQty").value(2))
+                .andExpect(jsonPath("$.outstandingReplacementQty").value(2))
+                .andExpect(jsonPath("$.heldUndecidedQty").value(0));
+    }
+
+    @Test
+    void replacementNeededMustBeSent() throws Exception {
+        long found = caseWithDamagedAndWrong();
+        Map<String, Object> body = new HashMap<>(Map.of("productId", lamp, "quantity", 1, "unitCost", 70_000));
+        receiveWrongBody(ownerToken, found, body).andExpect(status().isBadRequest());
+        assertThat(stock(giaLam, oil, "WRONG_ITEM")).isEqualTo(2);
+    }
+
+    @Test
+    void ownerGivesTheLotNumberAndDatesOfWrongItems() throws Exception {
+        long found = caseWithDamagedAndWrong();
+        Map<String, Object> body = new HashMap<>(Map.of("productId", lamp, "quantity", 1, "unitCost", 70_000,
+                "replacementNeeded", true, "manufacturerLotNo", " L-77 ", "manufactureDate", TODAY.minusDays(30).toString(),
+                "expiryDate", TODAY.plusDays(300).toString()));
+        body.put("expiryDate", TODAY.minusDays(40).toString());
+        receiveWrongBody(ownerToken, found, body)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG137"));
+        body.put("manufactureDate", TODAY.minusDays(90).toString());
+        receiveWrongBody(ownerToken, found, body)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG318"));
+        assertThat(stock(giaLam, oil, "WRONG_ITEM")).isEqualTo(2);
+
+        body.put("manufactureDate", TODAY.minusDays(30).toString());
+        body.put("expiryDate", TODAY.plusDays(300).toString());
+        receiveWrongBody(ownerToken, found, body).andExpect(status().isOk());
+        Map<String, Object> lot = jdbc.queryForMap("SELECT manufacturer_lot_no, manufacture_date, expiry_date FROM lot "
+                + "WHERE product_id = ? AND source_type = 'DISCREPANCY'", lamp);
+        assertThat(lot).containsEntry("manufacturer_lot_no", "L-77");
+        assertThat(lot.get("manufacture_date").toString()).isEqualTo(TODAY.minusDays(30).toString());
+        assertThat(lot.get("expiry_date").toString()).isEqualTo(TODAY.plusDays(300).toString());
+    }
+
+    @Test
+    void aDentedGoodsVariantIsNeverBoughtNorTakenAsTheRealPartOfWrongItems() throws Exception {
+        long found = caseWithDamagedAndWrong();
+        long variant = part("DEN-01-M", "Đèn pha (hàng móp)", jdbc.queryForObject(
+                "SELECT category_id FROM product WHERE id = ?", Long.class, lamp));
+        jdbc.update("UPDATE product SET variant_of_product_id = ? WHERE id = ?", lamp, variant);
+
+        create(ownerToken, order(honda, giaLam, TODAY, null, line(variant, 1, 50_000)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG316"))
+                .andExpect(jsonPath("$.message").value("Phụ tùng DEN-01-M là hàng móp, không đặt mua, yêu cầu bổ sung "
+                        + "hay nhập đầu kỳ được."));
+        request(managerToken, found, "WRONG_ITEM", variant, 1)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG317"));
+        receiveWrong(ownerToken, found, variant, 1, true)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG317"));
+        assertThat(stock(giaLam, oil, "WRONG_ITEM")).isEqualTo(2);
+
+        // A variant of a variant is never made: the case's part may not be a variant either.
+        jdbc.update("UPDATE discrepancy_case SET product_id = ? WHERE id = ?", variant, found);
+        acceptAsVariant(ownerToken, found, 1, 60_000, 90_000L)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG317"));
+    }
+
+    /** A case of the oil with 2 wrong items and 2 damaged ones held at the store, nothing to return. */
+    private long caseWithDamagedAndWrong() throws Exception {
+        long grn = receive("PX-001");
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 0),
+                counted(lineOf(grn, oil), 24, 24, 2, 2))).andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        long found = caseOf(grn, oil);
+        discrepancy(managerToken, found)
+                .andExpect(jsonPath("$.damagedUndecidedQty").value(2))
+                .andExpect(jsonPath("$.wrongUndecidedQty").value(2));
+        return found;
     }
 
     private ResultActions request(String token, long found, String type, Long product, int quantity)
@@ -178,10 +322,10 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
 
-    private ResultActions reject(String token, long found) throws Exception {
+    private ResultActions reject(String token, long found, String type) throws Exception {
         return mvc.perform(post("/api/v1/discrepancy-cases/" + found + "/acceptance-requests/reject")
                 .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("reason", "Trả lại nhà cung cấp"))));
+                .content(json(Map.of("type", type, "reason", "Trả lại nhà cung cấp"))));
     }
 
     private ResultActions acceptAsVariant(String token, long found, int quantity, long unitCost, Long salePrice)
@@ -196,9 +340,12 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
 
     private ResultActions receiveWrong(String token, long found, long product, int quantity, boolean replacement)
             throws Exception {
+        return receiveWrongBody(token, found, Map.of("productId", product, "quantity", quantity, "unitCost", 70_000,
+                "replacementNeeded", replacement));
+    }
+
+    private ResultActions receiveWrongBody(String token, long found, Map<String, Object> body) throws Exception {
         return mvc.perform(post("/api/v1/discrepancy-cases/" + found + "/wrong-items/receive")
-                .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON)
-                .content(json(Map.of("productId", product, "quantity", quantity, "unitCost", 70_000,
-                        "replacementNeeded", replacement))));
+                .header(HttpHeaders.AUTHORIZATION, token).contentType(MediaType.APPLICATION_JSON).content(json(body)));
     }
 }

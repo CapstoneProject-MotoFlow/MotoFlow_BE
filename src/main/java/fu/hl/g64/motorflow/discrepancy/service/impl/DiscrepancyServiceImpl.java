@@ -96,6 +96,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -325,6 +326,9 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         }
         Standing standing = settlement.standing(found);
         boolean damaged = request.type() == AcceptanceRequest.Type.DAMAGED;
+        if (pendingRequests(List.of(id)).getOrDefault(id, Map.of()).containsKey(request.type().name())) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG314", kindName(request.type().name()));
+        }
         int undecided = damaged ? standing.damagedUndecided() : standing.wrongUndecided();
         if (request.quantity() > undecided) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG309", undecided);
@@ -359,13 +363,19 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         long receiptId = discrepancies.findReceiptIdOf(id).orElseThrow(DiscrepancyServiceImpl::notFound);
         PurchaseOrder order = orderOf(receiptId);
         DiscrepancyCase found = discrepancies.findAllByIdForUpdate(List.of(id)).getFirst();
-        if (!found.isOpen() || !pendingRequests(List.of(id)).containsKey(id)) {
+        if (!found.isOpen()) {
             throw changed();
+        }
+        String type = request.type().name();
+        if (!pendingRequests(List.of(id)).getOrDefault(id, Map.of()).containsKey(type)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG315", kindName(type));
         }
         LocalDateTime now = LocalDateTime.now(clock);
         String reason = request.reason().strip();
-        auditLog.save(AuditLog.record(AUDIT_ENTITY, id, ACCEPTANCE_REJECTED, owner.id(), reason, null,
-                Map.of("reason", reason), now));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("type", type);
+        data.put("reason", reason);
+        auditLog.save(AuditLog.record(AUDIT_ENTITY, id, ACCEPTANCE_REJECTED, owner.id(), reason, null, data, now));
         notifications.notifyStoreManagers(order.getStoreId(), "DISCREPANCY_ACCEPTANCE_REJECTED",
                 "Owner không nhận hàng của sai lệch #%d vào kho: %s. Vui lòng trả nhà cung cấp hoặc đề nghị ghi giảm."
                         .formatted(id, reason), REF_TYPE, id);
@@ -438,6 +448,14 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         }
         Product received = receivedPart(found, request.productId());
         LocalDateTime now = LocalDateTime.now(clock);
+        // As goods receipt does for a line (MSG137); goods already past their expiry date do not come into stock.
+        if (request.manufactureDate() != null && request.expiryDate() != null
+                && request.expiryDate().isBefore(request.manufactureDate())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG137", 1);
+        }
+        if (request.expiryDate() != null && request.expiryDate().isBefore(now.toLocalDate())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG318");
+        }
         long lotId = lotOf(receiptId, found.getProductId());
         String note = "Nhận hàng giao sai thành " + received.getSku();
         DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.done(id,
@@ -447,12 +465,13 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 request.quantity(), List.of(new LotQuantity(lotId, request.quantity())),
                 MovementType.WRONG_ITEM_RECLASSIFIED, source, owner.id(), note));
         posting.receiveNewLot(new NewLotPosting(order.getStoreId(), received.getId(), LotSourceType.DISCREPANCY, null,
-                order.getSupplierId(), now.toLocalDate(), request.unitCost(), null, null, null,
+                order.getSupplierId(), now.toLocalDate(), request.unitCost(), text(request.manufacturerLotNo()),
+                request.manufactureDate(), request.expiryDate(),
                 Map.of(StockStatus.AVAILABLE, request.quantity()), MovementType.WRONG_ITEM_RECLASSIFIED, source,
                 owner.id(), note));
         if (!request.replacementNeeded()) {
             // As the Owner's waiver: the replacement still owed for these units is not to come.
-            int waived = Math.min(request.quantity(), settlement.standing(found).openReplacement());
+            int waived = Math.min(request.quantity(), waivableForWrongItems(settlement.standing(found)));
             if (waived > 0) {
                 events.save(DiscrepancyResolutionEvent.done(id, ResolutionType.CLOSED_BY_AGREEMENT, waived,
                         "Đã nhận hàng giao sai, không cần giao bù", owner.id(), now));
@@ -463,7 +482,24 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         return responses(owner, List.of(found), true).getFirst();
     }
 
-    /** The part goods delivered by mistake really are: on sale (MSG313) and not the part ordered (MSG310). */
+    /**
+     * The replacement Owner may waive together with receiving wrong items: the replacement no delivery is bringing yet
+     * ({@code openReplacement}) less what is still owed for the short units, which a wrong item never settles.
+     * Replacements and waivers already made are attributed to the short units first, so
+     * {@code shortStillOwed = max(0, shortQty - replaced - waived - pendingReplacement)} and the answer is
+     * {@code max(0, openReplacement - shortStillOwed)}; the caller caps it by the quantity received.
+     */
+    private static int waivableForWrongItems(Standing standing) {
+        Progress done = standing.progress();
+        int shortStillOwed = Math.max(standing.found().getShortQty()
+                - done.replaced() - done.waived() - done.pendingReplacement(), 0);
+        return Math.max(standing.openReplacement() - shortStillOwed, 0);
+    }
+
+    /**
+     * The part goods delivered by mistake really are: on sale (MSG313), not the part ordered (MSG310) and not a
+     * dented-goods variant (MSG317).
+     */
     private Product receivedPart(DiscrepancyCase found, long productId) {
         Product received = products.findById(productId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.BAD_REQUEST, "MSG57"));
@@ -474,6 +510,9 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         if (received.getStatus() != ProductStatus.ACTIVE) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG313", received.getSku());
         }
+        if (received.getVariantOfProductId() != null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG317", received.getSku());
+        }
         return received;
     }
 
@@ -483,6 +522,9 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
      * so that a scan never finds it instead of the original.
      */
     private Product variantOf(Product original, long by, LocalDateTime now) {
+        if (original.getVariantOfProductId() != null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG317", original.getSku());
+        }
         Optional<Product> existing = products.findByVariantOfProductId(original.getId());
         if (existing.isPresent()) {
             return existing.get();
@@ -514,11 +556,13 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 now));
     }
 
+    /** What a kind of acceptance request is called in MSG314 and MSG315. */
+    private static String kindName(String type) {
+        return AcceptanceRequest.Type.DAMAGED.name().equals(type) ? "hàng móp" : "hàng giao sai";
+    }
+
     private static DiscrepancyCaseResponse.PendingRequest pendingRequest(AuditLog step, Map<Long, Product> parts,
                                                                          Map<Long, String> names) {
-        if (step == null) {
-            return null;
-        }
         Map<String, Object> data = step.getNewData();
         Long productId = data.get("product_id") == null ? null : ((Number) data.get("product_id")).longValue();
         Product part = productId == null ? null : parts.get(productId);
@@ -528,14 +572,24 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 names.get(step.getActorId()), step.getOccurredAt());
     }
 
-    /** [case id → its latest acceptance request] of the cases whose latest acceptance step is a request. */
-    private Map<Long, AuditLog> pendingRequests(Collection<Long> caseIds) {
-        Map<Long, AuditLog> latest = new HashMap<>();
-        auditLog.findByEntityTypeAndEntityIdInAndActionIn(AUDIT_ENTITY, caseIds, ACCEPTANCE_ACTIONS)
-                .forEach(step -> latest.merge(step.getEntityId(), step, (a, b) ->
-                        Comparator.comparing(AuditLog::getOccurredAt).thenComparing(AuditLog::getId)
-                                .compare(a, b) >= 0 ? a : b));
-        latest.values().removeIf(step -> !ACCEPTANCE_REQUESTED.equals(step.getAction()));
+    /**
+     * [case id → [type → its request]] of the requests waiting for Owner: a request is pending per case and type
+     * (DAMAGED, WRONG_ITEM) while the latest acceptance step of that type is the request itself. Types are in order,
+     * DAMAGED then WRONG_ITEM.
+     */
+    private Map<Long, Map<String, AuditLog>> pendingRequests(Collection<Long> caseIds) {
+        Map<Long, Map<String, AuditLog>> latest = new HashMap<>();
+        auditLog.findByEntityTypeAndEntityIdInAndActionIn(AUDIT_ENTITY, caseIds, ACCEPTANCE_ACTIONS).forEach(step -> {
+            Object type = step.getNewData() == null ? null : step.getNewData().get("type");
+            if (type != null) {
+                latest.computeIfAbsent(step.getEntityId(), key -> new TreeMap<>()).merge(type.toString(), step,
+                        (a, b) -> Comparator.comparing(AuditLog::getOccurredAt).thenComparing(AuditLog::getId)
+                                .compare(a, b) >= 0 ? a : b);
+            }
+        });
+        latest.values().forEach(byType -> byType.values()
+                .removeIf(step -> !ACCEPTANCE_REQUESTED.equals(step.getAction())));
+        latest.values().removeIf(Map::isEmpty);
         return latest;
     }
 
@@ -621,13 +675,14 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         Map<Long, List<AttachmentResponse>> evidence = eventsByCase.isEmpty() ? Map.of()
                 : attachments.list(OwnerType.DISCREPANCY_RESOLUTION_EVENT, eventsByCase.values().stream()
                 .flatMap(List::stream).map(DiscrepancyResolutionEvent::getId).toList());
-        Map<Long, AuditLog> pending = pendingRequests(caseIds);
-        Map<Long, Product> requestedParts = byId(products.findAllById(pending.values().stream()
+        Map<Long, Map<String, AuditLog>> pending = pendingRequests(caseIds);
+        List<AuditLog> pendingSteps = pending.values().stream().flatMap(byType -> byType.values().stream()).toList();
+        Map<Long, Product> requestedParts = byId(products.findAllById(pendingSteps.stream()
                 .map(step -> step.getNewData().get("product_id")).filter(Objects::nonNull)
                 .map(value -> ((Number) value).longValue()).collect(Collectors.toSet())), Product::getId);
         Set<Long> people = new HashSet<>();
         cases.forEach(found -> people.add(found.getClosedBy()));
-        pending.values().forEach(step -> people.add(step.getActorId()));
+        pendingSteps.forEach(step -> people.add(step.getActorId()));
         eventsByCase.values().forEach(list -> list.forEach(event -> people.add(event.getRecordedBy())));
         people.remove(null);
         // A HashMap, so that the closer of a case still open (a null id) gives a null name.
@@ -648,6 +703,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             boolean manager = user.role() == Role.BRANCH_MANAGER
                     && Objects.equals(user.storeId(), order.getStoreId());
             boolean open = found.isOpen();
+            Map<String, AuditLog> asked = pending.getOrDefault(found.getId(), Map.of());
             List<Event> history = eventsByCase.getOrDefault(found.getId(), List.of()).stream()
                     .map(event -> new Event(event.getId(), event.getResolutionType(), event.getQuantity(),
                             event.getGoodsReceiptNoteId(), event.getReason(), event.getRecordedBy(),
@@ -672,10 +728,12 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                     open && owner && standing.openReplacement() > 0,
                     open && manager && standing.openReplacement() > 0, history,
                     standing.damagedUndecided(), standing.wrongUndecided(),
-                    open && (owner || manager) && !pending.containsKey(found.getId())
-                            && standing.damagedUndecided() + standing.wrongUndecided() > 0,
+                    open && (owner || manager)
+                            && (standing.damagedUndecided() > 0 && !asked.containsKey("DAMAGED")
+                            || standing.wrongUndecided() > 0 && !asked.containsKey("WRONG_ITEM")),
                     open && owner && standing.damagedUndecided() + standing.wrongUndecided() > 0,
-                    open ? pendingRequest(pending.get(found.getId()), requestedParts, names) : null));
+                    open ? asked.values().stream().map(step -> pendingRequest(step, requestedParts, names)).toList()
+                            : List.of()));
         }
         return rows;
     }

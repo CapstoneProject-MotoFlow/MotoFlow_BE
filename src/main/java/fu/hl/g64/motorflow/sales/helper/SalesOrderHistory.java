@@ -37,11 +37,13 @@ public final class SalesOrderHistory {
     public static final String CAUSE_RELEASE = "RELEASE";
     /**
      * GVHD 20/11, kept in audit_log instead of columns: version 1 of an order split from another names that order;
-     * the first confirmation that moved undelivered units to a waiting order names it and, per line, how many.
+     * the first confirmation that moved undelivered units to a waiting order names it and, per moved line, the
+     * quantity requested before.
      */
     public static final String SPLIT_FROM = "split_from_order_id";
     public static final String WAITING_ORDER = "waiting_order_id";
-    public static final String DEFERRED_QTY = "deferred_qty";
+    /** On a CONFIRMED row, per line moved to the waiting order: the requested quantity before it was narrowed. */
+    public static final String REQUESTED_BEFORE = "requested_before";
 
     private SalesOrderHistory() {
     }

@@ -31,6 +31,7 @@ public interface ReplenishmentRequestLineRepository extends JpaRepository<Replen
               and b.lowStockThreshold is not null
               and b.availableQty < b.lowStockThreshold
               and p.status = fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus.ACTIVE
+              and p.variantOfProductId is null
               and not exists (
                   select 1
                   from ReplenishmentRequestLine l

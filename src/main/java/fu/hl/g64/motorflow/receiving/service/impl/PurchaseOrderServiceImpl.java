@@ -430,7 +430,8 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
     /**
      * UC-40 step 6: MSG20 with the line number for a quantity or price not greater than 0 or a part already on an
-     * earlier line, MSG57 for an unknown part, MSG21 for a discontinued part that is not already on the PO (BR-07).
+     * earlier line, MSG57 for an unknown part, MSG21 for a discontinued part that is not already on the PO (BR-07),
+     * MSG316 for a dented-goods variant.
      */
     private void checkLines(List<PurchaseOrderLineRequest> lines, Set<Long> alreadyOnOrder) {
         Set<Long> seen = new HashSet<>();
@@ -448,6 +449,10 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
             }
             if (part.getStatus() == ProductStatus.DISCONTINUED && !alreadyOnOrder.contains(part.getId())) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG21", part.getSku());
+            }
+            // GVHD 20/11 (PR 5): dented-goods variants come from discrepancy cases, they are never bought.
+            if (part.getVariantOfProductId() != null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG316", part.getSku());
             }
         }
     }

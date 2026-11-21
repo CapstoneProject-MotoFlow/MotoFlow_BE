@@ -27,8 +27,8 @@ import java.util.List;
  * or the replacement may still change; {@code events} is filled on the detail only.
  * <p>GVHD 20/11 (PR 5): {@code damagedUndecidedQty} and {@code wrongUndecidedQty} are the held damaged and wrong goods
  * not decided yet, which Owner may take into stock; {@code canRequestAcceptance} (Branch Manager of the store or
- * Owner) asks for it, {@code canApproveAcceptance} (Owner) does it; {@code pendingRequest} is the request waiting for
- * Owner, or null.</p>
+ * Owner) asks for it, {@code canApproveAcceptance} (Owner) does it; {@code pendingRequests} are the requests waiting for
+ * Owner, one per kind at most, DAMAGED then WRONG_ITEM (empty when none).</p>
  */
 public record DiscrepancyCaseResponse(
         long id, long goodsReceiptNoteId, boolean replacementDelivery, long purchaseOrderId,
@@ -43,7 +43,7 @@ public record DiscrepancyCaseResponse(
         Long closedById, String closedByName, LocalDateTime closedAt,
         boolean canHandle, boolean canRecordReturn, boolean canWaiveReplacement, boolean canCreateReplacement,
         List<Event> events, int damagedUndecidedQty, int wrongUndecidedQty, boolean canRequestAcceptance,
-        boolean canApproveAcceptance, PendingRequest pendingRequest) {
+        boolean canApproveAcceptance, List<PendingRequest> pendingRequests) {
 
     /** GVHD 20/11 (PR 5): a request to take held goods into stock, waiting for Owner. */
     public record PendingRequest(String type, Long productId, String sku, String partName, int quantity, String note,

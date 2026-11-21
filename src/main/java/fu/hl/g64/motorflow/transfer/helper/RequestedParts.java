@@ -20,6 +20,18 @@ public class RequestedParts {
 
     private final ProductRepository products;
 
+    /** {@link #requireActive} for a replenishment request, which asks for parts to buy: no dented-goods variant (MSG316). */
+    public Map<Long, Product> requireBuyable(List<Long> ids) {
+        Map<Long, Product> found = requireActive(ids);
+        for (Long id : ids) {
+            Product part = found.get(id);
+            if (part.getVariantOfProductId() != null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG316", part.getSku());
+            }
+        }
+        return found;
+    }
+
     public Map<Long, Product> requireActive(List<Long> ids) {
         if (ids.stream().distinct().count() != ids.size()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG93");

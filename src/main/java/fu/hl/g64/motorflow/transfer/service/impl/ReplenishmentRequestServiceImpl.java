@@ -84,7 +84,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     @Override
     public ReplenishmentDetailResponse create(AuthenticatedUser user, ReplenishmentCreateRequest body) {
         Store store = requestingStore(user, body.storeId());
-        requestedParts.requireActive(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
+        requestedParts.requireBuyable(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
         LocalDateTime now = LocalDateTime.now(clock);
         ReplenishmentRequest request = requests.save(ReplenishmentRequest.create(store.getId(), note(body), user.id(),
                 now));
@@ -282,7 +282,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     @Override
     public ReplenishmentDetailResponse createDraft(AuthenticatedUser user, ReplenishmentCreateRequest body) {
         Store store = requestingStore(user, body.storeId());
-        requestedParts.requireActive(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
+        requestedParts.requireBuyable(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
         ReplenishmentRequest request = requests.save(ReplenishmentRequest.createDraft(store.getId(), note(body),
                 user.id(), LocalDateTime.now(clock)));
         saveLines(request, body);
@@ -337,7 +337,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     private Store rewriteDraft(AuthenticatedUser user, ReplenishmentRequest request, ReplenishmentCreateRequest body,
                                LocalDateTime now) {
         Store store = requestingStore(user, body.storeId());
-        requestedParts.requireActive(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
+        requestedParts.requireBuyable(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
         request.changeDraft(store.getId(), note(body), now);
         lines.deleteAll(lines.findByReplenishmentRequestIdOrderById(request.getId()));
         lines.flush();
