@@ -6,5 +6,7 @@ public enum PaymentType {
     REFUND,
     DEBT_PAYMENT,
     /** PM 21/11: money a customer leaves on a waiting order (AWAITING_STOCK) before the goods are there. */
-    DEPOSIT
+    DEPOSIT,
+    /** PM 21/11: what the last release of a waiting order gives back of a deposit larger than the order. */
+    DEPOSIT_REFUND
 }

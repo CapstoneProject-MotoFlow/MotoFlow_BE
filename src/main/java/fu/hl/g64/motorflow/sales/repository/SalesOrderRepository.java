@@ -33,7 +33,7 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
     /**
      * Sales summary: [store id, orders completed in [from, to), their revenue (delivered quantity × actual unit price),
      * how many were completed on credit, the original amount of their receivables, what their customers paid (verified
-     * payments − verified refunds, with applied corrections)], one row per store with any; every store when
+     * payments − verified refunds, with applied corrections, + the deposit releases put into them, PM 21/11)], one row per store with any; every store when
      * {@code storeId} is null.
      */
     @Query(value = """
@@ -42,7 +42,7 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
                    coalesce(sum(t.total), 0),
                    count(*) FILTER (WHERE o.completion_type = 'CREDIT'),
                    coalesce(sum(r.original_amount), 0),
-                   coalesce(sum(m.net), 0)
+                   coalesce(sum(m.net), 0) + coalesce(sum(d.applied), 0)
             FROM sales_order o
             JOIN (SELECT l.sales_order_id, sum(CAST(coalesce(l.delivered_qty, 0) AS BIGINT) * l.actual_unit_price) AS total
                   FROM sales_order_line l GROUP BY l.sales_order_id) t ON t.sales_order_id = o.id
@@ -58,6 +58,8 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
                                   GROUP BY a.payment_id) c ON c.payment_id = p.id
                        WHERE p.status = 'VERIFIED' AND p.payment_type IN ('ORDER_PAYMENT', 'REFUND')
                        GROUP BY p.sales_order_id) m ON m.sales_order_id = o.id
+            LEFT JOIN (SELECT a.sales_order_id, sum(a.amount) AS applied
+                       FROM sales_deposit_application a GROUP BY a.sales_order_id) d ON d.sales_order_id = o.id
             WHERE o.status = 'COMPLETED' AND o.completed_at >= :from AND o.completed_at < :to
               AND (CAST(:storeId AS BIGINT) IS NULL OR o.store_id = :storeId)
             GROUP BY o.store_id""", nativeQuery = true)
@@ -87,4 +89,27 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
               and not exists (select t.id from WarehouseTask t where t.salesOrderId = o.id
                               and t.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED)""")
     long countAwaitingPickingWithoutTask(Long storeId);
+
+    /** The columns of {@link #depositFigures} and {@link #depositFiguresOf}. */
+    String DEPOSIT_FIGURES = """
+            SELECT o.id, o.deposit_expires_on, o.deposit_forfeited_at IS NOT NULL,
+                   (SELECT coalesce(sum(p.amount), 0) FROM payment p WHERE p.sales_order_id = o.id
+                      AND p.payment_type = 'DEPOSIT' AND p.status = 'VERIFIED'),
+                   (SELECT coalesce(sum(p.amount), 0) FROM payment p WHERE p.sales_order_id = o.id
+                      AND p.payment_type = 'DEPOSIT_REFUND' AND p.status = 'VERIFIED'),
+                   (SELECT coalesce(sum(a.amount), 0) FROM sales_deposit_application a WHERE a.waiting_order_id = o.id)
+            FROM sales_order o
+            WHERE o.deposit_expires_on IS NOT NULL""";
+
+    /**
+     * PM 21/11 (BE-8): [id, deposit expiry date, forfeited, verified deposits, deposit given back, deposit applied] of
+     * every order of the store (every store when {@code storeId} is null) that has had a deposit.
+     */
+    @Query(value = DEPOSIT_FIGURES + " AND (CAST(:storeId AS BIGINT) IS NULL OR o.store_id = :storeId)",
+            nativeQuery = true)
+    List<Object[]> depositFigures(Long storeId);
+
+    /** As {@link #depositFigures} for these orders. */
+    @Query(value = DEPOSIT_FIGURES + " AND o.id IN (:ids)", nativeQuery = true)
+    List<Object[]> depositFiguresOf(List<Long> ids);
 }

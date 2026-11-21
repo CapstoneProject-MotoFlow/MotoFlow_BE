@@ -69,11 +69,12 @@ public record SalesOrderDetail(
      * for verification and does not count yet, BR-46); {@code applied} what releases took into their orders,
      * {@code refunded} what went back to the customer and {@code remaining} what the order still holds.
      * {@code status} is worked out on reading: EXPIRED once today is after {@code expiresOn}.
+     * {@code forfeitedAmount} is what the store kept when the order was cancelled or its deposit expired (BE-7).
      * {@code expiryChanges} lists every change of the expiry date by the Branch Manager, oldest first.
      */
     public record Deposit(long total, long unverified, long applied, long refunded, long remaining,
-                          LocalDate expiresOn, DepositStatus status, LocalDateTime forfeitedAt, Long forfeitedById,
-                          String forfeitedBy, List<ExpiryChange> expiryChanges) {
+                          LocalDate expiresOn, DepositStatus status, Long forfeitedAmount, LocalDateTime forfeitedAt,
+                          Long forfeitedById, String forfeitedBy, List<ExpiryChange> expiryChanges) {
     }
 
     /** One change of a deposit's expiry date. */
@@ -101,18 +102,21 @@ public record SalesOrderDetail(
 
     /**
      * What the signed-in user may do with the order now. PM 21/11: {@code canRecordDeposit} for a seller of a waiting
-     * order with a customer profile whose deposit has not expired; {@code canChangeDepositExpiry} for the Owner or
-     * the store's Branch Manager while a verified deposit still holds. A date left behind by a rejected deposit is
-     * not enough.
+     * order with a customer profile whose deposit has not expired; {@code canChangeDepositExpiry} and
+     * {@code canForfeitDeposit} for the Owner or the store's Branch Manager (forfeit only once the deposit has
+     * expired). A date left behind by a rejected deposit is not enough. {@code canRelease} is false once the deposit
+     * has expired. {@code cancelForfeitsDeposit} means cancelling without a refund keeps the deposit the order still
+     * holds.
      */
     public record Actions(boolean canUpdate, boolean canAssignPicker, boolean canRecordPicking, boolean canConfirm,
                           boolean canRecordPayment, boolean canRefund, boolean canRecordCredit, boolean canComplete,
                           boolean canCancel, boolean canRelease, boolean canRecordDeposit,
-                          boolean canChangeDepositExpiry) {
+                          boolean canChangeDepositExpiry, boolean canForfeitDeposit, boolean cancelForfeitsDeposit) {
     }
 
     /**
-     * Screen 8.2.2 and UC-60 step 2. {@code netCollected} = verified payments − verified refunds (BR-49);
+     * Screen 8.2.2 and UC-60 step 2. {@code netCollected} = verified payments + {@code depositApplied} − verified
+     * refunds (BR-49); {@code depositApplied} is the deposit the release of a waiting order put into this one (PM 21/11);
      * {@code remainingPayable} is what is still to be paid or put on credit, {@code overpaidAmount} what must be
      * refunded before completion (BR-50), {@code refundable} what may still be refunded (BR-48) and
      * {@code payableNow} what may still be recorded as paid while unverified payments wait (BR-47). Unverified rows do
@@ -120,7 +124,8 @@ public record SalesOrderDetail(
      */
     public record Money(long total, long verifiedPaid, long verifiedRefunded, long netCollected,
                         long remainingPayable, long overpaidAmount, long refundable, long payableNow,
-                        int unverifiedCount, List<PaymentRow> payments, Credit credit, Debt receivable) {
+                        int unverifiedCount, List<PaymentRow> payments, Credit credit, Debt receivable,
+                        long depositApplied) {
     }
 
     /**

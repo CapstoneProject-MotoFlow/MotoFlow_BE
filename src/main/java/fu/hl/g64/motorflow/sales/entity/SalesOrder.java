@@ -120,6 +120,9 @@ public class SalesOrder {
     @Column(name = "deposit_forfeited_by")
     private Long depositForfeitedBy;
 
+    @Column(name = "deposit_forfeited_amount")
+    private Long depositForfeitedAmount;
+
     /**
      * UC-53: a new order of the store, waiting for picking (version 1). {@code customerId} is null for a walk-in sale;
      * the snapshot keeps what the customer was called when the order was taken.
@@ -200,6 +203,20 @@ public class SalesOrder {
             throw new IllegalStateException("order " + id + " is " + status + ", not waiting for stock");
         }
         depositExpiresOn = date;
+        updatedAt = now;
+    }
+
+    /**
+     * PM 21/11 (BE-7): the customer loses the {@code amount} of deposit this waiting order still holds, when it is
+     * cancelled or its deposit expired.
+     */
+    public void forfeitDeposit(long amount, long forfeitedBy, LocalDateTime now) {
+        if (status != SalesOrderStatus.AWAITING_STOCK || depositForfeitedAt != null || amount <= 0) {
+            throw new IllegalStateException("order " + id + " cannot forfeit a deposit of " + amount);
+        }
+        depositForfeitedAmount = amount;
+        depositForfeitedBy = forfeitedBy;
+        depositForfeitedAt = now;
         updatedAt = now;
     }
 

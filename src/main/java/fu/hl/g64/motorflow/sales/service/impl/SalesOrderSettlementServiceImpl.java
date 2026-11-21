@@ -39,8 +39,10 @@ import fu.hl.g64.motorflow.sales.dto.SettlementResult;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.CompletionType;
+import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
+import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Priced;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
@@ -96,6 +98,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     private final AttachmentService attachments;
     private final InventoryPostingService inventory;
     private final OrderCollections collections;
+    private final OrderDeposits deposits;
     private final OrderPricing pricing;
     private final PickingGuide guide;
     private final SalesOrderService salesOrders;
@@ -267,9 +270,28 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         requireVerified(money);
         LocalDateTime now = LocalDateTime.now(clock);
         long held = money.netCollected();
+        OrderDeposits.State deposit = order.isWaitingForStock() ? deposits.of(order, money) : null;
+        long depositLeft = deposit == null ? 0 : deposit.remaining();
         Long refundId = null;
         CancelSalesOrderRequest.Refund refund = request.refund();
-        if (refund != null) {
+        if (order.isWaitingForStock()) {
+            // A refund here is the deposit still held. The ordinary refund path cannot see it (MSG308).
+            if (refund != null) {
+                if (refund.amount() != depositLeft) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG331", money(depositLeft));
+                }
+                if (depositLeft > 0) {
+                    Payment saved = saveDepositRefund(orderId, refund.amount(), refund.paymentMethod(),
+                            refund.transactionReference(), seller, now);
+                    refundId = saved.getId();
+                    depositLeft = 0;
+                }
+            } else if (deposit != null && depositLeft > 0 && deposit.status() == DepositStatus.EXPIRED
+                    && !storeManager(seller, order)) {
+                // Forfeiting an expired deposit by cancelling is for the Owner or this store's Branch Manager.
+                throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+            }
+        } else if (refund != null) {
             Payment saved = saveRefund(orderId, money, refund.amount(), refund.paymentMethod(),
                     refund.transactionReference(), true, seller, now);
             refundId = saved.getId();
@@ -278,6 +300,12 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         if (held != 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG185", money(held));
         }
+        // What releases already put into other orders stays there. What is left is kept only when this cancel
+        // does not hand it back.
+        long forfeited = depositLeft;
+        if (forfeited > 0) {
+            order.forfeitDeposit(forfeited, seller.id(), now);
+        }
         List<WarehouseTask> picking = tasks.findOpenPickings(List.of(orderId));
         String reason = request.reason().strip();
         order.cancel(seller.id(), reason, now);
@@ -285,6 +313,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("refund_id", refundId);
         data.put("refunded", refund == null ? 0 : refund.amount());
+        data.put("deposit_forfeited", forfeited);
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, orderId, SalesOrderHistory.CANCELLED, seller.id(),
                 reason, null, data, now));
         picking.stream().map(WarehouseTask::getAssignedTo).filter(picker -> picker != seller.id()).distinct()
@@ -393,6 +422,19 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         data.put("lines", issued);
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, orderId, SalesOrderHistory.COMPLETED, seller.id(),
                 null, null, data, now));
+    }
+
+    /** The deposit a waiting order still holds, handed back in full when the seller cancels and chooses to return it. */
+    private Payment saveDepositRefund(long orderId, long amount, PaymentMethod method, String transactionReference,
+                                      AuthenticatedUser seller, LocalDateTime now) {
+        String reference = reference(method, transactionReference);
+        return references.save(Payment.depositRefund(orderId, amount, method, reference, seller.id(), now));
+    }
+
+    /** Owner, or the store's Branch Manager: the people who may declare a deposit lost. */
+    private static boolean storeManager(AuthenticatedUser user, SalesOrder order) {
+        return user.role() == Role.OWNER
+                || (user.role() == Role.BRANCH_MANAGER && Objects.equals(user.storeId(), order.getStoreId()));
     }
 
     /** BR-48: a refund of at most what the order holds, less refunds still waiting for verification. */

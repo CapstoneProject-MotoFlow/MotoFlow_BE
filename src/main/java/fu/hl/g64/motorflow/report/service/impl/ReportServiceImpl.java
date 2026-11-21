@@ -63,7 +63,7 @@ public class ReportServiceImpl implements ReportService {
         String unit = grouping == ReportGrouping.MONTH ? "month" : "day";
 
         // (store, day) -> [orders, revenue, credit sales, order payments, refunds, debt, revenue corr., coll. corr.,
-        // receivable corr.]
+        // receivable corr., deposits received, deposits refunded, deposits applied, deposits forfeited]
         Map<Long, Map<LocalDate, long[]>> cells = new HashMap<>();
         queries.sales(scope.storeId(), scope.start(), scope.end(), unit).forEach(r -> {
             long[] c = cell(cells, r);
@@ -75,6 +75,13 @@ public class ReportServiceImpl implements ReportService {
             long[] c = cell(cells, r);
             c[3] += number(r.get("order_payments"));
             c[4] += number(r.get("refunds"));
+            c[9] += number(r.get("deposits_received"));
+            c[10] += number(r.get("deposits_refunded"));
+        });
+        queries.depositMovements(scope.storeId(), scope.start(), scope.end(), unit).forEach(r -> {
+            long[] c = cell(cells, r);
+            c[11] += number(r.get("deposits_applied"));
+            c[12] += number(r.get("deposits_forfeited"));
         });
         queries.debtCollections(scope.storeId(), scope.start(), scope.end(), unit)
                 .forEach(r -> cell(cells, r)[5] += number(r.get("debt_collected")));
@@ -201,17 +208,19 @@ public class ReportServiceImpl implements ReportService {
     private static long[] cell(Map<Long, Map<LocalDate, long[]>> cells, Map<String, Object> row) {
         LocalDate day = ((Date) row.get("day")).toLocalDate();
         return cells.computeIfAbsent(number(row.get("store_id")), k -> new HashMap<>())
-                .computeIfAbsent(day, k -> new long[9]);
+                .computeIfAbsent(day, k -> new long[13]);
     }
 
     private static Figures figures(long[] c, Long owed) {
-        return new Figures(c[0], c[1], c[3], c[4], c[5], c[3] - c[4] + c[5], c[2], c[6], c[7], c[8], owed);
+        return new Figures(c[0], c[1], c[3], c[4], c[5], c[3] - c[4] + c[9] - c[10] + c[5], c[2], c[6], c[7], c[8],
+                owed, c[9], c[10], c[11], c[12]);
     }
 
     private static Figures withOwed(Figures f, long owed) {
         return new Figures(f.completedOrders(), f.revenue(), f.orderPayments(), f.refunds(), f.debtCollected(),
                 f.totalCollected(), f.creditSales(), f.revenueCorrections(), f.collectionCorrections(),
-                f.receivableCorrections(), owed);
+                f.receivableCorrections(), owed, f.depositsReceived(), f.depositsRefunded(), f.depositsApplied(),
+                f.depositsForfeited());
     }
 
     private static GrossMarginReport.Figures margin(long[] s) {
