@@ -240,16 +240,15 @@ BEGIN
     VALUES ('EXPIRY_WARNING', 60, opening_at - interval '1 day', 'ACTIVE', u_owner, opening_at - interval '2 days');
 
     -- ===== Partners =====
-    INSERT INTO supplier (supplier_code, supplier_name, contact_name, phone, email, address, tax_code) VALUES
-        ('NCC001', 'Công ty TNHH Phụ tùng Minh Phát', 'Nguyễn Hữu Phát', '0243 6688 001', 'kinhdoanh@minhphat.vn', 'KCN Quang Minh, Mê Linh, Hà Nội', '0101234567'),
-        ('NCC002', 'Công ty CP Dầu nhớt Sao Việt', 'Trần Thị Sao', '0243 6688 002', 'sales@saoviet-oil.vn', 'Số 5 Phạm Văn Đồng, Bắc Từ Liêm, Hà Nội', '0102345678'),
-        ('NCC003', 'Công ty TNHH Lốp xe Thành Công', 'Lê Văn Thành', '0243 6688 003', 'order@lopthanhcong.vn', 'KCN Phố Nối A, Hưng Yên', '0901234567'),
-        ('NCC004', 'Công ty TNHH Điện Hưng Thịnh', 'Phạm Quang Hưng', '0243 6688 004', NULL, 'Số 20 Giải Phóng, Hai Bà Trưng, Hà Nội', '0103456789-001');
-    sup1 := (SELECT id FROM supplier WHERE supplier_code = 'NCC001');
-    sup2 := (SELECT id FROM supplier WHERE supplier_code = 'NCC002');
-    sup3 := (SELECT id FROM supplier WHERE supplier_code = 'NCC003');
-    sup4 := (SELECT id FROM supplier WHERE supplier_code = 'NCC004');
-    PERFORM setval('supplier_code_seq', 5, false); -- Codes created in the app continue at NCC005.
+    INSERT INTO supplier (supplier_name, contact_name, phone, email, address, tax_code) VALUES
+        ('Công ty TNHH Phụ tùng Minh Phát', 'Nguyễn Hữu Phát', '0243 6688 001', 'kinhdoanh@minhphat.vn', 'KCN Quang Minh, Mê Linh, Hà Nội', '0101234567'),
+        ('Công ty CP Dầu nhớt Sao Việt', 'Trần Thị Sao', '0243 6688 002', 'sales@saoviet-oil.vn', 'Số 5 Phạm Văn Đồng, Bắc Từ Liêm, Hà Nội', '0102345678'),
+        ('Công ty TNHH Lốp xe Thành Công', 'Lê Văn Thành', '0243 6688 003', 'order@lopthanhcong.vn', 'KCN Phố Nối A, Hưng Yên', '0901234567'),
+        ('Công ty TNHH Điện Hưng Thịnh', 'Phạm Quang Hưng', '0243 6688 004', NULL, 'Số 20 Giải Phóng, Hai Bà Trưng, Hà Nội', '0103456789-001');
+    sup1 := (SELECT id FROM supplier WHERE supplier_name = 'Công ty TNHH Phụ tùng Minh Phát');
+    sup2 := (SELECT id FROM supplier WHERE supplier_name = 'Công ty CP Dầu nhớt Sao Việt');
+    sup3 := (SELECT id FROM supplier WHERE supplier_name = 'Công ty TNHH Lốp xe Thành Công');
+    sup4 := (SELECT id FROM supplier WHERE supplier_name = 'Công ty TNHH Điện Hưng Thịnh');
 
     INSERT INTO customer (customer_name, phone, address, tax_code, credit_status, created_by, created_at, updated_at)
     SELECT v.name, v.phone, v.address, v.tax, v.credit, v.creator, opening_at - interval '1 day', opening_at - interval '1 day'

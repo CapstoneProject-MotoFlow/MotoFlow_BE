@@ -84,7 +84,7 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].status", contains("RECEIVING", "RECEIVING", "AWAITING_DELIVERY")))
                 .andExpect(jsonPath("$.items[*].expectedArrival", contains("2026-10-13", null, "2026-10-10")))
                 .andExpect(jsonPath("$.items[*].overdue", contains(false, false, true)))
-                .andExpect(jsonPath("$.items[*].supplierCode", contains("NCC-YM", "NCC-HD", "NCC-YM")))
+                .andExpect(jsonPath("$.items[0].supplierCode").doesNotExist())
                 .andExpect(jsonPath("$.items[*].supplierName", contains("Yamaha Motor", "Honda Việt Nam", "Yamaha Motor")))
                 .andExpect(jsonPath("$.items[*].storeName", contains("Gia Lâm", "Gia Lâm", "Long Biên")))
                 .andExpect(jsonPath("$.items[*].createdAt",
@@ -255,7 +255,7 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
         list(ownerToken, "q", "viet nam")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));
-        list(ownerToken, "q", "ncc-hd", "view", "ALL")
+        list(ownerToken, "q", "honda", "view", "ALL")
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder, cancelledOrder))));
         list(ownerToken, "q", dnh(receivingOrder))
                 .andExpect(jsonPath("$.items[*].id", contains(ids(receivingOrder))));

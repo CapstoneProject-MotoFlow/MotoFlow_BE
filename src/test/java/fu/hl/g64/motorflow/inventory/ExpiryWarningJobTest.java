@@ -70,7 +70,7 @@ class ExpiryWarningJobTest extends ApiTestUsers {
                 + "VALUES ('Dầu nhớt', 'MOTORCYCLE') RETURNING id", Long.class);
         oil = jdbc.queryForObject("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
                 + "VALUES ('NHOT-10W40', 'Nhớt 10W40', ?, 'chai', ?) RETURNING id", Long.class, category, owner.getId());
-        honda = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Honda') "
+        honda = jdbc.queryForObject("INSERT INTO supplier (supplier_name) VALUES ('Honda') "
                 + "RETURNING id", Long.class);
         po = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) "
                 + "RETURNING id", Long.class, honda, central, owner.getId());

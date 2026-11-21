@@ -78,7 +78,7 @@ abstract class PricingTestData extends ApiTestUsers {
         oil = part("NHOT-01", "Nhớt 10W40", oils);
         lamp = part("DEN-01", "Đèn pha", lights);
 
-        supplier = id("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Honda') RETURNING id");
+        supplier = id("INSERT INTO supplier (supplier_name) VALUES ('Honda') RETURNING id");
         purchaseOrder = id("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) RETURNING id",
                 supplier, store, owner.getId());
         received(pad, 100_000, LocalDate.of(2026, 10, 1));

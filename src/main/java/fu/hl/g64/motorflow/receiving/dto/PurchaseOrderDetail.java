@@ -19,7 +19,7 @@ import java.util.List;
  */
 public record PurchaseOrderDetail(
         long id, PurchaseOrderStatus status,
-        long supplierId, String supplierCode, String supplierName,
+        long supplierId, String supplierName,
         long storeId, String storeName,
         LocalDate expectedArrival, boolean overdue, String note, Long replenishmentRequestId,
         long createdById, String createdByName, LocalDateTime createdAt, LocalDateTime updatedAt,

@@ -74,7 +74,7 @@ class InventoryPostingServiceTest extends IntegrationTest {
         long category = id("INSERT INTO part_category (category_name, vehicle_type) VALUES ('Phanh', 'MOTORCYCLE') RETURNING id");
         product = id("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
                 + "VALUES ('MA-PHANH', 'Má phanh', " + category + ", 'cái', " + owner + ") RETURNING id");
-        supplier = id("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC001', 'Honda') RETURNING id");
+        supplier = id("INSERT INTO supplier (supplier_name) VALUES ('Honda') RETURNING id");
         po = id("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (" + supplier + ", " + store
                 + ", " + owner + ") RETURNING id");
         grn = newGrn("PX-1");

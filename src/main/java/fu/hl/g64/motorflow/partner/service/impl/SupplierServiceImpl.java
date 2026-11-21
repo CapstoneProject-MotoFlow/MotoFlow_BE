@@ -67,7 +67,7 @@ public class SupplierServiceImpl implements SupplierService {
     @Override
     public PageResponse<SupplierResponse> list(String q, SupplierStatus status, int page, int size) {
         Page<Supplier> found = suppliers.findAll(matching(q, status),
-                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100), Sort.by("supplierCode")));
+                PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, 100), Sort.by("supplierName", "id")));
         return PageResponse.of(found, found.map(SupplierResponse::from).getContent());
     }
 
@@ -97,10 +97,8 @@ public class SupplierServiceImpl implements SupplierService {
         if (suppliers.existsBySupplierNameIgnoreCase(name)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG78", name);
         }
-        String code = "NCC%03d".formatted(suppliers.nextCodeNumber());
-
         LocalDateTime now = LocalDateTime.now(clock);
-        Supplier supplier = Supplier.create(code, name, request.contactName().strip(),
+        Supplier supplier = Supplier.create(name, request.contactName().strip(),
                 request.phone().strip(), blankToNull(request.email()), blankToNull(request.address()),
                 blankToNull(request.taxCode()), now);
         try {
@@ -180,7 +178,6 @@ public class SupplierServiceImpl implements SupplierService {
             if (StringUtils.hasText(q)) {
                 String like = SearchText.likePattern(q);
                 where.add(cb.or(
-                        SearchText.like(cb, root.get("supplierCode"), like),
                         SearchText.like(cb, root.get("supplierName"), like),
                         cb.like(cb.function("replace", String.class, root.get("phone"), cb.literal(" "), cb.literal("")),
                                 SearchText.likePattern(q.replace(" ", "")), '\\')));

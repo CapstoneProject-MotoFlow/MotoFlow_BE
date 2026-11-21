@@ -26,9 +26,6 @@ public class Supplier {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "supplier_code", nullable = false, unique = true, length = 20)
-    private String supplierCode;
-
     @Column(name = "supplier_name", nullable = false, length = 150)
     private String supplierName;
 
@@ -57,11 +54,10 @@ public class Supplier {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    /** UC-31. The code entered by Owner is the supplier's key and never changes afterwards. */
-    public static Supplier create(String supplierCode, String supplierName, String contactName, String phone,
-                                  String email, String address, String taxCode, LocalDateTime now) {
+    /** UC-31. A supplier is identified by its id; its name is unique, ignoring case (MSG78). */
+    public static Supplier create(String supplierName, String contactName, String phone, String email,
+                                  String address, String taxCode, LocalDateTime now) {
         Supplier supplier = new Supplier();
-        supplier.supplierCode = supplierCode;
         supplier.status = SupplierStatus.ACTIVE;
         supplier.createdAt = now;
         supplier.update(supplierName, contactName, phone, email, address, taxCode, now);

@@ -75,7 +75,7 @@ abstract class TransferFlowTestData extends ApiTestUsers {
                 + "VALUES ('Phanh', 'MOTORCYCLE') RETURNING id", Long.class);
         brake = product("MA-PHANH", "Má phanh trước", category);
         chain = product("XICH-XE", "Xích tải", category);
-        supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_code, supplier_name) VALUES ('NCC1', 'Honda') "
+        supplier = jdbc.queryForObject("INSERT INTO supplier (supplier_name) VALUES ('Honda') "
                 + "RETURNING id", Long.class);
         purchaseOrder = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, created_by) "
                 + "VALUES (?, ?, ?) RETURNING id", Long.class, supplier, source, owner.getId());
