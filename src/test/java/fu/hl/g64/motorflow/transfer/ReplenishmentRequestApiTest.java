@@ -198,7 +198,7 @@ class ReplenishmentRequestApiTest extends ApiTestUsers {
 
     @Test
     void aDentedGoodsVariantIsNeitherRequestedNorSuggested() throws Exception {
-        long variant = product("MA-PHANH-M", "Má phanh trước (hàng móp)", categoryOf(brake));
+        long variant = product("MA-PHANH-M", "Má phanh trước (hàng lỗi)", categoryOf(brake));
         jdbc.update("UPDATE product SET variant_of_product_id = ? WHERE id = ?", brake, variant);
         stock(branch, variant, 0, 5);
         stock(branch, chain, 0, 5);

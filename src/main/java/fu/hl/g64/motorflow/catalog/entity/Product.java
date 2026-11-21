@@ -73,7 +73,7 @@ public class Product {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    /** GVHD 20/11 (PR 5, V15): the part this one is the dented-goods variant of ("<SKU>-M"); null for a normal part. */
+    /** GVHD 20/11 (PR 5, V15): the part this one is the damaged-goods ("hàng lỗi") variant of ("<SKU>-M"); null for a normal part. */
     @Column(name = "variant_of_product_id")
     private Long variantOfProductId;
 
@@ -90,7 +90,7 @@ public class Product {
     }
 
     /**
-     * GVHD 20/11 (PR 5): the dented-goods variant of {@code original}: SKU "<SKU>-M", name "<name> (hàng móp)", the
+     * GVHD 20/11 (PR 5): the damaged-goods ("hàng lỗi") variant of {@code original}: SKU "<SKU>-M", name "<name> (hàng lỗi)", the
      * same category, brand, origin, unit and specifications. It is sold and priced as a part of its own.
      */
     public static Product damagedVariantOf(Product original, Long createdBy, LocalDateTime now) {
@@ -102,7 +102,7 @@ public class Product {
     }
 
     public static final String VARIANT_SKU_SUFFIX = "-M";
-    public static final String VARIANT_NAME_SUFFIX = " (hàng móp)";
+    public static final String VARIANT_NAME_SUFFIX = " (hàng lỗi)";
 
     /** UC-16. The SKU never changes, so stock and documents keep pointing at the same part. */
     public void update(String newPartName, Long newCategoryId, String newBrand, String newCountryOfOrigin,

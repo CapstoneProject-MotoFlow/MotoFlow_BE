@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size;
 /**
  * GVHD 20/11 (PR 5): a Branch Manager asks Owner to take held goods into stock instead of returning them: dented goods
  * ({@code DAMAGED}) as the part's "-M" variant, or goods delivered by mistake ({@code WRONG_ITEM}) as the part they
- * really are ({@code productId}, optional, to help Owner). {@code quantity} is at most what is held and not decided
+ * really are ({@code productId}, required for WRONG_ITEM since góp ý UI 21/11, MSG334; ignored for DAMAGED). {@code quantity} is at most what is held and not decided
  * for that kind (MSG309).
  */
 public record AcceptanceRequest(

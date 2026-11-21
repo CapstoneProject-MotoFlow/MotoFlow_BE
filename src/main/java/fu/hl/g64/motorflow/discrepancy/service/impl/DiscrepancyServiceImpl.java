@@ -334,7 +334,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG309", undecided);
         }
         Product received = null;
-        if (!damaged && request.productId() != null) {
+        if (!damaged) {
+            // Góp ý UI 21/11: goods delivered by mistake are taken in as exactly one part, which must be chosen.
+            if (request.productId() == null) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG334");
+            }
             received = receivedPart(found, request.productId());
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -346,7 +350,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         auditLog.save(AuditLog.record(AUDIT_ENTITY, id, ACCEPTANCE_REQUESTED, user.id(), text(request.note()), null,
                 data, now));
         Product part = products.findById(found.getProductId()).orElseThrow();
-        String what = damaged ? "%d %s bị móp làm hàng móp".formatted(request.quantity(), part.getSku())
+        String what = damaged ? "%d %s bị lỗi làm hàng lỗi".formatted(request.quantity(), part.getSku())
                 : "%d hàng giao sai thay cho %s%s".formatted(request.quantity(), part.getSku(),
                 received == null ? "" : " là " + received.getSku());
         notifications.notifyOwners("DISCREPANCY_ACCEPTANCE_REQUESTED",
@@ -402,13 +406,13 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         Product variant = variantOf(original, owner.id(), now);
         if (request.salePrice() != null) {
             retailPrices.update(owner, new RetailPriceRequest(variant.getId(), request.salePrice(),
-                    now.toLocalDate(), "Giá hàng móp, sai lệch #" + id, false));
+                    now.toLocalDate(), "Giá hàng lỗi, sai lệch #" + id, false));
         } else if (pricingPolicies.findRetailPricesInEffect(List.of(variant.getId()), now).isEmpty()) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG311", original.getSku());
         }
         long lotId = lotOf(receiptId, found.getProductId());
         Lot lot = lots.findById(lotId).orElseThrow();
-        String note = "Nhận hàng móp thành " + variant.getSku();
+        String note = "Nhận hàng lỗi thành " + variant.getSku();
         DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.done(id,
                 ResolutionType.ACCEPTED_AS_VARIANT, request.quantity(), note, owner.id(), now));
         SourceRef source = SourceRef.discrepancyResolutionEvent(event.getId());
@@ -498,7 +502,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
 
     /**
      * The part goods delivered by mistake really are: on sale (MSG313), not the part ordered (MSG310) and not a
-     * dented-goods variant (MSG317).
+     * damaged-goods variant (MSG317).
      */
     private Product receivedPart(DiscrepancyCase found, long productId) {
         Product received = products.findById(productId)
@@ -518,7 +522,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
 
     /**
      * The dented-goods variant of {@code original}, made the first time (BR GVHD 20/11): SKU "<SKU>-M" (MSG312 when
-     * another part has it), name "<name> (hàng móp)", the original's details, its OEM codes and vehicles, no barcode
+     * another part has it), name "<name> (hàng lỗi)", the original's details, its OEM codes and vehicles, no barcode
      * so that a scan never finds it instead of the original.
      */
     private Product variantOf(Product original, long by, LocalDateTime now) {
@@ -541,7 +545,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         vehicles.saveAll(vehicles.findByProductIdIn(List.of(original.getId())).stream()
                 .map(link -> ProductVehicleModel.of(variant.getId(), link.getVehicleModelId())).toList());
         auditLog.save(AuditLog.record("PRODUCT", variant.getId(), "PRODUCT_CREATED", by,
-                "Hàng móp của " + original.getSku(), now));
+                "Hàng lỗi của " + original.getSku(), now));
         return variant;
     }
 
@@ -558,7 +562,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
 
     /** What a kind of acceptance request is called in MSG314 and MSG315. */
     private static String kindName(String type) {
-        return AcceptanceRequest.Type.DAMAGED.name().equals(type) ? "hàng móp" : "hàng giao sai";
+        return AcceptanceRequest.Type.DAMAGED.name().equals(type) ? "hàng lỗi" : "hàng giao sai";
     }
 
     private static DiscrepancyCaseResponse.PendingRequest pendingRequest(AuditLog step, Map<Long, Product> parts,

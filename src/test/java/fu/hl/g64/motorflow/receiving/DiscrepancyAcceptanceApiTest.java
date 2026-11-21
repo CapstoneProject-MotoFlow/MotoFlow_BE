@@ -63,7 +63,7 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.events[*].type", contains("ACCEPTED_AS_VARIANT")));
         long variant = jdbc.queryForObject("SELECT id FROM product WHERE variant_of_product_id = ?", Long.class, pad);
         assertThat(jdbc.queryForMap("SELECT sku, part_name, category_id, base_unit FROM product WHERE id = ?",
-                variant)).containsEntry("sku", "MA-PHANH-01-M").containsEntry("part_name", "Má phanh trước (hàng móp)")
+                variant)).containsEntry("sku", "MA-PHANH-01-M").containsEntry("part_name", "Má phanh trước (hàng lỗi)")
                 .containsEntry("base_unit", "cái");
         assertThat(jdbc.queryForObject("SELECT unit_price FROM pricing_policy WHERE product_id = ? "
                 + "AND policy_type = 'RETAIL_PRICE'", Long.class, variant)).isEqualTo(90_000);
@@ -116,6 +116,9 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
         // The supplier is to send 2 oils again; nothing goes back.
         handle(managerToken, grn, List.of(handling(found, 0, 2))).andExpect(status().isOk());
 
+        // Góp ý UI 21/11: goods delivered by mistake need the one part they really are.
+        request(managerToken, found, "WRONG_ITEM", null, 2)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG334"));
         // A request Owner refuses: the goods stay held and the store is told.
         request(managerToken, found, "WRONG_ITEM", lamp, 2)
                 .andExpect(status().isOk())
@@ -182,7 +185,7 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.canRequestAcceptance").value(false));
         request(managerToken, found, "DAMAGED", null, 1)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG314"))
-                .andExpect(jsonPath("$.message").value("Hồ sơ đã có đề nghị nhận hàng móp đang chờ Owner duyệt."));
+                .andExpect(jsonPath("$.message").value("Hồ sơ đã có đề nghị nhận hàng lỗi đang chờ Owner duyệt."));
 
         // Owner refuses the wrong items only: the dented goods are still waiting and the store is told.
         reject(ownerToken, found, "WRONG_ITEM")
@@ -277,13 +280,13 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
     @Test
     void aDentedGoodsVariantIsNeverBoughtNorTakenAsTheRealPartOfWrongItems() throws Exception {
         long found = caseWithDamagedAndWrong();
-        long variant = part("DEN-01-M", "Đèn pha (hàng móp)", jdbc.queryForObject(
+        long variant = part("DEN-01-M", "Đèn pha (hàng lỗi)", jdbc.queryForObject(
                 "SELECT category_id FROM product WHERE id = ?", Long.class, lamp));
         jdbc.update("UPDATE product SET variant_of_product_id = ? WHERE id = ?", lamp, variant);
 
         create(ownerToken, order(honda, giaLam, TODAY, null, line(variant, 1, 50_000)))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG316"))
-                .andExpect(jsonPath("$.message").value("Phụ tùng DEN-01-M là hàng móp, không đặt mua, yêu cầu bổ sung "
+                .andExpect(jsonPath("$.message").value("Phụ tùng DEN-01-M là hàng lỗi, không đặt mua, yêu cầu bổ sung "
                         + "hay nhập đầu kỳ được."));
         request(managerToken, found, "WRONG_ITEM", variant, 1)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG317"));

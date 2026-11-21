@@ -15,10 +15,10 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
 
     boolean existsBySku(String sku);
 
-    /** GVHD 20/11 (PR 5): the dented-goods variant of a part, if it has one. */
+    /** GVHD 20/11 (PR 5): the damaged-goods ("hàng lỗi") variant of a part, if it has one. */
     Optional<Product> findByVariantOfProductId(Long productId);
 
-    /** GVHD 20/11 (PR 5): the dented-goods variants of these parts. */
+    /** GVHD 20/11 (PR 5): the damaged-goods ("hàng lỗi") variants of these parts. */
     List<Product> findByVariantOfProductIdIn(Collection<Long> productIds);
 
     boolean existsByCategoryId(Long categoryId);
