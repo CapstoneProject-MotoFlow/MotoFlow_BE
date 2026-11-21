@@ -228,20 +228,21 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG204", lineNo);
             }
         }
-        if (!includeUnallocated) {
-            return;
-        }
         Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
         List<Map<String, Object>> changes = new ArrayList<>();
         for (ReplenishmentRequestLine line : requested) {
-            long unallocated = line.getRequestedQty() - planned.getOrDefault(line.getProductId(), 0L)
-                    - line.getToPurchaseQty();
-            if (unallocated > 0) {
-                changes.add(passToPurchase(line, Math.toIntExact(line.getToPurchaseQty() + unallocated)));
+            if (includeUnallocated) {
+                long unallocated = line.getRequestedQty() - planned.getOrDefault(line.getProductId(), 0L)
+                        - line.getToPurchaseQty();
+                if (unallocated > 0) {
+                    changes.add(passToPurchase(line, Math.toIntExact(line.getToPurchaseQty() + unallocated)));
+                }
             }
-            // GVHD 20/11: the PO may buy more than is short (a supplier's pack, stock for later), never less, or
-            // the shortage passed to purchase stays uncovered (a transfer planned while the Owner had the PO open).
-            if (quantities.getOrDefault(line.getProductId(), 0) < line.getToPurchaseQty()) {
+            // GVHD 20/11, on both paths (the Owner may have saved the allocation first): the PO may buy more than
+            // is short (a supplier's pack, stock for later), never less, or the shortage passed to purchase stays
+            // uncovered. A part left out of the PO counts as 0.
+            if (line.getToPurchaseQty() > 0
+                    && quantities.getOrDefault(line.getProductId(), 0) < line.getToPurchaseQty()) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG262", id,
                         products.findById(line.getProductId()).map(Product::getSku).orElseThrow(),
                         line.getToPurchaseQty());

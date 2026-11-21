@@ -97,6 +97,49 @@ class PurchaseOrderReplenishmentApiTest extends PurchaseOrderTestData {
 
         // What is passed to purchase stays within the request (to_purchase_qty <= requested_qty).
         assertThat(toPurchase(request)).containsExactly(4, 2, 0);
+        // The PO line itself keeps the 5 oil the Owner chose.
+        assertThat(jdbc.queryForObject("SELECT ordered_qty FROM purchase_order_line WHERE product_id = ?",
+                Integer.class, oil)).isEqualTo(5);
+    }
+
+    @Test
+    void withAnAllocationAlreadySavedThePoMayNotBuyLess() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> body = purchase(giaLam, request, false);
+        body.put("lines", List.of(line(pad, 1, 120_000), line(oil, 5, 85_000)));
+
+        create(ownerToken, body)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG262"))
+                .andExpect(jsonPath("$.message").value("Yêu cầu bổ sung #" + request
+                        + " vừa thay đổi nên số mua của phụ tùng MA-PHANH-01 phải ít nhất là 2. Vui lòng tải lại."));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();
+    }
+
+    @Test
+    void withAnAllocationAlreadySavedThePoMayNotOmitThePart() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> body = purchase(giaLam, request, false);
+        body.put("lines", List.of(line(oil, 5, 85_000)));
+
+        create(ownerToken, body)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG262"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();
+    }
+
+    @Test
+    void withAnAllocationAlreadySavedThePoMayBuyExactlyOrMore() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> exact = purchase(giaLam, request, false);
+        exact.put("lines", List.of(line(pad, 2, 120_000)));
+        long first = created(exact);
+        cancel(ownerToken, first, "Nhà cung cấp hết hàng").andExpect(status().isOk());
+
+        Map<String, Object> more = purchase(giaLam, request, false);
+        more.put("lines", List.of(line(pad, 7, 120_000), line(oil, 5, 85_000)));
+        create(ownerToken, more).andExpect(status().isCreated());
+        assertThat(toPurchase(request)).containsExactly(2, 0, 0);
     }
 
     @Test
