@@ -171,8 +171,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             from = from != null ? from : to;
         }
         Specification<SalesOrder> where = matching(search.q(), storeId, pickerId, statuses, from, to);
-        if (search.depositStatus() != null) {
-            // BE-8: the deposit state is worked out from the money, so the orders are picked by id.
+        // BE-8: Staff see no deposit, so they cannot filter by it either.
+        if (search.depositStatus() != null && pickerId == null) {
+            // The deposit state is worked out from the money, so the orders are picked by id.
             LocalDate today = LocalDate.now(clock);
             DepositStatus wanted = search.depositStatus();
             Map<Long, DepositFigures> figures = depositFigures(orders.depositFigures(storeId));
