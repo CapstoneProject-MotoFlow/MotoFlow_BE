@@ -308,6 +308,8 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.deliveryDocumentNo").isEmpty())
                 .andExpect(jsonPath("$.createdBy").value(staffId))
+                .andExpect(jsonPath("$.recordedBy").isEmpty())
+                .andExpect(jsonPath("$.recordedByName").isEmpty())
                 .andExpect(jsonPath("$.documents.length()").value(1))
                 .andExpect(jsonPath("$.lines[0].documentQty").value(2))
                 .andReturn().getResponse().getContentAsString();
@@ -320,7 +322,9 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         assertThat(jdbc.queryForObject("SELECT assigned_to FROM warehouse_task WHERE task_type = 'INSPECTION' "
                 + "AND goods_receipt_note_id = ? AND status = 'ASSIGNED'", Long.class, receipt)).isEqualTo(staffId);
 
-        result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isOk());
+        result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordedBy").value(staffId))
+                .andExpect(jsonPath("$.recordedByName").value("Test nvlb"));
         confirm("bmlb", order, receipt).andExpect(status().isOk());
     }
 }
