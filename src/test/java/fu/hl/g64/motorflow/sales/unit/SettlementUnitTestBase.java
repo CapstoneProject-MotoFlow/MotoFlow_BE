@@ -26,9 +26,12 @@ import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
+import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -100,6 +103,8 @@ abstract class SettlementUnitTestBase {
     @Mock TransactionTemplate transactions;
     @Mock MessageSource messages;
     @Mock PlatformTransactionManager transactionManager;
+    @Mock SalesDepositApplicationRepository depositApplications;
+    @Mock SalesDepositExpiryChangeRepository depositExpiry;
 
     SalesOrderSettlementServiceImpl service;
     OrderCollections collections;
@@ -119,11 +124,12 @@ abstract class SettlementUnitTestBase {
 
     @BeforeEach
     void baseData() {
-        collections = new OrderCollections(payments);
+        collections = new OrderCollections(payments, depositApplications);
+        OrderDeposits deposits = new OrderDeposits(depositApplications, depositExpiry, CLOCK);
         service = new SalesOrderSettlementServiceImpl(orders, orderLines, products, customers, payments,
                 new TransactionReferences(payments, transactionManager), receivables, auditLog, tasks,
-                warehouseTasks, notifications, attachments, inventory, collections, pricing, guide, salesOrders,
-                transactions, messages, CLOCK);
+                warehouseTasks, notifications, attachments, inventory, collections, deposits, pricing, guide,
+                salesOrders, transactions, messages, CLOCK);
         parts.put(OIL, product(OIL, "NHOT-01", ProductStatus.ACTIVE));
         parts.put(FILTER, product(FILTER, "LOC-01", ProductStatus.ACTIVE));
         sellable.put(OIL, 5);

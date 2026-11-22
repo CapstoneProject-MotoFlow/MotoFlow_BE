@@ -95,7 +95,7 @@ abstract class PurchaseOrderUnitTestBase {
         service = new PurchaseOrderServiceImpl(orders, orderLines, receipts, receiptLines, discrepancies, suppliers,
                 stores, products, users, auditLog, notifications, ledger, settlement, replenishments, warehouseTasks,
                 purchaseOrderReceiving, CLOCK);
-        supplier = withId(Supplier.create("NCC-03", "Minh Phát", null, null, null, null, null, NOW), 3);
+        supplier = withId(Supplier.create("NCC-03", "Minh Phát", null, null, null, null, NOW), 3);
         warehouse = with(store(2, StoreStatus.ACTIVE, false), "storeName", "Kho Gia Lâm");
         parts.put(PAD, product(PAD, "MA-PHANH-01", ProductStatus.ACTIVE));
         parts.put(OIL, product(OIL, "NHOT-01", ProductStatus.ACTIVE));

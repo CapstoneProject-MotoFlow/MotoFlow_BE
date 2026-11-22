@@ -14,12 +14,17 @@ import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.operation.service.WarehouseTaskService;
 import fu.hl.g64.motorflow.partner.entity.Customer;
 import fu.hl.g64.motorflow.partner.repository.CustomerRepository;
+import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
+import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
 import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
+import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
+import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.impl.SalesOrderServiceImpl;
@@ -34,6 +39,7 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -88,6 +94,10 @@ abstract class SalesOrderUnitTestBase {
     @Mock OrderCollections collections;
     @Mock ReceivableRepository receivables;
     @Mock AttachmentService attachments;
+    @Mock PaymentRepository payments;
+    @Mock PlatformTransactionManager transactionManager;
+    @Mock SalesDepositApplicationRepository depositApplications;
+    @Mock SalesDepositExpiryChangeRepository depositExpiry;
 
     SalesOrderServiceImpl service;
     final AuthenticatedUser manager = auth(5, Role.BRANCH_MANAGER, 2L);
@@ -108,8 +118,10 @@ abstract class SalesOrderUnitTestBase {
 
     @BeforeEach
     void baseData() {
+        OrderDeposits deposits = new OrderDeposits(depositApplications, depositExpiry, CLOCK);
         service = new SalesOrderServiceImpl(orders, orderLines, products, customers, stores, users, auditLog, tasks,
-                warehouseTasks, notifications, pricing, guide, balances, collections, receivables, attachments, CLOCK);
+                warehouseTasks, notifications, pricing, guide, balances, collections, receivables, attachments,
+                deposits, depositApplications, new TransactionReferences(payments, transactionManager), CLOCK);
         gialam = with(store(2, StoreStatus.ACTIVE, false), "storeName", "Kho Gia Lâm");
         part(OIL, "NHOT-01", ProductStatus.ACTIVE, 110_000L);
         part(FILTER, "LOC-01", ProductStatus.ACTIVE, 50_000L);
@@ -147,7 +159,7 @@ abstract class SalesOrderUnitTestBase {
         when(pricing.minimumMargin(any())).thenAnswer(inv -> margin);
         when(guide.parts(anyLong(), anyCollection(), any())).thenAnswer(this::stock);
         when(guide.parts(anyLong(), anyCollection(), any(), any())).thenAnswer(this::stock);
-        when(collections.of(anyLong())).thenReturn(new OrderCollections.Money(List.of(), Map.of(), 0, 0, 0, 0, 0));
+        when(collections.of(anyLong())).thenReturn(new OrderCollections.Money(List.of(), Map.of(), 0, 0, 0, 0, 0, 0));
 
         when(orders.save(any())).thenAnswer(inv -> {
             SalesOrder order = inv.getArgument(0);

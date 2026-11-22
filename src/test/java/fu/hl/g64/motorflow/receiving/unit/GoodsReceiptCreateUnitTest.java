@@ -65,7 +65,7 @@ class GoodsReceiptCreateUnitTest extends GoodsReceiptUnitTestBase {
 
     @Override
     DiscrepancySettlement.Progress pending(long id) {
-        return new DiscrepancySettlement.Progress(0, 0, 0, 0, id == 77 ? pendingOn77 : 0, null, 0, 0);
+        return new DiscrepancySettlement.Progress(0, 0, 0, 0, id == 77 ? pendingOn77 : 0, null, 0, 0, 0, 0, 0);
     }
 
     private static GoodsReceiptRequest request(String documentNo, LocalDate documentDate, LocalDateTime arrivedAt,
