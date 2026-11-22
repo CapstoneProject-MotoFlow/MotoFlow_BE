@@ -1,0 +1,15 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/unmet-demand"
+method: GET
+auth:
+  type: bearer
+  credentials:
+    token: "{{ownerToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 200', () => pm.response.to.have.status(200));
+      const b = pm.response.json();
+      pm.test('Trạng thái đơn hợp lệ', () => b.items.forEach(i => pm.expect(['COMPLETED', 'CANCELLED', 'AWAITING_STOCK']).to.include(i.orderStatus)));
+    language: text/javascript
+order: 3000

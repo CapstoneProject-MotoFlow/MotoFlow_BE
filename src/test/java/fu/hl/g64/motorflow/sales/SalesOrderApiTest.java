@@ -70,11 +70,14 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.discountAmount").value(27_075));
 
         // Missing stock does not stop the order (UC-53 step 5): GVHD 20/11, what cannot be sold now waits on a
-        // waiting order. 8 sellable, 4 + 2 held by the two orders above: 2 sold now, 18 wait.
+        // waiting order. 8 sellable, 4 + 2 held by the two orders above: 2 sold now, 18 wait. Góp ý UI 21/11: only a
+        // customer with a profile can wait; a walk-in customer is refused (MSG332).
         Map<String, Object> walkIn = order(null, null, "RETAIL", "0", lines(pad, 20));
         walkIn.put("walkInName", "  Chị Lan ");
-        String split = create(managerToken, walkIn).andExpect(status().isCreated())
-                .andExpect(jsonPath("$.customerName").value("Chị Lan"))
+        create(managerToken, walkIn).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG332"));
+        String split = create(managerToken, order(null, customer, "RETAIL", "0", lines(pad, 20)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.customerName").value("Anh Tuấn"))
                 .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
                 .andExpect(jsonPath("$.lines[0].requestedQty").value(2))
                 .andExpect(jsonPath("$.lines[0].heldByOthersQty").value(6))
@@ -495,7 +498,7 @@ class SalesOrderApiTest extends SalesOrderTestData {
         walkIn.put("walkInPhone", "0987000111");
         long second = ((Number) JsonPath.read(create(managerToken, walkIn).andReturn().getResponse()
                 .getContentAsString(), "$.id")).longValue();
-        long elsewhere = ((Number) JsonPath.read(create(ownerToken, order(otherStore, null, "RETAIL", null,
+        long elsewhere = ((Number) JsonPath.read(create(ownerToken, order(otherStore, customer, "RETAIL", null,
                 lines(oil, 1))).andReturn().getResponse().getContentAsString(), "$.id")).longValue();
 
         list(managerToken).andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(2))

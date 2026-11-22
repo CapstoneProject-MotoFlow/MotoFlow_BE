@@ -36,14 +36,10 @@ public final class SalesOrderHistory {
     /** GVHD 20/11: part or all of a waiting order was released to picking, at the prices in effect. */
     public static final String CAUSE_RELEASE = "RELEASE";
     /**
-     * GVHD 20/11, kept in audit_log instead of columns: version 1 of an order split from another names that order;
-     * the first confirmation that moved undelivered units to a waiting order names it and, per moved line, the
-     * quantity requested before.
+     * GVHD 20/11, kept in audit_log instead of columns: version 1 of an order split from another names that order.
+     * (Confirmations made before góp ý UI 21/11 may also carry waiting_order_id and requested_before.)
      */
     public static final String SPLIT_FROM = "split_from_order_id";
-    public static final String WAITING_ORDER = "waiting_order_id";
-    /** On a CONFIRMED row, per line moved to the waiting order: the requested quantity before it was narrowed. */
-    public static final String REQUESTED_BEFORE = "requested_before";
 
     private SalesOrderHistory() {
     }

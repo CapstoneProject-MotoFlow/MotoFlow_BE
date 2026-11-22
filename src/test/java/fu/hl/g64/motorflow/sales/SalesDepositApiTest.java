@@ -80,7 +80,11 @@ class SalesDepositApiTest extends SalesOrderTestData {
 
     @Test
     void aDepositNeedsAWaitingOrderOfACustomerProfileAndAnExpiryDateAfterToday() throws Exception {
-        long walkIn = waitingOrder(null);
+        // Góp ý UI 21/11: a walk-in customer can no longer leave anything waiting; an older walk-in waiting order
+        // still takes no deposit.
+        long walkIn = waitingOrder(customer);
+        jdbc.update("UPDATE sales_order SET customer_id = NULL, customer_name_snapshot = 'Chị Lan' WHERE id = ?",
+                walkIn);
         deposit(managerToken, walkIn, 500_000, "CASH", null, true, "2026-10-16", 0)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG320"));
         detail(managerToken, walkIn).andExpect(jsonPath("$.actions.canRecordDeposit").value(false));

@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.discrepancy.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -25,11 +27,25 @@ public record DiscrepancyHandlingRequest(
         @Size(max = 255, message = "Ghi chú tối đa 255 ký tự.")
         String note) {
 
+    /**
+     * Góp ý UI 21/11: {@code wrongReturnQty} and {@code damagedReturnQty} are the wrong items and the damaged goods to
+     * return, each at most what of that kind is still held (MSG35) and at least what of it went back already
+     * (MSG134); one left empty keeps what was agreed. {@code returnRequiredQty} is the older single figure (rejected
+     * excess included), split as before (wrong items first, then damaged goods); it is used only when both kinds are
+     * empty.
+     */
     public record Line(
             @NotNull(message = "Vui lòng chọn hồ sơ sai lệch.")
             Long caseId,
 
-            @NotNull(message = "Vui lòng nhập số lượng sẽ trả lại.")
+            @PositiveOrZero(message = "Số lượng không được âm.")
+            @Max(value = 1_000_000, message = "Số lượng tối đa 1.000.000.")
+            Integer wrongReturnQty,
+
+            @PositiveOrZero(message = "Số lượng không được âm.")
+            @Max(value = 1_000_000, message = "Số lượng tối đa 1.000.000.")
+            Integer damagedReturnQty,
+
             @PositiveOrZero(message = "Số lượng không được âm.")
             @Max(value = 1_000_000, message = "Số lượng tối đa 1.000.000.")
             Integer returnRequiredQty,
@@ -37,5 +53,16 @@ public record DiscrepancyHandlingRequest(
             @PositiveOrZero(message = "Số lượng không được âm.")
             @Max(value = 1_000_000, message = "Số lượng tối đa 1.000.000.")
             Integer replacementRequiredQty) {
+
+        /** The older form: case, whole return, replacement. */
+        public Line(Long caseId, Integer returnRequiredQty, Integer replacementRequiredQty) {
+            this(caseId, null, null, returnRequiredQty, replacementRequiredQty);
+        }
+
+        @JsonIgnore
+        @AssertTrue(message = "Vui lòng nhập số lượng sẽ trả lại.")
+        public boolean isReturnGiven() {
+            return wrongReturnQty != null || damagedReturnQty != null || returnRequiredQty != null;
+        }
     }
 }

@@ -1,0 +1,24 @@
+$kind: http-request
+url: "{{baseUrl}}/api/v1/sales-orders/999999/payments/split"
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "cashAmount": 100000,
+      "transferAmount": 50000,
+      "transactionReference": "FT-POSTMAN-1",
+      "expectedPayable": 150000
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{bmToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      pm.test('HTTP 404', () => pm.response.to.have.status(404));
+    language: text/javascript
+order: 2000

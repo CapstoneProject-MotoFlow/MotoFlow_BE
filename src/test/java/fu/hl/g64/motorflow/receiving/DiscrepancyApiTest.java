@@ -181,12 +181,18 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.closureType").value("ALL_SETTLED"))
                 .andExpect(jsonPath("$.closedById").value(manager.getId()))
                 .andExpect(jsonPath("$.canRecordReturn").value(false))
-                .andExpect(jsonPath("$.events[*].type", contains("MOVED_TO_AWAITING_RETURN", "RETURNED_TO_SUPPLIER")))
-                .andExpect(jsonPath("$.events[1].quantity").value(3))
+                // Góp ý UI 21/11: a return without a kind is stored per kind, the rejected excess first.
+                .andExpect(jsonPath("$.events[*].type", contains("MOVED_TO_AWAITING_RETURN", "RETURNED_TO_SUPPLIER",
+                        "RETURNED_TO_SUPPLIER")))
+                .andExpect(jsonPath("$.events[?(@.type == 'RETURNED_TO_SUPPLIER')].goodsKind",
+                        contains("REJECTED_EXCESS", "DAMAGED")))
+                .andExpect(jsonPath("$.events[1].quantity").value(2))
+                .andExpect(jsonPath("$.events[2].quantity").value(1))
                 .andExpect(jsonPath("$.events[1].reason").value("Giao cho tài xế NCC"))
                 .andExpect(jsonPath("$.events[1].evidence[*].fileName", contains("bien-ban.pdf")));
         assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isZero();
-        assertThat(movementsOf(pad)).endsWith(List.of("SUPPLIER_RETURN", "AWAITING_SUPPLIER_RETURN", -3));
+        assertThat(movementsOf(pad)).endsWith(List.of("SUPPLIER_RETURN", "AWAITING_SUPPLIER_RETURN", -2),
+                List.of("SUPPLIER_RETURN", "AWAITING_SUPPLIER_RETURN", -1));
         supplierReturn(managerToken, found, Map.of("quantity", 1))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG29"));

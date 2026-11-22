@@ -4,12 +4,13 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** UC-27, UC-29. Only the name is required, so a profile can be created quickly while taking an order. */
+/** UC-27, UC-29. The name and phone number are required (góp ý UI 21/11); the rest can be filled in later. */
 public record CustomerRequest(
         @NotBlank(message = "Vui lòng nhập tên khách hàng.")
         @Size(max = 150, message = "Tên khách hàng tối đa 150 ký tự.")
         String customerName,
 
+        @NotBlank(message = "Vui lòng nhập số điện thoại.")
         @Pattern(regexp = "^$|^[0-9+ ]{8,20}$", message = "Số điện thoại gồm 8–20 chữ số.")
         String phone,
 

@@ -13,6 +13,8 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.nullValue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -63,7 +65,7 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.events[*].type", contains("ACCEPTED_AS_VARIANT")));
         long variant = jdbc.queryForObject("SELECT id FROM product WHERE variant_of_product_id = ?", Long.class, pad);
         assertThat(jdbc.queryForMap("SELECT sku, part_name, category_id, base_unit FROM product WHERE id = ?",
-                variant)).containsEntry("sku", "MA-PHANH-01-M").containsEntry("part_name", "Má phanh trước (hàng móp)")
+                variant)).containsEntry("sku", "MA-PHANH-01-M").containsEntry("part_name", "Má phanh trước (hàng lỗi)")
                 .containsEntry("base_unit", "cái");
         assertThat(jdbc.queryForObject("SELECT unit_price FROM pricing_policy WHERE product_id = ? "
                 + "AND policy_type = 'RETAIL_PRICE'", Long.class, variant)).isEqualTo(90_000);
@@ -103,6 +105,24 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.lines[0].variant.sku").value("MA-PHANH-01-M"))
                 .andExpect(jsonPath("$.lines[0].variant.sellableQty").value(2))
                 .andExpect(jsonPath("$.lines[0].variant.retailPrice").value(90_000));
+        // Góp ý UI 21/11 item 20: the variant chosen on its own shows what can be sold, in the search and the preview,
+        // for the Branch Manager and for Owner choosing the store.
+        preview.put("lines", List.of(Map.of("productId", variant, "quantity", 1)));
+        mvc.perform(post("/api/v1/sales-orders/preview").header(HttpHeaders.AUTHORIZATION, managerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(preview)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].sellableQty").value(2));
+        preview.put("storeId", giaLam);
+        mvc.perform(post("/api/v1/sales-orders/preview").header(HttpHeaders.AUTHORIZATION, ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(preview)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].sellableQty").value(2));
+        mvc.perform(get("/api/v1/products").param("q", "MA-PHANH-01-M").header(HttpHeaders.AUTHORIZATION, managerToken))
+                .andExpect(jsonPath("$.items[0].availableQty").value(2));
+        mvc.perform(get("/api/v1/products").param("q", "MA-PHANH-01-M").param("storeId", String.valueOf(giaLam))
+                        .header(HttpHeaders.AUTHORIZATION, ownerToken))
+                .andExpect(jsonPath("$.items[0].availableQty").value(2));
+        // Without a store Owner sees no stock figure (null): the sales form must send the chosen store.
+        mvc.perform(get("/api/v1/products").param("q", "MA-PHANH-01-M").header(HttpHeaders.AUTHORIZATION, ownerToken))
+                .andExpect(jsonPath("$.items[0].availableQty").value(nullValue()));
     }
 
     @Test
@@ -116,6 +136,9 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
         // The supplier is to send 2 oils again; nothing goes back.
         handle(managerToken, grn, List.of(handling(found, 0, 2))).andExpect(status().isOk());
 
+        // Góp ý UI 21/11: goods delivered by mistake need the one part they really are.
+        request(managerToken, found, "WRONG_ITEM", null, 2)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG334"));
         // A request Owner refuses: the goods stay held and the store is told.
         request(managerToken, found, "WRONG_ITEM", lamp, 2)
                 .andExpect(status().isOk())
@@ -182,7 +205,7 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.canRequestAcceptance").value(false));
         request(managerToken, found, "DAMAGED", null, 1)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG314"))
-                .andExpect(jsonPath("$.message").value("Hồ sơ đã có đề nghị nhận hàng móp đang chờ Owner duyệt."));
+                .andExpect(jsonPath("$.message").value("Hồ sơ đã có đề nghị nhận hàng lỗi đang chờ Owner duyệt."));
 
         // Owner refuses the wrong items only: the dented goods are still waiting and the store is told.
         reject(ownerToken, found, "WRONG_ITEM")
@@ -277,13 +300,13 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
     @Test
     void aDentedGoodsVariantIsNeverBoughtNorTakenAsTheRealPartOfWrongItems() throws Exception {
         long found = caseWithDamagedAndWrong();
-        long variant = part("DEN-01-M", "Đèn pha (hàng móp)", jdbc.queryForObject(
+        long variant = part("DEN-01-M", "Đèn pha (hàng lỗi)", jdbc.queryForObject(
                 "SELECT category_id FROM product WHERE id = ?", Long.class, lamp));
         jdbc.update("UPDATE product SET variant_of_product_id = ? WHERE id = ?", lamp, variant);
 
         create(ownerToken, order(honda, giaLam, TODAY, null, line(variant, 1, 50_000)))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG316"))
-                .andExpect(jsonPath("$.message").value("Phụ tùng DEN-01-M là hàng móp, không đặt mua, yêu cầu bổ sung "
+                .andExpect(jsonPath("$.message").value("Phụ tùng DEN-01-M là hàng lỗi, không đặt mua, yêu cầu bổ sung "
                         + "hay nhập đầu kỳ được."));
         request(managerToken, found, "WRONG_ITEM", variant, 1)
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG317"));

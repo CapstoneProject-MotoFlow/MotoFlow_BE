@@ -1003,6 +1003,130 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Góp ý UI 21-11",
+      "item": [
+        {
+          "name": "BM tạo khách thiếu số điện thoại bị MSG02",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/customers",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Khách thử Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "const b = pm.response.json();",
+                  "pm.test('Báo lỗi số điện thoại', () => pm.expect(b.fieldErrors.phone).to.eql('Vui lòng nhập số điện thoại.'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Thu tiền mặt + chuyển khoản cho đơn không tồn tại bị 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/sales-orders/999999/payments/split",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cashAmount\": 100000,\n  \"transferAmount\": 50000,\n  \"transactionReference\": \"FT-POSTMAN-1\",\n  \"expectedPayable\": 150000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem đơn chưa đáp ứng đủ (có cả đơn chờ hàng)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/unmet-demand",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Trạng thái đơn hợp lệ', () => b.items.forEach(i => pm.expect(['COMPLETED', 'CANCELLED', 'AWAITING_STOCK']).to.include(i.orderStatus)));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [

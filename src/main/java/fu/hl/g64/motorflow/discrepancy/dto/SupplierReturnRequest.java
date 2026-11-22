@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.discrepancy.dto;
 
+import fu.hl.g64.motorflow.discrepancy.entity.enums.GoodsKind;
 import fu.hl.g64.motorflow.operation.dto.AttachmentUpload;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -12,7 +13,9 @@ import java.util.List;
 
 /**
  * UC-46 Step 1_Actual supplier return: goods handed back to the supplier, with the handover evidence (at least one
- * file) already uploaded with an ATTACHMENT signature.
+ * file) already uploaded with an ATTACHMENT signature. Góp ý UI 21/11: {@code goodsKind} says which goods went back,
+ * at most what of that kind is still to return (MSG135); left empty, the return is at most everything still to return
+ * and is read as the rejected excess first, then the wrong items, then the damaged goods.
  */
 public record SupplierReturnRequest(
         @NotNull(message = "Vui lòng nhập số lượng trả nhà cung cấp.")
@@ -25,5 +28,11 @@ public record SupplierReturnRequest(
 
         @NotEmpty(message = "Vui lòng đính kèm bằng chứng trả hàng cho nhà cung cấp.")
         @Size(max = 10, message = "Tối đa 10 tệp.")
-        List<@NotNull @Valid AttachmentUpload> evidence) {
+        List<@NotNull @Valid AttachmentUpload> evidence,
+
+        GoodsKind goodsKind) {
+
+    public SupplierReturnRequest(Integer quantity, String note, List<AttachmentUpload> evidence) {
+        this(quantity, note, evidence, null);
+    }
 }

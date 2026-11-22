@@ -13,7 +13,8 @@ import java.util.List;
 /**
  * UC-58 steps 3-5: the quantity to deliver of every line, from what was picked, once the customer agrees. Delivering
  * less than requested saves a new version, priced again (BR-36). {@code version} is the version the seller opened
- * (MSG165 if another was saved since).
+ * (MSG165 if another was saved since). Góp ý UI 21/11: what the customer does not take is given up (unmet demand);
+ * a confirmation no longer moves it to a waiting order.
  */
 public record ConfirmSalesOrderRequest(
         @NotNull(message = "Vui lòng tải lại đơn bán.")
@@ -34,16 +35,6 @@ public record ConfirmSalesOrderRequest(
             @NotNull(message = "Vui lòng nhập số giao.")
             @PositiveOrZero(message = "Số giao không được âm.")
             @Max(value = 100_000, message = "Số giao tối đa 100.000.")
-            Integer deliveredQty,
-
-            /*
-             * GVHD 20/11: what is not delivered of the line waits on a new waiting order ("mai chị đến lấy nốt");
-             * otherwise the customer gives it up, as before. Only when the picking is confirmed the first time.
-             */
-            Boolean waitForRest) {
-
-        public Line(Long productId, Integer deliveredQty) {
-            this(productId, deliveredQty, null);
-        }
+            Integer deliveredQty) {
     }
 }

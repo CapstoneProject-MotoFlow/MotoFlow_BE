@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.discrepancy.helper;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ClosureType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.GoodsKind;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
@@ -17,7 +18,8 @@ import java.util.Map;
 
 /**
  * How far a supplier discrepancy case is settled (UC-46, BR-27), from its resolution events. The case keeps what is
- * required (return_required_qty, replacement_required_qty); the events record what was done against it:
+ * required (return_required_qty, split by kind since V21, and replacement_required_qty); the events record what was
+ * done against it:
  * <ul>
  *     <li>returned: goods handed back to the supplier (RETURNED_TO_SUPPLIER);</li>
  *     <li>written off: held goods a loss or damage request wrote off (APPROVED_LOSS; comes with the adjustment
@@ -38,12 +40,15 @@ public class DiscrepancySettlement {
 
     /**
      * What was done on one case; {@code lastWaiverReason} is the reason of the latest waiver, if any. GVHD 20/11 (PR 5):
-     * {@code acceptedDamaged} were taken into stock as the dented-goods variant, {@code acceptedWrong} as the part they
-     * really are; both settle held goods like a write-off.
+     * {@code acceptedDamaged} were taken into stock as the damaged-goods variant, {@code acceptedWrong} as the part
+     * they really are; both settle held goods like a write-off. Góp ý UI 21/11: {@code returnedExcess},
+     * {@code returnedWrong} and {@code returnedDamaged} are the returns recorded with their kind; {@code returned}
+     * also counts older returns recorded without one.
      */
     public record Progress(int returned, int writtenOff, int replaced, int waived, int pendingReplacement,
-                           String lastWaiverReason, int acceptedDamaged, int acceptedWrong) {
-        public static final Progress NONE = new Progress(0, 0, 0, 0, 0, null, 0, 0);
+                           String lastWaiverReason, int acceptedDamaged, int acceptedWrong, int returnedExcess,
+                           int returnedWrong, int returnedDamaged) {
+        public static final Progress NONE = new Progress(0, 0, 0, 0, 0, null, 0, 0, 0, 0, 0);
 
         /** Held goods settled by being kept: written off or taken into stock as another part. */
         public int kept() {
@@ -52,25 +57,49 @@ public class DiscrepancySettlement {
 
         private Progress add(DiscrepancyResolutionEvent event) {
             int q = event.getQuantity();
-            return switch (event.getResolutionType()) {
-                case RETURNED_TO_SUPPLIER -> new Progress(returned + q, writtenOff, replaced, waived,
-                        pendingReplacement, lastWaiverReason, acceptedDamaged, acceptedWrong);
-                case APPROVED_LOSS -> new Progress(returned, writtenOff + q, replaced, waived, pendingReplacement,
-                        lastWaiverReason, acceptedDamaged, acceptedWrong);
-                case REPLACEMENT_RECEIVED, LATE_DELIVERY_RECEIVED -> event.isConfirmed()
-                        ? new Progress(returned, writtenOff, replaced + q, waived, pendingReplacement, lastWaiverReason,
-                        acceptedDamaged, acceptedWrong)
-                        : new Progress(returned, writtenOff, replaced, waived, pendingReplacement + q, lastWaiverReason,
-                        acceptedDamaged, acceptedWrong);
-                case CLOSED_BY_AGREEMENT -> new Progress(returned, writtenOff, replaced, waived + q,
-                        pendingReplacement, event.getReason(), acceptedDamaged, acceptedWrong);
-                case ACCEPTED_AS_VARIANT -> new Progress(returned, writtenOff, replaced, waived, pendingReplacement,
-                        lastWaiverReason, acceptedDamaged + q, acceptedWrong);
-                case RECEIVED_AS_OTHER_PRODUCT -> new Progress(returned, writtenOff, replaced, waived,
-                        pendingReplacement, lastWaiverReason, acceptedDamaged, acceptedWrong + q);
+            int returned = this.returned;
+            int writtenOff = this.writtenOff;
+            int replaced = this.replaced;
+            int waived = this.waived;
+            int pending = this.pendingReplacement;
+            String reason = this.lastWaiverReason;
+            int acceptedDamaged = this.acceptedDamaged;
+            int acceptedWrong = this.acceptedWrong;
+            int returnedExcess = this.returnedExcess;
+            int returnedWrong = this.returnedWrong;
+            int returnedDamaged = this.returnedDamaged;
+            switch (event.getResolutionType()) {
+                case RETURNED_TO_SUPPLIER -> {
+                    returned += q;
+                    if (event.getGoodsKind() != null) {
+                        switch (event.getGoodsKind()) {
+                            case REJECTED_EXCESS -> returnedExcess += q;
+                            case WRONG_ITEM -> returnedWrong += q;
+                            case DAMAGED -> returnedDamaged += q;
+                        }
+                    }
+                }
+                case APPROVED_LOSS -> writtenOff += q;
+                case REPLACEMENT_RECEIVED, LATE_DELIVERY_RECEIVED -> {
+                    if (event.isConfirmed()) {
+                        replaced += q;
+                    } else {
+                        pending += q;
+                    }
+                }
+                case CLOSED_BY_AGREEMENT -> {
+                    waived += q;
+                    reason = event.getReason();
+                }
+                case ACCEPTED_AS_VARIANT -> acceptedDamaged += q;
+                case RECEIVED_AS_OTHER_PRODUCT -> acceptedWrong += q;
                 // Moving goods to awaiting return changes no obligation; the case records it in return_required_qty.
-                case MOVED_TO_AWAITING_RETURN, RELEASED_FROM_AWAITING_RETURN, RECEIVED_BACK_AT_SOURCE -> this;
-            };
+                case MOVED_TO_AWAITING_RETURN, RELEASED_FROM_AWAITING_RETURN, RECEIVED_BACK_AT_SOURCE -> {
+                    return this;
+                }
+            }
+            return new Progress(returned, writtenOff, replaced, waived, pending, reason, acceptedDamaged,
+                    acceptedWrong, returnedExcess, returnedWrong, returnedDamaged);
         }
     }
 
@@ -102,22 +131,58 @@ public class DiscrepancySettlement {
         }
 
         /**
-         * GVHD 20/11 (PR 5): damaged goods held and not decided, which Owner may take as the dented-goods variant. The
-         * return takes the rejected excess first, then the wrong items, then the damaged goods (UC-46).
+         * Góp ý UI 21/11: what went back of each kind. Every return is now stored with its kind; one recorded
+         * without a kind before V21 takes the rejected excess first, then the wrong items, then the damaged goods, as
+         * the return did then.
+         */
+        public int returnedOf(GoodsKind kind) {
+            return returnedOf(kind, found.getWrongReturnRequiredQty());
+        }
+
+        /** {@link #returnedOf(GoodsKind)} if {@code wrongRequired} wrong items were agreed to go back. */
+        public int returnedOf(GoodsKind kind, int wrongRequired) {
+            int unknown = Math.max(progress.returned() - progress.returnedExcess() - progress.returnedWrong()
+                    - progress.returnedDamaged(), 0);
+            int excess = progress.returnedExcess();
+            int toExcess = Math.min(unknown, Math.max(found.getRejectedExcessQty() - excess, 0));
+            unknown -= toExcess;
+            int wrong = progress.returnedWrong();
+            int toWrong = Math.min(unknown, Math.max(wrongRequired - wrong, 0));
+            unknown -= toWrong;
+            return switch (kind) {
+                case REJECTED_EXCESS -> excess + toExcess;
+                case WRONG_ITEM -> wrong + toWrong;
+                case DAMAGED -> progress.returnedDamaged() + unknown;
+            };
+        }
+
+        /** Góp ý UI 21/11: what is agreed to go back of one kind. */
+        public int returnRequiredOf(GoodsKind kind) {
+            return switch (kind) {
+                case REJECTED_EXCESS -> found.getRejectedExcessQty();
+                case WRONG_ITEM -> found.getWrongReturnRequiredQty();
+                case DAMAGED -> found.getDamagedReturnRequiredQty();
+            };
+        }
+
+        /** Góp ý UI 21/11: agreed to go back of one kind and not handed back yet. */
+        public int outstandingReturn(GoodsKind kind) {
+            return Math.max(returnRequiredOf(kind) - returnedOf(kind), 0);
+        }
+
+        /**
+         * GVHD 20/11 (PR 5): damaged goods held and not decided, which Owner may take as the damaged-goods variant.
+         * Góp ý UI 21/11: the damaged goods agreed to go back are kept apart from the wrong items.
          */
         public int damagedUndecided() {
-            int moved = Math.max(found.getReturnRequiredQty() - found.getRejectedExcessQty(), 0);
-            int damagedMoved = Math.max(moved - found.getWrongItemQty(), 0);
-            return Math.min(Math.max(found.getDamagedQty() - damagedMoved - progress.acceptedDamaged(), 0),
-                    heldUndecided());
+            return Math.min(Math.max(found.getDamagedQty() - found.getDamagedReturnRequiredQty()
+                    - progress.acceptedDamaged(), 0), heldUndecided());
         }
 
         /** GVHD 20/11 (PR 5): wrong items held and not decided, which Owner may take as the part they really are. */
         public int wrongUndecided() {
-            int moved = Math.max(found.getReturnRequiredQty() - found.getRejectedExcessQty(), 0);
-            int wrongMoved = Math.min(moved, found.getWrongItemQty());
-            return Math.min(Math.max(found.getWrongItemQty() - wrongMoved - progress.acceptedWrong(), 0),
-                    heldUndecided());
+            return Math.min(Math.max(found.getWrongItemQty() - found.getWrongReturnRequiredQty()
+                    - progress.acceptedWrong(), 0), heldUndecided());
         }
 
         /**

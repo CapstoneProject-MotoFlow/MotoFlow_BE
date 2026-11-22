@@ -68,11 +68,16 @@ class CustomerApiTest extends IntegrationTest {
     }
 
     @Test
-    void aNewCustomerNeedsOnlyANameAndMayNotBuyOnCreditYet() throws Exception {
-        String location = send(post("/api/v1/customers"), bmToken, Map.of("customerName", " Garage Hùng "))
+    void aNewCustomerNeedsANameAndAPhoneAndMayNotBuyOnCreditYet() throws Exception {
+        // Góp ý UI 21/11: the phone number is required.
+        send(post("/api/v1/customers"), bmToken, Map.of("customerName", "Garage Hùng"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.phone").value("Vui lòng nhập số điện thoại."));
+        String location = send(post("/api/v1/customers"), bmToken,
+                        Map.of("customerName", " Garage Hùng ", "phone", "0987654321"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.customerName").value("Garage Hùng"))
-                .andExpect(jsonPath("$.phone").doesNotExist())
+                .andExpect(jsonPath("$.phone").value("0987654321"))
                 .andExpect(jsonPath("$.creditStatus").value("NOT_GRANTED"))
                 .andExpect(jsonPath("$.totalDebt").value(0))
                 .andExpect(jsonPath("$.debtAtOwnStore").value(0))
@@ -122,12 +127,15 @@ class CustomerApiTest extends IntegrationTest {
         long order = order(branch, "COMPLETED", "PAID");
         forCustomer(order, id, "Garage Hùng");
 
-        Map<String, Object> body = customer("Garage Hùng Thịnh", "");
+        send(put("/api/v1/customers/{id}", id), bmToken, customer("Garage Hùng Thịnh", ""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.fieldErrors.phone").value("Vui lòng nhập số điện thoại."));
+        Map<String, Object> body = customer("Garage Hùng Thịnh", "0912000111");
         body.put("address", "  ");
         send(put("/api/v1/customers/{id}", id), bmToken, body)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.customerName").value("Garage Hùng Thịnh"))
-                .andExpect(jsonPath("$.phone").doesNotExist())
+                .andExpect(jsonPath("$.phone").value("0912000111"))
                 .andExpect(jsonPath("$.address").doesNotExist());
         assertThat(jdbc.queryForObject("SELECT customer_name_snapshot FROM sales_order", String.class))
                 .isEqualTo("Garage Hùng");
@@ -144,7 +152,7 @@ class CustomerApiTest extends IntegrationTest {
     void theListFindsByNamePhoneOrNumberAndShowsWhatIsOwed() throws Exception {
         long hung = createdId(send(post("/api/v1/customers"), bmToken, customer("Garage Hùng", "0912 345 678")));
         long binh = createdId(send(post("/api/v1/customers"), bmToken, customer("Nguyễn Văn Bình", "0987654321")));
-        long tam = createdId(send(post("/api/v1/customers"), bmToken, customer("Cửa hàng Tâm", null)));
+        long tam = createdId(send(post("/api/v1/customers"), bmToken, customer("Cửa hàng Tâm", "0911000001")));
         jdbc.update("UPDATE customer SET credit_status = 'ELIGIBLE' WHERE id = ?", hung);
 
         // At CH02: 1 000 000 opening, minus the verified 300 000, plus the applied 50 000 on the debt.
@@ -191,7 +199,7 @@ class CustomerApiTest extends IntegrationTest {
     @Test
     void theDetailShowsOnlyTheDocumentsOfStoresTheViewerSees() throws Exception {
         long hung = createdId(send(post("/api/v1/customers"), bmToken, customer("Garage Hùng", "0912345678")));
-        long binh = createdId(send(post("/api/v1/customers"), bmToken, customer("Nguyễn Văn Bình", null)));
+        long binh = createdId(send(post("/api/v1/customers"), bmToken, customer("Nguyễn Văn Bình", "0911000002")));
         long brake = addProduct("BRK-01", "Má phanh trước");
         long chain = addProduct("CHN-01", "Xích tải");
 
@@ -256,7 +264,7 @@ class CustomerApiTest extends IntegrationTest {
             String token = signIn(username);
             send(get("/api/v1/customers"), token)
                     .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
-            send(post("/api/v1/customers"), token, customer("Garage Hùng", null)).andExpect(status().isForbidden());
+            send(post("/api/v1/customers"), token, customer("Garage Hùng", "0911000003")).andExpect(status().isForbidden());
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM customer", Long.class)).isZero();
     }
