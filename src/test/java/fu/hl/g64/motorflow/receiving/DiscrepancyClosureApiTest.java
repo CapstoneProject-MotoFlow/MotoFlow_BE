@@ -39,7 +39,8 @@ class DiscrepancyClosureApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.status").value("OPEN"))
                 .andExpect(jsonPath("$.wrongOutstandingReturnQty").value(0))
                 .andExpect(jsonPath("$.outstandingReplacementQty").value(2))
-                .andExpect(jsonPath("$.events[1].goodsKind").value("WRONG_ITEM"));
+                .andExpect(jsonPath("$.events[?(@.type == 'RETURNED_TO_SUPPLIER')].goodsKind",
+                        contains("WRONG_ITEM")));
         // S8: the replacement arrives after the return; its confirmation closes the case.
         replaced(found, 2);
         discrepancy(managerToken, found).andExpect(jsonPath("$.status").value("CLOSED"))
@@ -114,10 +115,11 @@ class DiscrepancyClosureApiTest extends GoodsReceiptTestData {
         handle(managerToken, grn, found, 1).andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].wrongReturnRequiredQty").value(1))
                 .andExpect(jsonPath("$[0].damagedReturnRequiredQty").value(0));
-        // A return without a kind is read in the same order.
+        // A return without a kind is read in the same order, and stored with the kind it was read as.
         supplierReturn(managerToken, found, Map.of("quantity", 1)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.wrongOutstandingReturnQty").value(0))
-                .andExpect(jsonPath("$.events[1].goodsKind").doesNotExist());
+                .andExpect(jsonPath("$.events[?(@.type == 'RETURNED_TO_SUPPLIER')].goodsKind",
+                        contains("WRONG_ITEM")));
         handle(managerToken, grn, List.of(byKind(found, 0, 1, null))).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG134"));
         handle(managerToken, grn, List.of(byKind(found, null, 1, null))).andExpect(status().isOk())
@@ -126,6 +128,51 @@ class DiscrepancyClosureApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$[0].damagedOutstandingReturnQty").value(1));
         handle(managerToken, grn, List.of(byKind(found, 2, 0, null))).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG35"));
+    }
+
+    @Test
+    void aReturnWithoutAKindKeepsItsKindWhenTheAgreedReturnChangesLater() throws Exception {
+        long grn = delivered(24, 1, 1);
+        long found = caseOf(grn, oil);
+        handle(managerToken, grn, List.of(byKind(found, 0, 1, 0))).andExpect(status().isOk());
+        // Read as the damaged goods: only they are agreed to go back.
+        supplierReturn(managerToken, found, Map.of("quantity", 1)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.events[?(@.type == 'RETURNED_TO_SUPPLIER')].goodsKind", contains("DAMAGED")));
+        // Also sending the wrong item back later does not turn the damaged goods already returned into a wrong item.
+        handle(managerToken, grn, List.of(byKind(found, 1, 1, 0))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].damagedOutstandingReturnQty").value(0))
+                .andExpect(jsonPath("$[0].wrongOutstandingReturnQty").value(1));
+        returned(found, 1, "WRONG_ITEM").andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+        assertStockAgrees(giaLam, oil);
+    }
+
+    @Test
+    void aReturnRecordedBeforeV21IsNotMovedToAnotherKind() throws Exception {
+        long grn = delivered(24, 1, 1);
+        long found = caseOf(grn, oil);
+        handle(managerToken, grn, List.of(byKind(found, 0, 1, 0))).andExpect(status().isOk());
+        returned(found, 1, "DAMAGED").andExpect(status().isOk());
+        // As a return recorded before V21: no kind, read by the agreed wrong items, so the damaged goods now.
+        jdbc.update("UPDATE discrepancy_resolution_event SET goods_kind = NULL WHERE discrepancy_case_id = ?", found);
+        discrepancy(managerToken, found).andExpect(jsonPath("$.damagedOutstandingReturnQty").value(0));
+        // Agreeing to send the wrong item back too would read that return as the wrong item.
+        handle(managerToken, grn, List.of(byKind(found, 1, 1, 0))).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG134"));
+        discrepancy(managerToken, found).andExpect(jsonPath("$.damagedOutstandingReturnQty").value(0))
+                .andExpect(jsonPath("$.wrongReturnRequiredQty").value(0));
+    }
+
+    @Test
+    void aReturnWithoutAKindAcrossKindsIsStoredPerKind() throws Exception {
+        long grn = delivered(24, 1, 1);
+        long found = caseOf(grn, oil);
+        handle(managerToken, grn, List.of(byKind(found, 1, 1, 0))).andExpect(status().isOk());
+        supplierReturn(managerToken, found, Map.of("quantity", 2)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.events[?(@.type == 'RETURNED_TO_SUPPLIER')].goodsKind",
+                        contains("WRONG_ITEM", "DAMAGED")));
+        assertStockAgrees(giaLam, oil);
     }
 
     /** A delivery of 10 pads and {@code delivered} oils of the 24 ordered, some wrong or damaged, confirmed. */

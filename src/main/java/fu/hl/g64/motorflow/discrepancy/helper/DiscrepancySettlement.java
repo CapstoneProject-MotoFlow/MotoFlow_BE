@@ -131,17 +131,23 @@ public class DiscrepancySettlement {
         }
 
         /**
-         * Góp ý UI 21/11: what went back of each kind. A return recorded without a kind (before V21) takes the
-         * rejected excess first, then the wrong items, then the damaged goods, as the return did then.
+         * Góp ý UI 21/11: what went back of each kind. Every return is now stored with its kind; one recorded
+         * without a kind before V21 takes the rejected excess first, then the wrong items, then the damaged goods, as
+         * the return did then.
          */
         public int returnedOf(GoodsKind kind) {
+            return returnedOf(kind, found.getWrongReturnRequiredQty());
+        }
+
+        /** {@link #returnedOf(GoodsKind)} if {@code wrongRequired} wrong items were agreed to go back. */
+        public int returnedOf(GoodsKind kind, int wrongRequired) {
             int unknown = Math.max(progress.returned() - progress.returnedExcess() - progress.returnedWrong()
                     - progress.returnedDamaged(), 0);
             int excess = progress.returnedExcess();
             int toExcess = Math.min(unknown, Math.max(found.getRejectedExcessQty() - excess, 0));
             unknown -= toExcess;
             int wrong = progress.returnedWrong();
-            int toWrong = Math.min(unknown, Math.max(found.getWrongReturnRequiredQty() - wrong, 0));
+            int toWrong = Math.min(unknown, Math.max(wrongRequired - wrong, 0));
             unknown -= toWrong;
             return switch (kind) {
                 case REJECTED_EXCESS -> excess + toExcess;

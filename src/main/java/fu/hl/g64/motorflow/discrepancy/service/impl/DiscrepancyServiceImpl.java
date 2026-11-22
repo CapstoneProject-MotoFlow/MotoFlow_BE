@@ -224,6 +224,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n,
                         wrong < wrongFloor ? wrongFloor : damagedFloor);
             }
+            // A return recorded without a kind before V21 is read by the agreed wrong items: the new figures must not
+            // move it to another kind (the damaged goods already returned stay damaged goods).
+            if (standing.returnedOf(GoodsKind.DAMAGED, wrong) != damagedFloor) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, damagedFloor);
+            }
             // UC-46 step 3, BR-27: the replacement is agreed apart from the return, never above the case's limit
             // (BR-67); left empty, it grows by the wrong or damaged units newly agreed to go back.
             Integer asked = line.replacementRequiredQty();
@@ -285,25 +290,45 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         if (standing.outstandingReturn() == 0) {
             throw changed();
         }
-        // Góp ý UI 21/11: a return of one kind; without a kind it is read as the rejected excess first, then the wrong
-        // items, then the damaged goods (DiscrepancySettlement.Standing#returnedOf).
+        // Góp ý UI 21/11: a return of one kind. Without a kind it is taken as the rejected excess first, then the wrong
+        // items, then the damaged goods, and that reading is stored with the return, so a later change of the agreed
+        // return per kind does not move what already went back to another kind.
         GoodsKind kind = request.goodsKind();
         int left = kind != null ? standing.outstandingReturn(kind) : standing.outstandingReturn();
         if (request.quantity() > left) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG135", left);
         }
-        int quantity = request.quantity();
+        Map<GoodsKind, Integer> parts = new LinkedHashMap<>();
+        if (kind != null) {
+            parts.put(kind, request.quantity());
+        } else {
+            int rest = request.quantity();
+            for (GoodsKind each : List.of(GoodsKind.REJECTED_EXCESS, GoodsKind.WRONG_ITEM, GoodsKind.DAMAGED)) {
+                int part = Math.min(rest, standing.outstandingReturn(each));
+                if (part > 0) {
+                    parts.put(each, part);
+                    rest -= part;
+                }
+            }
+        }
         String note = text(request.note());
         LocalDateTime now = LocalDateTime.now(clock);
-        DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.returned(id, kind, quantity, note,
-                manager.id(), now));
-        // The goods leave the store from awaiting return to supplier, valued at the average (BR-74).
         long lotId = lotOf(receiptId, found.getProductId());
-        posting.takeOut(new OutPosting(order.getStoreId(), found.getProductId(), StockStatus.AWAITING_SUPPLIER_RETURN,
-                quantity, List.of(new LotQuantity(lotId, quantity)), MovementType.SUPPLIER_RETURN,
-                SourceRef.discrepancyResolutionEvent(event.getId()), manager.id(), note));
-        attachments.attach(OwnerType.DISCREPANCY_RESOLUTION_EVENT, event.getId(),
-                request.evidence() == null ? List.of() : request.evidence(), manager.id());
+        boolean first = true;
+        for (Map.Entry<GoodsKind, Integer> part : parts.entrySet()) {
+            int quantity = part.getValue();
+            DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.returned(id, part.getKey(),
+                    quantity, note, manager.id(), now));
+            // The goods leave the store from awaiting return to supplier, valued at the average (BR-74).
+            posting.takeOut(new OutPosting(order.getStoreId(), found.getProductId(),
+                    StockStatus.AWAITING_SUPPLIER_RETURN, quantity, List.of(new LotQuantity(lotId, quantity)),
+                    MovementType.SUPPLIER_RETURN, SourceRef.discrepancyResolutionEvent(event.getId()), manager.id(),
+                    note));
+            // The evidence of the hand-over goes with its first part.
+            attachments.attach(OwnerType.DISCREPANCY_RESOLUTION_EVENT, event.getId(),
+                    !first || request.evidence() == null ? List.of() : request.evidence(), manager.id());
+            first = false;
+        }
         settlement.closeIfSettled(found, manager.id(), now);
         return responses(manager, List.of(found), true).getFirst();
     }
