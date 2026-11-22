@@ -212,9 +212,16 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.message").value("Khách lẻ chỉ mua được số đang có: MA-PHANH-01 cần 3, "
                         + "còn 2. Vui lòng tạo hồ sơ khách hàng để chờ phần còn lại."));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)).isEqualTo(1);
-        create(managerToken, order(null, null, "RETAIL", null, lines(pad, 2)))
+        // Review R-03: nor buy more than is in stock by leaving the rest as declined.
+        create(managerToken, order(null, null, "RETAIL", null, List.of(line(pad, 3, 2, false))))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG332"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)).isEqualTo(1);
+        // Review R-01: what is in stock is taken in full now, whatever nowQty says.
+        create(managerToken, order(null, null, "RETAIL", null, List.of(line(pad, 2, 1, true))))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(2))
                 .andExpect(jsonPath("$.split").value(nullValue()));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order", Long.class)).isEqualTo(2);
         // A customer with a profile still waits for the rest.
         create(managerToken, order(null, customer, "RETAIL", null, lines(pad, 1)))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"));

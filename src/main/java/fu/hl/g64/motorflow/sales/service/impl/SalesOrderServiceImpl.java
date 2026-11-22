@@ -394,7 +394,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
      * open orders, read under the lock of the parts' stock rows so two sellers take turns. The server works it out
      * again and does not trust the client's figures: sellNow = min(nowQty, sellable); with {@code waitForRest} the
      * rest of the requested quantity waits, without it the rest is declined. MSG171 when nothing at all is sold or
-     * waits. Góp ý UI 21/11: a walk-in customer (no profile) cannot leave anything waiting, MSG332.
+     * waits. Góp ý UI 21/11: a walk-in customer (no profile) takes the whole quantity now and cannot buy more than
+     * is in stock, MSG332.
      */
     private List<Share> shares(long storeId, boolean walkIn, List<SalesOrderLineRequest> lines, LocalDate today) {
         List<Long> ids = lines.stream().map(SalesOrderLineRequest::productId).sorted().toList();
@@ -413,12 +414,18 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG306", i + 1);
             }
             int sellable = stock.get(line.productId()).sellableQty();
+            if (walkIn) {
+                // Góp ý UI 21/11 (review R-01, R-03): a walk-in customer takes the whole quantity now, so it must be
+                // in stock; nothing waits and nothing is left as declined, whatever nowQty and waitForRest say.
+                if (line.quantity() > sellable) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG332", parts.get(line.productId()).getSku(),
+                            line.quantity(), sellable);
+                }
+                shares.add(new Share(line, line.quantity(), 0, 0));
+                continue;
+            }
             int sellNow = Math.min(now, sellable);
             int waitQty = line.waits() ? line.quantity() - sellNow : 0;
-            if (walkIn && waitQty > 0) {
-                throw new BusinessException(HttpStatus.CONFLICT, "MSG332", parts.get(line.productId()).getSku(),
-                        line.quantity(), sellable);
-            }
             shares.add(new Share(line, sellNow, waitQty, line.quantity() - sellNow - waitQty));
             if (sellNow < now) {
                 lacking.add("%s cần %d, còn %d".formatted(parts.get(line.productId()).getSku(), now, sellable));

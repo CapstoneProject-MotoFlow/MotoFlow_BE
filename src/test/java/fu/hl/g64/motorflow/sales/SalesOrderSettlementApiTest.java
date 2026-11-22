@@ -14,6 +14,7 @@ import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -466,6 +467,13 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
                 .andExpect(status().isOk());
         send(managerToken, path, Map.of("cashAmount", 100_000, "transferAmount", 85_000, "transactionReference",
                 "FT-DUP", "expectedPayable", 285_000)).andExpect(status().is4xxClientError());
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment WHERE sales_order_id = ?", Integer.class, order))
+                .isZero();
+        // Review R-02: a refusal after both payments are saved (invalid evidence, MSG142) undoes the cash too.
+        send(managerToken, path, Map.of("cashAmount", 100_000, "transferAmount", 85_000, "transactionReference",
+                "FT-NEW", "expectedPayable", 285_000, "evidence", List.of(Map.of("storageKey", "elsewhere/receipt",
+                        "fileName", "uy-nhiem-chi.pdf", "contentType", "application/pdf", "fileSize", 50_000))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG142"));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM payment WHERE sales_order_id = ?", Integer.class, order))
                 .isZero();
 
