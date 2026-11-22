@@ -382,6 +382,34 @@ class DocumentApiTest extends SalesOrderTestData {
     // ---- UC-80 -------------------------------------------------------------------------------------------------------
 
     @Test
+    void theInvoiceCountsAPaymentWithItsAppliedCorrections() throws Exception {
+        // BR-49: an applied correction finds that only 235,000 đ of the 285,000 đ was taken.
+        long correction = id("INSERT INTO adjustment_request (adjustment_type, store_id, payment_id, reason, status, "
+                + "requested_by, decided_by, decided_at, applied_at) VALUES ('DOCUMENT_CORRECTION', ?, ?, "
+                + "'Ghi nhầm số tiền', 'APPLIED', ?, ?, '2026-10-13 10:00', '2026-10-13 10:00') RETURNING id", store,
+                salePayment, owner.getId(), owner.getId());
+        jdbc.update("INSERT INTO adjustment_amount_line (adjustment_request_id, payment_id, amount_change) "
+                + "VALUES (?, ?, -50000)", correction, salePayment);
+        print(managerToken, "SALES_ORDER", sale, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.total").value(285_000))
+                .andExpect(jsonPath("$.totals.paid").value(235_000))
+                .andExpect(jsonPath("$.totals.amountDue").value(50_000));
+        // The 50,000 đ left is put on credit at 30,000 đ, later corrected up by 20,000 đ: nothing is due any more.
+        long credit = id("INSERT INTO receivable (origin_type, customer_id, store_id, sales_order_id, "
+                + "original_amount, recognized_by, recognized_at) VALUES ('CREDIT_SALE', ?, ?, ?, 30000, ?, "
+                + "'2026-10-13 10:00') RETURNING id", customer, store, sale, manager.getId());
+        long debtCorrection = id("INSERT INTO adjustment_request (adjustment_type, store_id, receivable_id, reason, "
+                + "status, requested_by, decided_by, decided_at, applied_at) VALUES ('DOCUMENT_CORRECTION', ?, ?, "
+                + "'Ghi nhầm số nợ', 'APPLIED', ?, ?, '2026-10-13 11:00', '2026-10-13 11:00') RETURNING id", store,
+                credit, owner.getId(), owner.getId());
+        jdbc.update("INSERT INTO adjustment_amount_line (adjustment_request_id, receivable_id, amount_change) "
+                + "VALUES (?, ?, 20000)", debtCorrection, credit);
+        print(managerToken, "SALES_ORDER", sale, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totals.credit").value(50_000))
+                .andExpect(jsonPath("$.totals.amountDue").value(0));
+    }
+
+    @Test
     void aCompletedSalePrintsAsAnInvoiceAndAStockIssueNote() throws Exception {
         // PM 21/11: the store's own tax code is printed as the seller's.
         jdbc.update("UPDATE store SET tax_code = '0101234567' WHERE store_name = 'Gia Lâm'");

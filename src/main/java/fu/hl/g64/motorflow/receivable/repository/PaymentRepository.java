@@ -51,4 +51,23 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
               and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED
             group by l.paymentId""")
     List<Object[]> sumCorrections(Collection<Long> paymentIds);
+
+    /**
+     * Verified order payments minus verified refunds of one order, each with its applied corrections (BR-49).
+     * A deposit is not money paid for the order.
+     */
+    @Query("""
+            select coalesce(sum(
+                (case when p.paymentType = fu.hl.g64.motorflow.receivable.entity.enums.PaymentType.REFUND
+                      then -1 else 1 end)
+                * (p.amount + coalesce((select sum(l.amountChange) from AdjustmentAmountLine l
+                                        join AdjustmentRequest q on q.id = l.adjustmentRequestId
+                                        where l.paymentId = p.id
+                                          and q.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED), 0))), 0)
+            from Payment p
+            where p.salesOrderId = :salesOrderId
+              and p.status = fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus.VERIFIED
+              and p.paymentType in (fu.hl.g64.motorflow.receivable.entity.enums.PaymentType.ORDER_PAYMENT,
+                                    fu.hl.g64.motorflow.receivable.entity.enums.PaymentType.REFUND)""")
+    long sumVerifiedNet(long salesOrderId);
 }
