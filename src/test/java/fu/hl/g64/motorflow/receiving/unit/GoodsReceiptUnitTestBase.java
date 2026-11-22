@@ -129,7 +129,7 @@ abstract class GoodsReceiptUnitTestBase {
                 withId(PurchaseOrderLine.create(30, PAD, 10, 60000), 1), withId(PurchaseOrderLine.create(30, OIL, 5, 70000), 2)));
         when(ledger.of(30L)).thenAnswer(inv -> standing());
         when(suppliers.findById(3L)).thenReturn(Optional.of(withId(Supplier.create("NCC-03", "Minh Phát", null, null,
-                null, null, null, NOW), 3)));
+                null, null, NOW), 3)));
         when(stores.findById(2L)).thenReturn(Optional.of(store(2, StoreStatus.ACTIVE, false)));
         when(products.findAllById(any())).thenAnswer(inv -> {
             List<Product> found = new ArrayList<>();

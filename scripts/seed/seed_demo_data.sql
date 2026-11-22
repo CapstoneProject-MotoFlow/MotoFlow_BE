@@ -369,9 +369,10 @@ BEGIN
         FROM goods_receipt_note_line l JOIN goods_receipt_note g ON g.id = l.goods_receipt_note_id WHERE l.id = grl AND l.damaged_qty > 0;
     END LOOP;
 
+    -- V21: the return agreed is 2 damaged (no wrong item, no rejected excess), so return_required_qty = damaged_return_required_qty.
     INSERT INTO discrepancy_case (source_type, goods_receipt_note_id, product_id, short_qty, damaged_qty, return_required_qty,
-                                  replacement_required_qty, status, opened_at)
-    VALUES ('SUPPLIER', gr2, pg_temp.pid('CUROA-VISION'), 2, 2, 2, 4, 'OPEN', pg_temp.ts(0.42))
+                                  damaged_return_required_qty, replacement_required_qty, status, opened_at)
+    VALUES ('SUPPLIER', gr2, pg_temp.pid('CUROA-VISION'), 2, 2, 2, 2, 4, 'OPEN', pg_temp.ts(0.42))
     RETURNING id INTO dc1;
 
     -- GRR3: goods just arrived and wait for inspection (no stock yet).
@@ -384,6 +385,11 @@ BEGIN
     INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, delivery_document_no, arrived_at, status)
     VALUES ('SUPPLIER_DELIVERY', grr3, 'PGH-TC-2231', pg_temp.ts(0.95), 'AWAITING_INSPECTION')
     RETURNING id INTO gr3;
+    -- As the receiving service writes it: one line per PO part at the PO price, document_qty from the delivery
+    -- document (here the ordered quantities), nothing inspected yet.
+    INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, delivered_qty, passed_qty, unit_price)
+    SELECT gr3, l.product_id, l.ordered_qty, 0, 0, l.purchase_price
+    FROM purchase_order_line l WHERE l.purchase_order_id = grr3;
 
     -- GRR4: ordered, not delivered yet.
     INSERT INTO purchase_order (supplier_id, store_id, expected_arrival, note, status, created_by, created_at, updated_at)

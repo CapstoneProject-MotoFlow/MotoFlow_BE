@@ -40,6 +40,11 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
                 List.of(lines));
     }
 
+    /** A customer with a profile (id 20): the only kind of buyer who may wait for stock (góp ý UI 21/11). */
+    private static SalesOrderRequest customer(SalesOrderLineRequest... lines) {
+        return new SalesOrderRequest(null, 20L, null, null, PriceType.RETAIL, null, null, List.of(lines));
+    }
+
     private static SalesOrderRequest wholesale(String rate, SalesOrderLineRequest... lines) {
         return new SalesOrderRequest(null, 20L, null, null, PriceType.WHOLESALE, rate == null ? null
                 : new BigDecimal(rate), null, List.of(lines));
@@ -232,7 +237,23 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
     void utc21() {
         sellable.put(OIL, 0);
 
-        assertRefused(walkIn(null, new SalesOrderLineRequest(OIL, 2, null, false)), HttpStatus.CONFLICT, "MSG171");
+        assertRefused(customer(new SalesOrderLineRequest(OIL, 2, null, false)), HttpStatus.CONFLICT, "MSG171");
+    }
+
+    @Test
+    @DisplayName("UTCID21b A: walk-in, 1 oil sellable of 2 -> MSG332, a walk-in customer cannot wait (góp ý 21/11)")
+    void utc21b() {
+        sellable.put(OIL, 1);
+
+        assertRefused(walkIn(null, line(OIL, 2)), HttpStatus.CONFLICT, "MSG332");
+    }
+
+    @Test
+    @DisplayName("UTCID21c A: walk-in, no oil sellable -> MSG332, nothing to take now and a walk-in cannot wait")
+    void utc21c() {
+        sellable.put(OIL, 0);
+
+        assertRefused(walkIn(null, line(OIL, 2)), HttpStatus.CONFLICT, "MSG332");
     }
 
     @Test
@@ -240,7 +261,7 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
     void utc22() {
         sellable.put(OIL, 1);
 
-        SalesOrderDetail order = service.create(manager, walkIn(null, line(OIL, 2)));
+        SalesOrderDetail order = service.create(manager, customer(line(OIL, 2)));
 
         assertThat(order.id()).isEqualTo(10);
         assertThat(order.status()).isEqualTo(SalesOrderStatus.AWAITING_PICKING);
@@ -256,7 +277,7 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
     void utc23() {
         sellable.put(OIL, 1);
 
-        SalesOrderDetail order = service.create(manager, walkIn(null, new SalesOrderLineRequest(OIL, 2, null,
+        SalesOrderDetail order = service.create(manager, customer(new SalesOrderLineRequest(OIL, 2, null,
                 false)));
 
         assertThat(order.id()).isEqualTo(10);
@@ -273,7 +294,7 @@ class SalesOrderCreateUnitTest extends SalesOrderUnitTestBase {
     void utc24() {
         sellable.put(OIL, 0);
 
-        SalesOrderDetail order = service.create(manager, walkIn(null, line(OIL, 2)));
+        SalesOrderDetail order = service.create(manager, customer(line(OIL, 2)));
 
         assertThat(order.id()).isEqualTo(10);
         assertThat(order.status()).isEqualTo(SalesOrderStatus.AWAITING_STOCK);

@@ -334,34 +334,28 @@ class SalesOrderConfirmUnitTest extends SalesOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID27 N: oil delivered 1, the customer waits for the other -> waiting order 11 with oil 1")
+    @DisplayName("UTCID27 N: oil delivered 1 of 2, the customer gives up the other -> version 2, no waiting order")
     void utc27() {
         SalesOrderDetail detail = confirm(manager, new ConfirmSalesOrderRequest(1, true, List.of(
-                new ConfirmSalesOrderRequest.Line(OIL, 1, true), line(FILTER, 1))));
+                line(OIL, 1), line(FILTER, 1))));
 
+        // Góp ý UI 21/11: the undelivered unit stays on order 10 as unmet demand; no waiting order is made.
         assertThat(detail.version()).isEqualTo(2);
-        assertThat(row(detail, OIL).requestedQty()).isEqualTo(1);
+        assertThat(row(detail, OIL).requestedQty()).isEqualTo(2);
         assertThat(row(detail, OIL).deliveredQty()).isEqualTo(1);
-        assertThat(detail.split()).isEqualTo(new SalesOrderDetail.Split(10L, 11L, null, List.of()));
-        assertThat(saved.get(11L).getStatus()).isEqualTo(SalesOrderStatus.AWAITING_STOCK);
-        assertThat(linesOf(11)).singleElement().satisfies(l -> {
-            assertThat(l.getProductId()).isEqualTo(OIL);
-            assertThat(l.getRequestedQty()).isEqualTo(1);
-            assertThat(l.getActualUnitPrice()).isEqualTo(110_000);
-        });
+        assertThat(detail.split()).isNull();
+        assertThat(saved.get(11L)).isNull();
     }
 
     @Test
-    @DisplayName("UTCID28 B: filter delivered 0, the customer waits for it -> the line moves to waiting order 11")
+    @DisplayName("UTCID28 B: filter delivered 0 of 1, the customer gives it up -> the line stays on order 10 at 0")
     void utc28() {
         SalesOrderDetail detail = confirm(manager, new ConfirmSalesOrderRequest(1, true, List.of(line(OIL, 2),
-                new ConfirmSalesOrderRequest.Line(FILTER, 0, true))));
+                line(FILTER, 0))));
 
-        assertThat(detail.lines()).singleElement().satisfies(l -> assertThat(l.productId()).isEqualTo(OIL));
-        assertThat(detail.split()).isEqualTo(new SalesOrderDetail.Split(10L, 11L, null, List.of()));
-        assertThat(linesOf(11)).singleElement().satisfies(l -> {
-            assertThat(l.getProductId()).isEqualTo(FILTER);
-            assertThat(l.getRequestedQty()).isEqualTo(1);
-        });
+        assertThat(row(detail, FILTER).requestedQty()).isEqualTo(1);
+        assertThat(row(detail, FILTER).deliveredQty()).isZero();
+        assertThat(detail.split()).isNull();
+        assertThat(saved.get(11L)).isNull();
     }
 }

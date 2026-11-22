@@ -15,6 +15,7 @@ import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Progress;
+import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement.Standing;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.discrepancy.service.impl.DiscrepancyServiceImpl;
@@ -144,7 +145,7 @@ class DiscrepancySaveHandlingUnitTest {
         when(orders.findById(30L)).thenReturn(Optional.of(order));
         when(orders.findAllById(any())).thenReturn(List.of(order));
         when(suppliers.findAllById(any())).thenReturn(List.of(withId(Supplier.create("NCC-03", "Minh Phát", null,
-                null, null, null, null, NOW), 3)));
+                null, null, null, NOW), 3)));
         when(stores.findAllById(any())).thenReturn(List.of(store(2, StoreStatus.ACTIVE, false)));
         when(products.findAllById(any())).thenReturn(List.of(product(PAD, "MA-PHANH-01", ProductStatus.ACTIVE),
                 product(OIL, "NHOT-01", ProductStatus.ACTIVE)));
@@ -153,6 +154,14 @@ class DiscrepancySaveHandlingUnitTest {
             Map<Long, Progress> found = new HashMap<>();
             inv.<Collection<Long>>getArgument(0)
                     .forEach(id -> found.put(id, progress.getOrDefault(id, Progress.NONE)));
+            return found;
+        });
+        // The service reads each case with its progress through standing / standings (góp ý UI 21/11 refactor).
+        when(settlement.standing(any())).thenAnswer(inv -> standingOf(inv.getArgument(0)));
+        when(settlement.standings(anyCollection())).thenAnswer(inv -> {
+            Map<Long, Standing> found = new HashMap<>();
+            inv.<Collection<DiscrepancyCase>>getArgument(0)
+                    .forEach(c -> found.put(c.getId(), standingOf(c)));
             return found;
         });
         when(receiptLines.findByGoodsReceiptNoteIdOrderByIdAsc(40L)).thenReturn(List.of(
@@ -181,9 +190,13 @@ class DiscrepancySaveHandlingUnitTest {
         return rows.stream().filter(r -> r.id() == caseId).findFirst().orElseThrow();
     }
 
+    private Standing standingOf(DiscrepancyCase found) {
+        return new Standing(found, progress.getOrDefault(found.getId(), Progress.NONE));
+    }
+
     /** Case 50 was agreed before: return 3 (the 3 wrong pads held), replacement 5. */
     private void agreedBefore() {
-        pad.agree(3, 5);
+        pad.agree(3, 0, 5);
     }
 
     private List<MovePosting> moves() {
@@ -355,7 +368,7 @@ class DiscrepancySaveHandlingUnitTest {
     @Test
     @DisplayName("UTCID15 B: 4 pads already on a replacement delivery, replacement 3 -> MSG193")
     void utc15() {
-        progress.put(50L, new Progress(0, 0, 0, 0, 4, null, 0, 0));
+        progress.put(50L, new Progress(0, 0, 0, 0, 4, null, 0, 0, 0, 0, 0));
 
         assertRefused(manager, request(line(50, 0, 3)), HttpStatus.BAD_REQUEST, "MSG193");
     }
@@ -364,7 +377,7 @@ class DiscrepancySaveHandlingUnitTest {
     @DisplayName("UTCID16 B: agreed 3/5, 2 pads went back, return lowered to 1 -> MSG134")
     void utc16() {
         agreedBefore();
-        progress.put(50L, new Progress(2, 0, 0, 0, 0, null, 0, 0));
+        progress.put(50L, new Progress(2, 0, 0, 0, 0, null, 0, 0, 0, 2, 0));
 
         assertRefused(manager, request(line(50, 1, null)), HttpStatus.BAD_REQUEST, "MSG134");
     }
