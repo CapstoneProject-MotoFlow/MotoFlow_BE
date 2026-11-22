@@ -92,6 +92,13 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
+    @Operation(summary = "Sign out of all own devices except this one")
+    @PostMapping("/sessions/sign-out-others")
+    public ResponseEntity<Void> signOutOtherSessions(@AuthenticationPrincipal AuthenticatedUser user) {
+        sessionService.signOutOthers(user.id(), user.sessionId());
+        return ResponseEntity.noContent().build();
+    }
+
     private ResponseEntity<AuthResponse> withRefreshCookie(AuthService.IssuedTokens tokens) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, refreshTokenCookies.issue(tokens.refreshToken()).toString())
