@@ -25,6 +25,7 @@ public record TransferOrderDetailResponse(
         String delivererName, String vehiclePlateNo,
         Person extraDispatchConfirmedBy, LocalDateTime extraDispatchConfirmedAt,
         Person closedBy, LocalDateTime closedAt,
+        Person discrepancyAcknowledgedBy, LocalDateTime discrepancyAcknowledgedAt,
         List<Line> lines, List<Lot> lots, List<Receipt> receipts, List<Discrepancy> discrepancies,
         List<AttachmentResponse> attachments) {
 
@@ -34,7 +35,7 @@ public record TransferOrderDetailResponse(
     public record Line(long productId, String sku, String partName, String baseUnit, int plannedQty,
                        Integer preparedQty, Integer dispatchedQty, Integer receivedQty, Integer returnedQty,
                        Integer lossQty, Integer extraReceivedQty, Integer extraDispatchedQty, Integer unresolvedQty,
-                       Long makeupForCaseId) {
+                       Integer damagedQty, Integer shortageQty, Long makeupForCaseId) {
     }
 
     /** A lot taken out of the source on dispatch (BR-75). */
@@ -48,7 +49,7 @@ public record TransferOrderDetailResponse(
                           LocalDateTime arrivedAt, LocalDateTime confirmedAt) {
     }
 
-    public record Discrepancy(long id, long productId, int shortQty, DiscrepancyCaseStatus status,
+    public record Discrepancy(long id, long productId, int shortQty, int wrongItemQty, int damagedQty, DiscrepancyCaseStatus status,
                               LocalDateTime openedAt, LocalDateTime closedAt, List<Event> events) {
     }
 

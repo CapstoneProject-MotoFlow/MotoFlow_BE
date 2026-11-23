@@ -42,6 +42,8 @@ public interface TransferOrderService {
     TransferOrderDetailResponse confirmExtraDispatch(AuthenticatedUser user, long id, ExtraDispatchRequest request);
 
     /** UC-77: the Owner and the central warehouse Branch Manager. Changes nothing. */
+    TransferOrderDetailResponse acknowledgeDiscrepancy(AuthenticatedUser user, long id);
+
     ClosingPreviewResponse closingPreview(AuthenticatedUser user, long id);
 
     /**

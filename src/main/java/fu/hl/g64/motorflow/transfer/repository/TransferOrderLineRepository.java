@@ -53,6 +53,12 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
         long getReturned();
 
         long getExcess();
+
+        long getDamaged();
+
+        long getLegacyExcess();
+
+        long getPendingExcess();
     }
 
     @Query("""
@@ -62,7 +68,15 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
                    sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.RETURN_TO_SOURCE
                             then l.passedQty + l.damagedQty else 0 end) as returned,
                    sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
-                            then l.excessQty else 0 end) as excess
+                            then l.excessQty else 0 end) as excess,
+                   sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
+                            then l.damagedQty else 0 end) as damaged,
+                   sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
+                            and l.excessDecision = fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision.NOT_APPLICABLE
+                            then l.excessQty else 0 end) as legacyExcess,
+                   sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
+                            and l.excessDecision = fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision.AWAITING_OWNER
+                            then l.excessQty else 0 end) as pendingExcess
             from GoodsReceiptNoteLine l
             join GoodsReceiptNote g on g.id = l.goodsReceiptNoteId
             where g.transferOrderId = :id
@@ -70,6 +84,15 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             group by l.productId
             """)
     List<ReceiptTotals> confirmedReceipts(@Param("id") long transferOrderId);
+
+    @Query("""
+            select m.productId as productId, -sum(m.quantityChange) as qty from StockMovement m
+            where m.transferOrderId = :id and m.movementType = fu.hl.g64.motorflow.inventory.entity.enums.MovementType.ADJUSTMENT
+              and m.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+              and m.quantityChange < 0
+            group by m.productId
+            """)
+    List<ProductQty> acknowledgedShortages(@Param("id") long transferOrderId);
 
     /** What open receipts of the order, at the destination or back at the source, still expect per part. */
     @Query("""

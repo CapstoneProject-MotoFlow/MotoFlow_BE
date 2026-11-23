@@ -88,6 +88,11 @@ class TransferExtraDispatchApiTest extends TransferFlowTestData {
         }
         long order = dispatchedOrder(brake, 3);
         confirm("bmlb", order, inspected(order, brake, 3 + excess, 0)).andExpect(status().isOk());
+        if (excess > 0) {
+            jdbc.update("UPDATE goods_receipt_note_line SET excess_decision = 'NOT_APPLICABLE' "
+                    + "WHERE excess_qty > 0 AND goods_receipt_note_id IN "
+                    + "(SELECT id FROM goods_receipt_note WHERE transfer_order_id = ?)", order);
+        }
         return order;
     }
 

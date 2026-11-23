@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.transfer.dto;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
+import fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -26,6 +27,6 @@ public record TransferReceiptResponse(long id, long transferOrderId, ReceiptType
      * {@code deliveredQty} = passed + wrong item + damaged.
      */
     public record Line(long productId, String sku, String partName, String baseUnit, int documentQty,
-                       int deliveredQty, int passedQty, int wrongItemQty, int damagedQty, int excessQty) {
+                       int deliveredQty, int passedQty, int wrongItemQty, int damagedQty, int excessQty, Long lineId, LocalDate expiryDate, ExcessDecision excessDecision) {
     }
 }
