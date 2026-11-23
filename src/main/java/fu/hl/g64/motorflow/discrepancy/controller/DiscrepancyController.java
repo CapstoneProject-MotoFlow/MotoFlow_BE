@@ -12,6 +12,11 @@ import fu.hl.g64.motorflow.discrepancy.dto.WaiveReplacementRequest;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.service.DiscrepancyService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.receiving.service.GoodsReceiptService;
+import fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision;
+import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
+
+import java.util.List;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -40,6 +45,26 @@ import java.time.LocalDate;
 public class DiscrepancyController {
 
     private final DiscrepancyService discrepancies;
+    private final GoodsReceiptService receipts;
+
+    @GetMapping("/receipts/{receiptId}/handling")
+    public ReceiptHandling handling(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long receiptId) {
+        var receipt = receipts.get(user, receiptId);
+        List<ExcessLine> excess = receipt.lines().stream().filter(line -> line.excessQty() > 0)
+                .map(line -> new ExcessLine(line.id(), line.productId(), line.sku(), line.partName(),
+                        line.excessQty(), line.excessDecision())).toList();
+        return new ReceiptHandling(excess, receipt.status() == GoodsReceiptNoteStatus.CONFIRMED
+                && receipt.openDiscrepancies() == 0
+                && excess.stream().noneMatch(line -> line.decision() == ExcessDecision.AWAITING_OWNER));
+    }
+
+    public record ReceiptHandling(List<ExcessLine> excessLines, boolean handlingComplete) {
+    }
+
+    public record ExcessLine(long lineId, long productId, String sku, String partName, int quantity,
+                             ExcessDecision decision) {
+    }
+
 
     @Operation(summary = "Supplier discrepancy cases of every warehouse (Owner) or of the user's warehouse")
     @GetMapping

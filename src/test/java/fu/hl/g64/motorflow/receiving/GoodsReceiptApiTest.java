@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.receiving;
 import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -13,6 +14,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
@@ -451,11 +453,14 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
     @Test
     void thePhotosOfTheDeliveryDocumentAreKeptWithTheReceipt() throws Exception {
         Map<String, Object> body = deliveryNote("PX-001");
-        body.put("documents", List.of(Map.of("storageKey", "motoflow/attachments/px001", "fileName", "chung-tu.jpg",
-                "contentType", "image/jpeg", "fileSize", 200_000)));
+        body.put("documents", List.of(
+                Map.of("storageKey", "motoflow/attachments/px001", "fileName", "chung-tu.jpg",
+                        "contentType", "image/jpeg", "fileSize", 200_000),
+                Map.of("storageKey", "motoflow/attachments/px001b", "fileName", "trang-hai.png",
+                        "contentType", "image/png", "fileSize", 100_000)));
         long grn = ((Number) JsonPath.read(createReceipt(managerToken, order, body)
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.documents[*].fileName", contains("chung-tu.jpg")))
+                .andExpect(jsonPath("$.documents[*].fileName", contains("chung-tu.jpg", "trang-hai.png")))
                 .andExpect(jsonPath("$.documents[0].contentType").value("image/jpeg"))
                 .andExpect(jsonPath("$.documents[0].fileSize").value(200_000))
                 .andExpect(jsonPath("$.documents[0].uploadedById").value(manager.getId()))
@@ -491,9 +496,9 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 "contentType", "IMAGE/PNG", "fileSize", 3_000)));
         record(staffToken, grn, evidence)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.documents[*].fileName", contains("chung-tu.jpg", "hu.png")))
-                .andExpect(jsonPath("$.documents[1].contentType").value("image/png"))
-                .andExpect(jsonPath("$.documents[1].uploadedById").value(staff.getId()));
+                .andExpect(jsonPath("$.documents[*].fileName", contains("chung-tu.jpg", "trang-hai.png", "hu.png")))
+                .andExpect(jsonPath("$.documents[2].contentType").value("image/png"))
+                .andExpect(jsonPath("$.documents[2].uploadedById").value(staff.getId()));
     }
 
     @Test
@@ -533,6 +538,12 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.canDecideExcess").value(true))
                 .andExpect(jsonPath("$.lines[*].unitPrice", contains(120_000, 85_000)));
 
+        mvc.perform(get("/api/v1/discrepancy-cases/receipts/" + grn + "/handling")
+                        .header(HttpHeaders.AUTHORIZATION, managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.handlingComplete").value(false))
+                .andExpect(jsonPath("$.excessLines[*].quantity", contains(2, 1)));
+
         decide(managerToken, grn, padLine, "ACCEPTED", oilLine, "ACCEPTED")
                 .andExpect(status().isForbidden());
         // UC-45 Step 4_Incomplete or changed decision.
@@ -551,6 +562,10 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
         decide(ownerToken, grn, padLine, "ACCEPTED", oilLine, "ACCEPTED")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG29"));
+
+        mvc.perform(get("/api/v1/discrepancy-cases/receipts/" + grn + "/handling")
+                        .header(HttpHeaders.AUTHORIZATION, managerToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.handlingComplete").value(true));
 
         // BR-73: the excess is in the same lot; BR-74: (20 x 110 000 + 2 x 120 000) / 22.
         assertThat(stock(giaLam, pad, "AVAILABLE")).isEqualTo(22);

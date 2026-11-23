@@ -133,6 +133,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
         }
         LocalDate today = LocalDate.now(clock);
         PurchaseOrderView view = search.view() == null ? PurchaseOrderView.OPEN : search.view();
+        if (user.role() == Role.STAFF && view != PurchaseOrderView.CLOSED) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
         LocalDate from = search.createdFrom();
         LocalDate to = search.createdTo();
         if (view != PurchaseOrderView.OPEN && view != PurchaseOrderView.AWAITING_RECEIVING_ASSIGNMENT
@@ -640,9 +643,17 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
                 where.add(cb.or(root.get("status").in(view.statuses()), cb.and(
                         cb.equal(root.get("status"), PurchaseOrderStatus.FULLY_RECEIVED),
                         cb.exists(openCaseOf(root, query, cb)))));
-            } else if (view == PurchaseOrderView.FULLY_RECEIVED) {
+            } else if (view == PurchaseOrderView.FULLY_RECEIVED || view == PurchaseOrderView.CLOSED) {
                 where.add(root.get("status").in(view.statuses()));
                 where.add(cb.not(cb.exists(openCaseOf(root, query, cb))));
+                Subquery<Long> pendingExcess = query.subquery(Long.class);
+                var item = pendingExcess.from(fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNoteLine.class);
+                var receipt = pendingExcess.from(GoodsReceiptNote.class);
+                pendingExcess.select(item.get("id")).where(cb.equal(item.get("goodsReceiptNoteId"), receipt.get("id")),
+                        cb.equal(receipt.get("purchaseOrderId"), root.get("id")),
+                        cb.equal(item.get("excessDecision"),
+                                fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision.AWAITING_OWNER));
+                where.add(cb.not(cb.exists(pendingExcess)));
             } else if (view == PurchaseOrderView.DISCREPANCY_OPEN) {
                 where.add(root.get("status").in(view.statuses()));
                 where.add(cb.exists(openCaseOf(root, query, cb)));

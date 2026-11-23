@@ -18,6 +18,7 @@ public enum PurchaseOrderView {
      */
     AWAITING_RECEIVING_ASSIGNMENT(EnumSet.of(PurchaseOrderStatus.AWAITING_DELIVERY, PurchaseOrderStatus.RECEIVING)),
     FULLY_RECEIVED(EnumSet.of(PurchaseOrderStatus.FULLY_RECEIVED)),
+    CLOSED(EnumSet.of(PurchaseOrderStatus.FULLY_RECEIVED, PurchaseOrderStatus.CANCELLED)),
     CANCELLED(EnumSet.of(PurchaseOrderStatus.CANCELLED)),
     /**
      * Test report 20/11 (item 2): POs with a supplier discrepancy case still open, whatever their receiving status.
