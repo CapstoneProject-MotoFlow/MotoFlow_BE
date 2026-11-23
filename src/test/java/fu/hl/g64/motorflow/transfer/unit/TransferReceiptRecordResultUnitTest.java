@@ -199,11 +199,11 @@ class TransferReceiptRecordResultUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID05 B: [{P1, 0, 6}] damaged above 5 -> MSG212")
+    @DisplayName("UTCID05 B: [{P1, 0, 6}] damaged above 5 -> 5 written off, 1 kept on the receipt (PM 23/11)")
     void utcid05() {
-        assertBusiness(() -> service.recordResult(staffS1, 1, 10, body("Hong 2 cai", P1, 0, 6)),
-                HttpStatus.BAD_REQUEST, "MSG212");
-        assertNothingSubmitted();
+        TransferReceiptResponse result = service.recordResult(staffS1, 1, 10, body("Hong 2 cai", P1, 0, 6));
+        assertSubmitted(result, 0, 5, 0);
+        assertThat(result.lines().getFirst().damagedBeyondQty()).isEqualTo(1);
     }
 
     @Test

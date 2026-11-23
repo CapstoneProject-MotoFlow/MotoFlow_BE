@@ -236,12 +236,16 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         for (GoodsReceiptNoteLine line : lines) {
             TransferReceiptResultRequest.Line result = sent.get(line.getProductId());
             // Damaged goods fill what is expected first, so excess is always goods that passed (excess <= passed).
-            if (result.damagedQty() > line.getDocumentQty()) {
+            // PM 23/11 (test DC-0066): a transfer receipt may record more damaged units than were dispatched; the units
+            // above the dispatch stay on the receipt only, so they are neither excess nor written off.
+            boolean transferIn = receipt.getReceiptType() == ReceiptType.TRANSFER_IN;
+            if (!transferIn && result.damagedQty() > line.getDocumentQty()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG212", parts.get(line.getProductId()).getSku(),
                         line.getDocumentQty());
             }
+            int damaged = Math.min(result.damagedQty(), line.getDocumentQty());
             // What arrived of this part; a wrong item is another part sent in its place and is never this part.
-            int arrived = result.passedQty() + result.damagedQty();
+            int arrived = result.passedQty() + damaged;
             // Goods coming back can only be goods that left (BR-61): nothing above what is expected.
             if (receipt.getReceiptType() == ReceiptType.RETURN_TO_SOURCE && arrived > line.getDocumentQty()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG220", parts.get(line.getProductId()).getSku(),
@@ -253,7 +257,8 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             }
             // Review FE PR #44 R-01: delivered = passed + wrong item + damaged, as on a supplier receipt (BR-24).
             int wrongItem = result.wrongItemQty() == null ? 0 : result.wrongItemQty();
-            line.record(line.getDocumentQty(), arrived + wrongItem, wrongItem, result.damagedQty(), null, null, result.expiryDate());
+            line.record(line.getDocumentQty(), arrived + wrongItem, wrongItem, damaged, null, null, result.expiryDate());
+            line.recordDamagedBeyond(result.damagedQty() - damaged);
             line.settleTransferExcess(Math.max(arrived - line.getDocumentQty(), 0));
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -580,7 +585,8 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                     Product part = parts.get(line.getProductId());
                     return new TransferReceiptResponse.Line(part.getId(), part.getSku(), part.getPartName(),
                             part.getBaseUnit(), line.getDocumentQty(), line.getDeliveredQty(), line.getPassedQty(),
-                            line.getWrongItemQty(), line.getDamagedQty(), line.getExcessQty(), line.getId(), line.getExpiryDate(), line.getExcessDecision());
+                            line.getWrongItemQty(), line.getDamagedQty(), line.getExcessQty(), line.getId(), line.getExpiryDate(), line.getExcessDecision(),
+                            line.getDamagedBeyondQty());
                 }).toList(), attachments.list(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId()));
     }
 

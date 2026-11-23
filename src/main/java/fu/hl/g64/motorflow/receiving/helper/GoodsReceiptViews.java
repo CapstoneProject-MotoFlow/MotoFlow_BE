@@ -138,7 +138,9 @@ public class GoodsReceiptViews {
             int toStock = confirmed ? line.acceptedQty() : Math.min(line.getPassedQty(), expectedQty);
             return new Line(line.getId(), line.getProductId(), part.getSku(), part.getPartName(), part.getBaseUnit(),
                     bins.get(line.getProductId()), expectedQty, line.getDocumentQty(), line.getDeliveredQty(),
-                    line.getPassedQty(), line.getWrongItemQty(), line.getDamagedQty(), line.shortQty(), toStock,
+                    line.getPassedQty(), line.getWrongItemQty(),
+                    // PM 23/11: a transfer receipt shows every damaged unit recorded, also those above the dispatch.
+                    line.getDamagedQty() + line.getDamagedBeyondQty(), line.shortQty(), toStock,
                     confirmed ? line.getExcessQty() : line.getPassedQty() - toStock, line.getExcessDecision(),
                     owner ? line.getUnitPrice() : null, lotByLine.get(line.getId()), line.getManufacturerLotNo(),
                     line.getManufactureDate(), line.getExpiryDate());
