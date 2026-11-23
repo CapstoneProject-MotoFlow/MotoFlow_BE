@@ -53,6 +53,7 @@ public class PurchaseOrderController {
                     + "for the Branch Manager's to-do box), FULLY_RECEIVED, CANCELLED or ALL. createdFrom and "
                     + "createdTo (yyyy-MM-dd): creation days; FULLY_RECEIVED, CANCELLED and ALL keep the last "
                     + "30 days when none are given.")
+    @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER', 'STAFF')")
     @GetMapping
     public PageResponse<PurchaseOrderSummary> list(
             @AuthenticationPrincipal AuthenticatedUser user,

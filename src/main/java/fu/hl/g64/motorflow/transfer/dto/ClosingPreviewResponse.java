@@ -17,6 +17,6 @@ public record ClosingPreviewResponse(long id, TransferOrderStatus status, boolea
     /** {@code extraDispatchedQty} moves from the source's available stock to the destination's on closing (BR-68). */
     public record Line(long productId, String sku, String partName, String baseUnit, int dispatchedQty,
                        int receivedQty, int returnedQty, int lossQty, int unresolvedQty, int extraReceivedQty,
-                       int extraDispatchedQty, int sourceSellableQty) {
+                       int extraDispatchedQty, int sourceSellableQty, int damagedQty, int legacyExcessQty, int pendingExcessQty) {
     }
 }

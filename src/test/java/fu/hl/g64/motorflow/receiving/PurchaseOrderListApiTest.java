@@ -35,6 +35,14 @@ class PurchaseOrderListApiTest extends PurchaseOrderTestData {
     private long uninspectedDelivery;
     private long unconfirmedDelivery;
 
+    @Test
+    void staffListsOnlyClosedPurchaseOrdersInTheirStore() throws Exception {
+        list(staffToken, "view", "CLOSED", "createdFrom", "2026-09-01")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id", contains((int) cancelledOrder, (int) fullyReceived)));
+        list(staffToken, "view", "OPEN").andExpect(status().isForbidden());
+    }
+
     @BeforeEach
     void createOrders() throws Exception {
         fullyReceived = created(order(honda, giaLam, TODAY, null, line(pad, 10, 120_000)));

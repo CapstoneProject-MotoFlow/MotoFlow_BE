@@ -105,6 +105,13 @@ public class TransferOrderController {
         return service.confirmExtraDispatch(user, id, request);
     }
 
+    @PostMapping("/{id}/discrepancy-acknowledgement")
+    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    public TransferOrderDetailResponse acknowledgeDiscrepancy(@AuthenticationPrincipal AuthenticatedUser user,
+                                                              @PathVariable long id) {
+        return service.acknowledgeDiscrepancy(user, id);
+    }
+
     @Operation(summary = "Closing preview (UC-77): the final figures of each part and the message codes that would stop "
             + "the order from closing. Owner or central warehouse Branch Manager")
     @GetMapping("/{id}/closing-preview")

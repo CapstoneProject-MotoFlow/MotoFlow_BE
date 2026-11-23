@@ -191,6 +191,34 @@ class SalesDepositApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.order.deposit.expiresOn").value("2026-10-20"));
     }
 
+    @Test
+    void splitDepositRecordsBothVerifiedReceiptsInOneCall() throws Exception {
+        long waiting = waitingOrder(customer);
+        Map<String, Object> split = Map.of("cashAmount", 300_000, "transferAmount", 700_000,
+                "transactionReference", "QA-DEPOSIT-SPLIT", "depositExpiresOn", "2026-10-20",
+                "expectedDepositRecorded", 0);
+        String path = "/api/v1/sales-orders/" + waiting + "/deposits/split";
+        send(managerToken, path, split).andExpect(status().isOk())
+                .andExpect(jsonPath("$.paymentIds.length()").value(2))
+                .andExpect(jsonPath("$.order.deposit.total").value(1_000_000))
+                .andExpect(jsonPath("$.order.deposit.unverified").value(0));
+        send(managerToken, path, split).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG194"));
+    }
+
+    @Test
+    void retailCannotPreorderOrAddADepositToAnExistingWaitingOrder() throws Exception {
+        Map<String, Object> line = Map.of("productId", pad, "quantity", 3, "nowQty", 0, "waitForRest", true);
+        create(managerToken, order(null, customer, "RETAIL", null, List.of(line)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG335"));
+
+        long waiting = waitingOrder(customer);
+        jdbc.update("UPDATE sales_order SET price_type = 'RETAIL' WHERE id = ?", waiting);
+        detail(managerToken, waiting).andExpect(jsonPath("$.actions.canRecordDeposit").value(false));
+        deposit(managerToken, waiting, 50_000, "CASH", null, true, "2026-10-20", 0)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG335"));
+    }
+
     /** A new order that takes none of 3 pads now and waits for them. */
     private long waitingOrder(Long customerId) throws Exception {
         Map<String, Object> line = new LinkedHashMap<>();
@@ -198,7 +226,7 @@ class SalesDepositApiTest extends SalesOrderTestData {
         line.put("quantity", 3);
         line.put("nowQty", 0);
         line.put("waitForRest", true);
-        String body = create(managerToken, order(null, customerId, "RETAIL", null, List.of(line)))
+        String body = create(managerToken, order(null, customerId, "WHOLESALE", null, List.of(line)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
                 .andReturn().getResponse().getContentAsString();

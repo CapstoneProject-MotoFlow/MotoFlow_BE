@@ -57,6 +57,22 @@ public class TransferOrder {
     @Column(name = "extra_dispatch_confirmed_at")
     private LocalDateTime extraDispatchConfirmedAt;
 
+    @Column(name = "discrepancy_acknowledged_by")
+    private Long discrepancyAcknowledgedBy;
+
+    @Column(name = "discrepancy_acknowledged_at")
+    private LocalDateTime discrepancyAcknowledgedAt;
+
+    public void acknowledgeDiscrepancy(long who, LocalDateTime when) {
+        discrepancyAcknowledgedBy = who;
+        discrepancyAcknowledgedAt = when;
+    }
+
+    public void invalidateDiscrepancyAcknowledgement() {
+        discrepancyAcknowledgedBy = null;
+        discrepancyAcknowledgedAt = null;
+    }
+
     @Column(name = "closed_by")
     private Long closedBy;
 

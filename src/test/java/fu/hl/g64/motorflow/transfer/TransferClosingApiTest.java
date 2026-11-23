@@ -76,9 +76,9 @@ class TransferClosingApiTest extends TransferFlowTestData {
         long order = received(4, 1);
 
         preview("owner", order).andExpect(jsonPath("$.canClose").value(false))
-                .andExpect(jsonPath("$.blockedBy", contains("MSG221")))
+                .andExpect(jsonPath("$.blockedBy", contains("MSG336")))
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(3));
-        close("owner", order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG221"));
+        close("owner", order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG336"));
         assertThat(jdbc.queryForObject("SELECT status FROM transfer_order WHERE id = ?", String.class, order))
                 .isEqualTo("RECONCILING");
     }
@@ -188,6 +188,11 @@ class TransferClosingApiTest extends TransferFlowTestData {
     private long received(int sent, int arrived) throws Exception {
         long order = dispatchedOrder(brake, sent);
         confirm("bmlb", order, inspected(order, brake, arrived, 0)).andExpect(status().isOk());
+        if (arrived > sent) {
+            jdbc.update("UPDATE goods_receipt_note_line SET excess_decision = 'NOT_APPLICABLE' "
+                    + "WHERE excess_qty > 0 AND goods_receipt_note_id IN "
+                    + "(SELECT id FROM goods_receipt_note WHERE transfer_order_id = ?)", order);
+        }
         return order;
     }
 

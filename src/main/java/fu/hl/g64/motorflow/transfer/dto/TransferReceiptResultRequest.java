@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
+import java.time.LocalDate;
 
 /**
  * UC-43 for a transfer: one line per part of the receipt. Delivered = passed + wrong item + damaged; a wrong item is
@@ -33,6 +34,9 @@ public record TransferReceiptResultRequest(
 
             @NotNull(message = "Vui lòng nhập số hỏng.")
             @Min(value = 0, message = "Số lượng không được âm.")
-            Integer damagedQty) {
+            Integer damagedQty, LocalDate expiryDate) {
+        public Line(Long productId, Integer passedQty, Integer wrongItemQty, Integer damagedQty) {
+            this(productId, passedQty, wrongItemQty, damagedQty, null);
+        }
     }
 }

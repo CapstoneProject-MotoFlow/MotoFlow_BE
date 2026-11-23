@@ -36,13 +36,24 @@ public class TransferReconciliation {
      * @param unresolved    dispatched minus every final result (BR-60)
      *                      <p>Invariant: destination IN_TRANSIT of the order = dispatched - received - returned - loss.
      */
-    public record Part(int dispatched, int received, int extraReceived, int returned, int loss, int unresolved) {
+    public record Part(int dispatched, int received, int extraReceived, int returned, int loss, int unresolved,
+                       int damaged, int legacyExcess, int pendingExcess, int closedShortage) {
+        public Part(int dispatched, int received, int extraReceived, int returned, int loss, int unresolved) {
+            this(dispatched, received, extraReceived, returned, loss, unresolved, 0, extraReceived, 0, 0);
+        }
+
+        public int passed() {
+            return received - damaged;
+        }
     }
 
     public Map<Long, Part> byProduct(long transferOrderId, List<TransferOrderLine> orderLines) {
         Map<Long, TransferOrderLineRepository.ReceiptTotals> receipts = lines.confirmedReceipts(transferOrderId).stream()
                 .collect(Collectors.toMap(TransferOrderLineRepository.ReceiptTotals::getProductId, Function.identity()));
         Map<Long, Long> losses = lines.appliedLoss(transferOrderId).stream()
+                .collect(Collectors.toMap(TransferOrderLineRepository.ProductQty::getProductId,
+                        TransferOrderLineRepository.ProductQty::getQty));
+        Map<Long, Long> shortages = lines.acknowledgedShortages(transferOrderId).stream()
                 .collect(Collectors.toMap(TransferOrderLineRepository.ProductQty::getProductId,
                         TransferOrderLineRepository.ProductQty::getQty));
         return orderLines.stream().collect(Collectors.toMap(TransferOrderLine::getProductId, line -> {
@@ -52,8 +63,12 @@ public class TransferReconciliation {
             int received = receipt == null ? 0 : (int) receipt.getReceived() - extra;
             int returned = receipt == null ? 0 : (int) receipt.getReturned();
             int loss = losses.getOrDefault(line.getProductId(), 0L).intValue();
+            int closedShortage = shortages.getOrDefault(line.getProductId(), 0L).intValue();
             return new Part(dispatched, received, extra, returned, loss,
-                    Math.max(dispatched - received - returned - loss, 0));
+                    Math.max(dispatched - received - returned - loss - closedShortage, 0),
+                    receipt == null ? 0 : Math.toIntExact(receipt.getDamaged()),
+                    receipt == null ? 0 : Math.toIntExact(receipt.getLegacyExcess()),
+                    receipt == null ? 0 : Math.toIntExact(receipt.getPendingExcess()), closedShortage);
         }));
     }
 
@@ -63,7 +78,7 @@ public class TransferReconciliation {
         for (TransferOrderRepository.LinkedOrder row : orders.findLinkedOrders(replenishmentRequestId)) {
             long id = row.getTransferOrder().getId();
             byProduct(id, lines.findByTransferOrderIdOrderByProductId(id))
-                    .forEach((productId, part) -> total.merge(productId, (long) part.received(), Long::sum));
+                    .forEach((productId, part) -> total.merge(productId, (long) part.passed(), Long::sum));
         }
         return total;
     }

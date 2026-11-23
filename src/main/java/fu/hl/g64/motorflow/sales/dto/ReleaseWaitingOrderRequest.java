@@ -15,7 +15,7 @@ import java.util.List;
  * the line waits for (MSG305) and what the store can sell now is released, the rest keeps waiting.
  * <p>
  * PM 21/11 (BE-5): {@code depositAmount} is the part of the deposit put into the order the release opens, from 0 to
- * the deposit left and the order's total (MSG327); null is 0. The last release, which leaves nothing waiting, puts in
+ * the smaller of the deposit left and the order's total (MSG327); null uses that maximum. The final release puts in
  * all the deposit left up to the total (MSG326 when another amount is sent), and gives the rest back to the customer
  * as {@code depositRefund} (MSG328 when it is missing).
  */

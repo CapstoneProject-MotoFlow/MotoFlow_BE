@@ -279,6 +279,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     Math.min(line.quantity(), sellable), variants.get(part.getId())));
         }
         Totals totals = OrderPricing.totals(priced);
+        if (priced.size() == lines.size()) {
+            checkRequestedMargin(seller, request.lines(), parts, totals, now);
+        }
         boolean within = true;
         try {
             OrderPricing.checkThreshold(rate, totals, threshold);
@@ -447,6 +450,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         List<Share> sold = shares.stream().filter(share -> share.sellNow() > 0).toList();
         List<Share> waiting = shares.stream().filter(share -> share.waitQty() > 0).toList();
         BigDecimal rate = content.rate();
+        List<SalesOrderLineRequest> requested = shares.stream().map(Share::line).toList();
+        if (order.getPriceType() == PriceType.RETAIL
+                && requested.stream().anyMatch(line -> line.waits() && line.takenNow() == 0)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG335");
+        }
+        checkRequestedMargin(seller, requested, content.parts(), OrderPricing.totals(content.priced()), now);
         checkPricing(rate, (sold.isEmpty() ? waiting : sold).stream().map(share -> priced(sold.isEmpty()
                 ? share.waitQty() : share.sellNow(), content.prices().get(share.line().productId()), rate))
                 .toList(), now);
@@ -564,11 +573,11 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Map<Long, Long> prices = requirePrices(request.lines(), parts, now);
         List<Priced> priced = request.lines().stream()
                 .map(line -> priced(line.quantity(), prices.get(line.productId()), rate)).toList();
-        return new Content(store, customer, rate, prices, priced);
+        return new Content(store, customer, rate, prices, priced, parts);
     }
 
     private record Content(Store store, SalesOrder.Customer customer, BigDecimal rate, Map<Long, Long> prices,
-                           List<Priced> priced) {
+                           List<Priced> priced, Map<Long, Product> parts) {
     }
 
     private List<SalesOrderLine> saveLines(SalesOrder order, SalesOrderRequest request, Content content) {
@@ -638,8 +647,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
 
         // BR-18, BR-36: the new version takes the retail prices in effect now.
         Map<Long, Long> prices = requirePrices(request.lines(), parts, now);
-        checkPricing(rate, request.lines().stream().map(line -> priced(line.quantity(), prices.get(line.productId()),
-                rate)).toList(), now);
+        List<Priced> revisedPrices = request.lines().stream()
+                .map(line -> priced(line.quantity(), prices.get(line.productId()), rate)).toList();
+        checkPricing(rate, revisedPrices, now);
+        checkRequestedMargin(seller, request.lines(), parts, OrderPricing.totals(revisedPrices), now);
 
         if (!order.isWaitingForStock()) {
             // GVHD 20/11: more units on an order that holds its goods must be in stock, not held by others (MSG171);
@@ -813,7 +824,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         checkPricing(rate, priced, now);
         Totals totals = OrderPricing.totals(priced);
         checkStock(order, lines, parts, delivered, now.toLocalDate());
-        checkMargin(seller, lines, parts, delivered, totals, now);
         warehouseTasks.confirmResult(seller, TaskType.PICKING, id);
 
         Map<String, Object> previous = newVersion ? SalesOrderHistory.snapshot(version, null, order, lines) : null;
@@ -902,11 +912,15 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 == line.getRequestedQty());
         int version = currentVersion(id);
         Map<String, Object> previous = SalesOrderHistory.snapshot(version, null, order, lines);
+        Map<Long, Integer> releasedByProduct = lines.stream().collect(Collectors.toMap(
+                SalesOrderLine::getProductId, line -> released.getOrDefault(line.getId(), 0)));
         if (whole) {
             List<Priced> all = lines.stream().map(line -> priced(line.getRequestedQty(),
                     prices.get(line.getProductId()), rate)).toList();
             checkPricing(rate, all, now);
-            DepositUse use = depositUse(deposit, OrderPricing.totals(all).total(), true, request);
+            Totals releaseTotals = OrderPricing.totals(all);
+            checkMargin(seller, parts, releasedByProduct, releaseTotals, now);
+            DepositUse use = depositUse(deposit, releaseTotals.total(), true, request);
             lines.forEach(line -> line.reprice(prices.get(line.getProductId()),
                     OrderPricing.actualUnitPrice(prices.get(line.getProductId()), rate)));
             order.release(now);
@@ -923,7 +937,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         List<Priced> nowTaken = taken.stream().map(line -> priced(released.get(line.getId()),
                 prices.get(line.getProductId()), rate)).toList();
         checkPricing(rate, nowTaken, now);
-        DepositUse use = depositUse(deposit, OrderPricing.totals(nowTaken).total(), false, request);
+        Totals releaseTotals = OrderPricing.totals(nowTaken);
+        checkMargin(seller, parts, releasedByProduct, releaseTotals, now);
+        DepositUse use = depositUse(deposit, releaseTotals.total(), false, request);
         SalesOrder sold = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
                 rate, order.getNote(), seller.id(), now));
         List<SalesOrderLine> soldLines = new ArrayList<>();
@@ -953,7 +969,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     }
 
     /**
-     * PM 21/11 (BE-5): a release puts 0 up to the deposit left and the order's total into the order it opens (MSG327).
+     * A partial release defaults to the most it can apply; older callers can still specify an amount (MSG327).
      * The last one puts in all it can (MSG326), gives the rest back (MSG328) and needs every deposit verified (MSG325),
      * so nothing of the deposit is left on the waiting order.
      */
@@ -961,7 +977,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                                          ReleaseWaitingOrderRequest request) {
         long most = Math.min(deposit.remaining(), total);
         if (!last) {
-            long amount = request.depositAmount() == null ? 0 : request.depositAmount();
+            long amount = request.depositAmount() == null ? most : request.depositAmount();
             if (amount > most) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG327", money(most));
             }
@@ -1218,16 +1234,23 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     }
 
     /**
-     * BR-88: order total ≥ delivered goods at the moving average cost × (1 + minimum margin). Only Owner learns the
+     * BR-88: order total ≥ the goods under review at the moving average cost × (1 + minimum margin). Only Owner learns the
      * amount (MSG173, BR-72); a Branch Manager is told the price is too low (MSG172).
      */
-    private void checkMargin(AuthenticatedUser seller, List<SalesOrderLine> lines, Map<Long, Product> parts,
-                             Map<Long, Integer> delivered, Totals totals, LocalDateTime now) {
+    private void checkRequestedMargin(AuthenticatedUser seller, List<SalesOrderLineRequest> lines,
+                                      Map<Long, Product> parts, Totals totals, LocalDateTime now) {
+        Map<Long, Integer> quantities = lines.stream().collect(Collectors.toMap(
+                SalesOrderLineRequest::productId, SalesOrderLineRequest::quantity));
+        checkMargin(seller, parts, quantities, totals, now);
+    }
+
+    private void checkMargin(AuthenticatedUser seller, Map<Long, Product> parts, Map<Long, Integer> quantities,
+                             Totals totals, LocalDateTime now) {
         BigDecimal cost = BigDecimal.ZERO;
-        for (SalesOrderLine line : lines) {
-            BigDecimal average = parts.get(line.getProductId()).getMovingAvgCost();
+        for (var entry : quantities.entrySet()) {
+            BigDecimal average = parts.get(entry.getKey()).getMovingAvgCost();
             if (average != null) {
-                cost = cost.add(average.multiply(BigDecimal.valueOf(delivered.get(line.getProductId()))));
+                cost = cost.add(average.multiply(BigDecimal.valueOf(entry.getValue())));
             }
         }
         BigDecimal margin = pricing.minimumMargin(now);
@@ -1432,7 +1455,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 seller && confirmedNow && settled && money.remainingPayable() == 0 && money.overpaidAmount() == 0,
                 seller && unfinished,
                 seller && waiting && (deposit == null || deposit.status() != DepositStatus.EXPIRED),
-                seller && depositHolds && order.getCustomerId() != null,
+                seller && depositHolds && order.getPriceType() == PriceType.WHOLESALE
+                        && order.getCustomerId() != null,
                 storeManager && depositHolds && deposit.total() > 0,
                 storeManager && waiting && deposit != null && deposit.status() == DepositStatus.EXPIRED,
                 seller && unfinished && waiting && deposit != null && deposit.remaining() > 0);

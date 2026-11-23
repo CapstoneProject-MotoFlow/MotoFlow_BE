@@ -217,19 +217,19 @@ class SalesOrderConfirmUnitTest extends SalesOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID13 A: minimum margin 100%, minimum 300,000 > total 250,000 -> MSG172")
+    @DisplayName("UTCID13: confirmation keeps the order after the margin increases")
     void utc13() {
         margin = new BigDecimal("100");
 
-        assertRefused(asPicked(), HttpStatus.BAD_REQUEST, "MSG172");
+        confirm(manager, asPicked());
     }
 
     @Test
-    @DisplayName("UTCID14 A: the same for Owner -> MSG173 with the amount")
+    @DisplayName("UTCID14: confirmation keeps the order after the margin increases")
     void utc14() {
         margin = new BigDecimal("100");
 
-        assertRefused(owner, asPicked(), HttpStatus.BAD_REQUEST, "MSG173");
+        confirm(owner, asPicked());
     }
 
     @Test

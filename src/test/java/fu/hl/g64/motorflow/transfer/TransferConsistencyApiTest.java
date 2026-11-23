@@ -145,6 +145,9 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].extraReceivedQty").value(1))
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
         assertInvariant(order, 0);
+        jdbc.update("UPDATE goods_receipt_note_line SET excess_decision = 'NOT_APPLICABLE' "
+                + "WHERE excess_qty > 0 AND goods_receipt_note_id IN "
+                + "(SELECT id FROM goods_receipt_note WHERE transfer_order_id = ?)", order);
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG222"));
         mvc.perform(post(ORDERS + "/" + order + "/extra-dispatch").header(HttpHeaders.AUTHORIZATION, signIn("bmcg"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -165,8 +168,8 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
 
         mvc.perform(get(ORDERS + "/" + order + "/closing-preview").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(jsonPath("$.canClose").value(false))
-                .andExpect(jsonPath("$.blockedBy", contains("MSG221", "MSG225")));
-        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG221"));
+                .andExpect(jsonPath("$.blockedBy", contains("MSG336", "MSG225")));
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG336"));
     }
 
     @Test

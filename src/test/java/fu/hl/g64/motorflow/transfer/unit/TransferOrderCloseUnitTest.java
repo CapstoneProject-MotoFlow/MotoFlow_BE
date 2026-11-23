@@ -194,11 +194,11 @@ class TransferOrderCloseUnitTest extends TransferOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID09 A: P1 received 3 of 5, 2 without a result -> MSG221")
+    @DisplayName("UTCID09 A: P1 received 3 of 5, 2 without a result -> MSG336")
     void utcid09() {
         figures.put(P1, new TransferReconciliation.Part(5, 3, 0, 0, 0, 2));
 
-        assertBusiness(() -> service.close(owner, 1), HttpStatus.CONFLICT, "MSG221");
+        assertBusiness(() -> service.close(owner, 1), HttpStatus.CONFLICT, "MSG336");
         assertNotClosed();
     }
 

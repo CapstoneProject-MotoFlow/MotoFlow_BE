@@ -94,7 +94,7 @@ class TransferReceiptApiTest extends TransferFlowTestData {
     }
 
     @Test
-    void damagedGoodsOfOneLotGoToDamagedWithOneMovementOut() throws Exception {
+    void damagedGoodsLeaveTransitWithoutEnteringReceivingStock() throws Exception {
         long only = lot(source, brake, 3, 100_000, null, "A");
         long order = dispatchedOrder(brake, 3);
 
@@ -102,12 +102,13 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         confirm("bmlb", order, receipt).andExpect(status().isOk());
 
         assertThat(lotStock(only, dest, "AVAILABLE")).isEqualTo(2);
-        assertThat(lotStock(only, dest, "DAMAGED")).isEqualTo(1);
-        assertThat(stock(dest, brake, "damaged_qty")).isEqualTo(1);
+        assertThat(lotStock(only, dest, "DAMAGED")).isZero();
+        assertThat(stock(dest, brake, "damaged_qty")).isZero();
         assertThat(jdbc.queryForList("SELECT stock_status || ':' || quantity_change FROM stock_movement WHERE "
                 + "goods_receipt_note_id = ? ORDER BY quantity_change", String.class, receipt))
-                .containsExactly("IN_TRANSIT:-3", "DAMAGED:1", "AVAILABLE:2");
-        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].receivedQty").value(3))
+                .containsExactly("IN_TRANSIT:-2", "IN_TRANSIT:-1", "AVAILABLE:2");
+        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].receivedQty").value(2))
+                .andExpect(jsonPath("$.lines[0].damagedQty").value(1))
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
     }
 
@@ -138,9 +139,10 @@ class TransferReceiptApiTest extends TransferFlowTestData {
 
         // Only the part itself leaves transit; the wrong item is another part, so 2 brakes stay unresolved.
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(7);
-        assertThat(stock(dest, brake, "damaged_qty")).isEqualTo(1);
+        assertThat(stock(dest, brake, "damaged_qty")).isZero();
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(2);
-        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].receivedQty").value(8))
+        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].receivedQty").value(7))
+                .andExpect(jsonPath("$.lines[0].damagedQty").value(1))
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].shortQty").value(2));
     }
@@ -161,7 +163,7 @@ class TransferReceiptApiTest extends TransferFlowTestData {
     }
 
     @Test
-    void excessStaysOutOfStockAndTheSourceIsTold() throws Exception {
+    void excessStaysOutOfStockAndTheOwnerIsTold() throws Exception {
         lot(source, brake, 10, 100_000, null, "A");
         long order = dispatchedOrder(brake, 2);
         long receipt = arrive("bmlb", order);
@@ -178,8 +180,7 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         view("owner", "/" + order).andExpect(jsonPath("$.lines[0].receivedQty").value(2))
                 .andExpect(jsonPath("$.lines[0].extraReceivedQty").value(1))
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
-        assertThat(recipients("TRANSFER_EXCESS_RECEIVED")).containsExactlyInAnyOrder(sourceManager.getId(),
-                otherSourceManager.getId());
+        assertThat(recipients("TRANSFER_EXCESS_RECEIVED")).containsExactly(owner.getId());
     }
 
     @Test

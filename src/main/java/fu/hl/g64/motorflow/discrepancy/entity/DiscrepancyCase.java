@@ -136,6 +136,18 @@ public class DiscrepancyCase {
         return found;
     }
 
+    public void recordTransferCondition(int wrong, int damaged) {
+        wrongItemQty += wrong;
+        damagedQty += damaged;
+        if (wrong > 0 || damaged > 0) {
+            status = DiscrepancyCaseStatus.OPEN;
+            closedAt = null;
+            closedBy = null;
+            closureReason = null;
+            closureType = null;
+        }
+    }
+
     public boolean isOpen() {
         return status == DiscrepancyCaseStatus.OPEN;
     }

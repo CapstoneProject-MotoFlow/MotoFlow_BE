@@ -15,6 +15,9 @@ import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
+import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
+import fu.hl.g64.motorflow.inventory.dto.OutPosting;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.ClosureType;
 import fu.hl.g64.motorflow.inventory.dto.StockAvailabilityResponse;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
@@ -295,7 +298,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .collect(Collectors.toMap(TransferOrderLine::getProductId, Function.identity()));
         // What was received above the dispatch and not yet confirmed: confirming twice cannot go beyond it.
         Map<Long, Integer> pending = orderLines.stream().collect(Collectors.toMap(TransferOrderLine::getProductId,
-                line -> Math.max(figures.get(line.getProductId()).extraReceived() - line.getExtraDispatchedQty(), 0)));
+                line -> Math.max(figures.get(line.getProductId()).legacyExcess() - line.getExtraDispatchedQty(), 0)));
         if (pending.values().stream().allMatch(quantity -> quantity == 0)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG213");
         }
@@ -333,6 +336,33 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         return detail(user, order);
     }
 
+    @Transactional
+    @Override
+    public TransferOrderDetailResponse acknowledgeDiscrepancy(AuthenticatedUser user, long id) {
+        TransferOrder order = orders.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+        if (!isManagerOf(user, order.getDestStoreId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        if (order.getStatus() != TransferOrderStatus.RECONCILING || !lines.openReceiptQty(id).isEmpty()
+                || hasPendingClaims(id)) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        // Only a transfer with a short, damaged or wrong item part is acknowledged; a clean one closes as before.
+        if (order.getDiscrepancyAcknowledgedAt() == null && !hasDiscrepancy(order, closingLines(order))) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        if (order.getDiscrepancyAcknowledgedAt() == null) {
+            LocalDateTime now = LocalDateTime.now(clock);
+            order.acknowledgeDiscrepancy(user.id(), now);
+            auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_DISCREPANCY_ACKNOWLEDGED", user.id(), null,
+                    null, Map.of("destination_store_id", order.getDestStoreId()), now));
+            notifications.notifyOwners("TRANSFER_DISCREPANCY_ACKNOWLEDGED",
+                    "Kho nhận đã xác nhận xử lý sai lệch phiếu chuyển kho #%d".formatted(id), ENTITY, id);
+        }
+        return detail(user, order);
+    }
+
     // UC-77
     @Transactional(readOnly = true)
     @Override
@@ -342,9 +372,10 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
         List<ClosingPreviewResponse.Line> rows = closingLines(order);
         Map<String, String> blocked = order.getStatus() == TransferOrderStatus.RECONCILING
-                ? blockers(rows, lines.openReceiptQty(id)) : Map.of();
+                ? blockers(order, rows, lines.openReceiptQty(id)) : Map.of();
         return new ClosingPreviewResponse(id, order.getStatus(),
-                order.getStatus() == TransferOrderStatus.RECONCILING && blocked.isEmpty(),
+                order.getStatus() == TransferOrderStatus.RECONCILING && blocked.isEmpty()
+                        && (order.getDiscrepancyAcknowledgedAt() == null || user.role() == Role.OWNER),
                 List.copyOf(blocked.keySet()), rows);
     }
 
@@ -362,7 +393,10 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
         List<ClosingPreviewResponse.Line> rows = closingLines(order);
-        Map<String, String> blocked = blockers(rows, lines.openReceiptQty(id));
+        Map<String, String> blocked = blockers(order, rows, lines.openReceiptQty(id));
+        if (order.getDiscrepancyAcknowledgedAt() != null && user.role() != Role.OWNER) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
         if (!blocked.isEmpty()) {
             Map.Entry<String, String> first = blocked.entrySet().iterator().next();
             throw new BusinessException(HttpStatus.CONFLICT, first.getKey(), first.getValue());
@@ -380,6 +414,29 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             }
         }
         posting.moveAll(moves);
+        if (order.getDiscrepancyAcknowledgedAt() != null) {
+            Map<Long, List<LotQuantity>> remaining = orders.findTransitLots(id, order.getDestStoreId()).stream()
+                    .collect(Collectors.groupingBy(TransferOrderRepository.TransitLotOfPart::getProductId,
+                            Collectors.mapping(lot -> new LotQuantity(lot.getLotId(), Math.toIntExact(lot.getQuantity())),
+                                    Collectors.toList())));
+            List<OutPosting> shortage = new ArrayList<>();
+            for (ClosingPreviewResponse.Line row : rows) {
+                List<LotQuantity> lots = remaining.getOrDefault(row.productId(), List.of());
+                int quantity = lots.stream().mapToInt(LotQuantity::quantity).sum();
+                if (quantity != row.unresolvedQty()) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG337");
+                }
+                if (quantity > 0) {
+                    shortage.add(new OutPosting(order.getDestStoreId(), row.productId(), StockStatus.IN_TRANSIT,
+                            quantity, lots, MovementType.ADJUSTMENT, SourceRef.transferOrder(id), user.id(),
+                            "Thiếu khi nhận điều chuyển"));
+                }
+            }
+            posting.takeOutAll(shortage);
+            orders.findCases(id).stream().filter(DiscrepancyCase::isOpen)
+                    .forEach(item -> item.close(ClosureType.CLOSED_BY_AGREEMENT,
+                            "Kho nhận đã xác nhận xử lý, Owner đã đóng phiếu.", user.id(), now));
+        }
         order.close(user.id(), now);
         warehouseTasks.cancelForDocument(TaskType.TRANSFER_RECEIVING, id);
         auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_CLOSED", user.id(), null, null,
@@ -405,22 +462,39 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             TransferReconciliation.Part figure = figures.get(line.getProductId());
             PickingGuide.Part held = source.get(line.getProductId());
             return new ClosingPreviewResponse.Line(part.getId(), part.getSku(), part.getPartName(), part.getBaseUnit(),
-                    figure.dispatched(), figure.received(), figure.returned(), figure.loss(), figure.unresolved(),
-                    figure.extraReceived(), line.getExtraDispatchedQty(), held == null ? 0 : held.sellableQty());
+                    figure.dispatched(), figure.passed(), figure.returned(), figure.loss(), figure.unresolved(),
+                    figure.extraReceived(), line.getExtraDispatchedQty(), held == null ? 0 : held.sellableQty(),
+                    figure.damaged(), figure.legacyExcess(), figure.pendingExcess());
         }).toList();
     }
 
+    private boolean hasPendingClaims(long id) {
+        return reconciliation.pendingClaims(id).values().stream().anyMatch(qty -> qty > 0);
+    }
+
+    /** Q4: a part received short or damaged, or a wrong item received in its place, needs the destination's acknowledgement. */
+    private boolean hasDiscrepancy(TransferOrder order, List<ClosingPreviewResponse.Line> rows) {
+        return rows.stream().anyMatch(row -> row.unresolvedQty() > 0 || row.damagedQty() > 0)
+                || orders.findCases(order.getId()).stream().anyMatch(c -> c.getWrongItemQty() > 0);
+    }
+
     /** UC-77 step 2: each reason the order cannot close, with the parts it concerns, in the order checked. */
-    private static Map<String, String> blockers(List<ClosingPreviewResponse.Line> rows,
+    private Map<String, String> blockers(TransferOrder order, List<ClosingPreviewResponse.Line> rows,
                                                 List<TransferOrderLineRepository.ProductQty> open) {
         Map<String, String> blocked = new LinkedHashMap<>();
         String unresolved = rows.stream().filter(row -> row.unresolvedQty() > 0)
                 .map(row -> row.sku() + " x" + row.unresolvedQty()).collect(Collectors.joining(", "));
-        if (!unresolved.isEmpty()) {
-            blocked.put("MSG221", unresolved);
+        if (order.getDiscrepancyAcknowledgedAt() == null && hasDiscrepancy(order, rows)) {
+            blocked.put("MSG336", unresolved);
         }
-        String unconfirmed = rows.stream().filter(row -> row.extraReceivedQty() > row.extraDispatchedQty())
-                .map(row -> row.sku() + " x" + (row.extraReceivedQty() - row.extraDispatchedQty()))
+        if (order.getDiscrepancyAcknowledgedAt() != null && hasPendingClaims(order.getId())) {
+            blocked.put("MSG340", "");
+        }
+        if (rows.stream().anyMatch(row -> row.pendingExcessQty() > 0)) {
+            blocked.put("MSG338", "");
+        }
+        String unconfirmed = rows.stream().filter(row -> row.legacyExcessQty() > row.extraDispatchedQty())
+                .map(row -> row.sku() + " x" + (row.legacyExcessQty() - row.extraDispatchedQty()))
                 .collect(Collectors.joining(", "));
         if (!unconfirmed.isEmpty()) {
             blocked.put("MSG222", unconfirmed);
@@ -509,7 +583,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         Map<Long, String> storeNames = stores.findAllById(List.of(order.getSourceStoreId(), order.getDestStoreId()))
                 .stream().collect(Collectors.toMap(Store::getId, Store::getStoreName));
         Map<Long, String> names = users.findAllById(Stream.of(order.getCreatedBy(), order.getDispatchedBy(),
-                        order.getExtraDispatchConfirmedBy(), order.getClosedBy()).filter(Objects::nonNull).toList())
+                        order.getExtraDispatchConfirmedBy(), order.getClosedBy(), order.getDiscrepancyAcknowledgedBy()).filter(Objects::nonNull).toList())
                 .stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
         List<TransferOrderDetailResponse.Discrepancy> discrepancies = staff ? List.of() : discrepancies(id);
         return new TransferOrderDetailResponse(id, order.getStatus(), order.getReplenishmentRequestId(),
@@ -520,14 +594,17 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 order.getVehiclePlateNo(), person(order.getExtraDispatchConfirmedBy(), names),
                 order.getExtraDispatchConfirmedAt(),
                 person(order.getClosedBy(), names), order.getClosedAt(),
+                person(order.getDiscrepancyAcknowledgedBy(), names), order.getDiscrepancyAcknowledgedAt(),
                 orderLines.stream().map(line -> {
                     Product part = parts.get(line.getProductId());
                     TransferReconciliation.Part figure = figures.get(line.getProductId());
                     return new TransferOrderDetailResponse.Line(part.getId(), part.getSku(), part.getPartName(),
                             part.getBaseUnit(), line.getPlannedQty(), line.getPreparedQty(), line.getDispatchedQty(),
-                            staff ? null : figure.received(), staff ? null : figure.returned(),
+                            staff ? null : figure.passed(), staff ? null : figure.returned(),
                             staff ? null : figure.loss(), staff ? null : figure.extraReceived(),
-                            staff ? null : line.getExtraDispatchedQty(), staff ? null : figure.unresolved(),
+                            staff ? null : line.getExtraDispatchedQty(),
+                            staff ? null : (order.getDiscrepancyAcknowledgedAt() == null ? figure.unresolved() : 0),
+                            staff ? null : figure.damaged(), staff ? null : figure.unresolved() + figure.closedShortage(),
                             line.getMakeupForCaseId());
                 }).toList(),
                 orders.findDispatchedLots(id).stream().map(lot -> new TransferOrderDetailResponse.Lot(
@@ -554,7 +631,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .map(DiscrepancyCase::getId).toList()).stream()
                 .collect(Collectors.groupingBy(DiscrepancyResolutionEvent::getDiscrepancyCaseId));
         return found.stream().map(shortage -> new TransferOrderDetailResponse.Discrepancy(shortage.getId(),
-                shortage.getProductId(), shortage.getShortQty(), shortage.getStatus(), shortage.getOpenedAt(),
+                shortage.getProductId(), shortage.getShortQty(), shortage.getWrongItemQty(), shortage.getDamagedQty(), shortage.getStatus(), shortage.getOpenedAt(),
                 shortage.getClosedAt(), events.getOrDefault(shortage.getId(), List.of()).stream()
                         .map(event -> new TransferOrderDetailResponse.Event(event.getId(), event.getResolutionType(),
                                 event.getQuantity(), event.getGoodsReceiptNoteId(), event.getAdjustmentRequestId(),

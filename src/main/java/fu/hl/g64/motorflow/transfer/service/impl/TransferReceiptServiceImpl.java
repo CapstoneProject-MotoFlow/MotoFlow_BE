@@ -16,6 +16,7 @@ import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
+import fu.hl.g64.motorflow.inventory.dto.OutPosting;
 import fu.hl.g64.motorflow.inventory.dto.SplitMovePosting;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
@@ -251,7 +252,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             }
             // Review FE PR #44 R-01: delivered = passed + wrong item + damaged, as on a supplier receipt (BR-24).
             int wrongItem = result.wrongItemQty() == null ? 0 : result.wrongItemQty();
-            line.record(line.getDocumentQty(), arrived + wrongItem, wrongItem, result.damagedQty(), null, null, null);
+            line.record(line.getDocumentQty(), arrived + wrongItem, wrongItem, result.damagedQty(), null, null, result.expiryDate());
             line.settleTransferExcess(Math.max(arrived - line.getDocumentQty(), 0));
         }
         LocalDateTime now = LocalDateTime.now(clock);
@@ -299,19 +300,50 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                 .sorted(Comparator.comparing(GoodsReceiptNoteLine::getProductId)).toList();
         Map<Long, List<LotQuantity>> inTransit = transitLots(order);
         List<SplitMovePosting> moves = new ArrayList<>();
+        List<OutPosting> damaged = new ArrayList<>();
         for (GoodsReceiptNoteLine line : lines) {
             int arrived = arrivedOfPart(line);
             if (arrived == 0) {
                 continue;
             }
             Map<StockStatus, Integer> into = new EnumMap<>(StockStatus.class);
-            into.put(StockStatus.AVAILABLE, line.getPassedQty() - line.getExcessQty());
-            into.put(StockStatus.DAMAGED, line.getDamagedQty());
-            moves.add(new SplitMovePosting(line.getProductId(), order.getDestStoreId(), StockStatus.IN_TRANSIT,
-                    receivingStore, into, takeTransit(inTransit, line.getProductId(), arrived),
-                    MovementType.TRANSFER_RECEIPT, SourceRef.goodsReceiptNote(receiptId), user.id(), null));
+            int passed = line.getPassedQty() - line.getExcessQty();
+            List<LotQuantity> lots = takeTransit(inTransit, line.getProductId(), arrived);
+            if (receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
+                List<LotQuantity> passedLots = new ArrayList<>();
+                List<LotQuantity> damagedLots = new ArrayList<>();
+                int remainingPassed = passed;
+                for (LotQuantity lot : lots) {
+                    int good = Math.min(remainingPassed, lot.quantity());
+                    if (good > 0) passedLots.add(new LotQuantity(lot.lotId(), good));
+                    if (good < lot.quantity()) damagedLots.add(new LotQuantity(lot.lotId(), lot.quantity() - good));
+                    remainingPassed -= good;
+                }
+                if (passed > 0) {
+                    into.put(StockStatus.AVAILABLE, passed);
+                    moves.add(new SplitMovePosting(line.getProductId(), receivingStore, StockStatus.IN_TRANSIT,
+                            receivingStore, into, passedLots, MovementType.TRANSFER_RECEIPT,
+                            SourceRef.goodsReceiptNote(receiptId), user.id(), null));
+                }
+                if (line.getDamagedQty() > 0) {
+                    damaged.add(new OutPosting(receivingStore, line.getProductId(), StockStatus.IN_TRANSIT,
+                            line.getDamagedQty(), damagedLots, MovementType.ADJUSTMENT,
+                            SourceRef.goodsReceiptNote(receiptId), user.id(), "Hỏng khi nhận điều chuyển"));
+                }
+            } else {
+                into.put(StockStatus.AVAILABLE, passed);
+                into.put(StockStatus.DAMAGED, line.getDamagedQty());
+                moves.add(new SplitMovePosting(line.getProductId(), order.getDestStoreId(), StockStatus.IN_TRANSIT,
+                        receivingStore, into, lots, MovementType.TRANSFER_RECEIPT,
+                        SourceRef.goodsReceiptNote(receiptId), user.id(), null));
+            }
         }
         posting.moveToStatusesAll(moves);
+        posting.takeOutAll(damaged);
+        if (receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
+            lines.forEach(line -> line.settleExcess(line.getExcessQty()));
+        }
+        order.invalidateDiscrepancyAcknowledgement();
         LocalDateTime now = LocalDateTime.now(clock);
         receipt.confirm(user.id(), now);
         receiptLines.flush();
@@ -334,8 +366,8 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                 .map(line -> catalog.get(line.getProductId()).getSku() + " x" + line.getExcessQty())
                 .collect(Collectors.joining(", "));
         if (!excess.isEmpty()) {
-            notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_EXCESS_RECEIVED",
-                    "Phiếu chuyển kho #%d nhận thừa %s, cần xác nhận xuất thêm".formatted(id, excess), ENTITY, id);
+            notifications.notifyOwners("TRANSFER_EXCESS_RECEIVED",
+                    "Phiếu chuyển kho #%d nhận thừa %s, cần duyệt hàng thừa".formatted(id, excess), ENTITY, id);
         }
         Map<Long, DiscrepancyCase> opened = orders.findCases(id).stream()
                 .collect(Collectors.toMap(DiscrepancyCase::getProductId, Function.identity()));
@@ -375,11 +407,24 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         for (TransferOrderLine part : parts) {
             int unresolved = figures.get(part.getProductId()).unresolved();
             if (unresolved > 0 && !opened.containsKey(part.getProductId())) {
-                cases.save(DiscrepancyCase.transfer(id, part.getProductId(), unresolved, now));
+                opened.put(part.getProductId(), cases.save(DiscrepancyCase.transfer(id, part.getProductId(), unresolved, now)));
                 missing.add(catalog.get(part.getProductId()).getSku() + " x" + unresolved);
             }
         }
+        if (receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
+            for (GoodsReceiptNoteLine line : lines) {
+                if (line.getWrongItemQty() > 0 || line.getDamagedQty() > 0) {
+                    DiscrepancyCase record = opened.get(line.getProductId());
+                    if (record == null) {
+                        record = cases.save(DiscrepancyCase.transfer(id, line.getProductId(), 0, now));
+                        opened.put(line.getProductId(), record);
+                    }
+                    record.recordTransferCondition(line.getWrongItemQty(), line.getDamagedQty());
+                }
+            }
+        }
         opened.values().stream().filter(DiscrepancyCase::isOpen)
+                .filter(shortage -> shortage.getWrongItemQty() == 0 && shortage.getDamagedQty() == 0)
                 .filter(shortage -> figures.get(shortage.getProductId()).unresolved() == 0)
                 .forEach(shortage -> shortage.close(ClosureType.ALL_SETTLED, null, user.id(), now));
         String wrong = lines.stream()
@@ -530,7 +575,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                     Product part = parts.get(line.getProductId());
                     return new TransferReceiptResponse.Line(part.getId(), part.getSku(), part.getPartName(),
                             part.getBaseUnit(), line.getDocumentQty(), line.getDeliveredQty(), line.getPassedQty(),
-                            line.getWrongItemQty(), line.getDamagedQty(), line.getExcessQty());
+                            line.getWrongItemQty(), line.getDamagedQty(), line.getExcessQty(), line.getId(), line.getExpiryDate(), line.getExcessDecision());
                 }).toList(), attachments.list(OwnerType.GOODS_RECEIPT_NOTE, receipt.getId()));
     }
 

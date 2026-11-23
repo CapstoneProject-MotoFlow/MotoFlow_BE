@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.sales.controller;
 
 import fu.hl.g64.motorflow.sales.dto.DepositExpiryRequest;
 import fu.hl.g64.motorflow.sales.dto.DepositPaymentRequest;
+import fu.hl.g64.motorflow.sales.dto.DepositSplitRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SettlementResult;
 import fu.hl.g64.motorflow.sales.service.SalesDepositService;
@@ -40,6 +41,13 @@ public class SalesDepositController {
     public SettlementResult recordDeposit(@AuthenticationPrincipal AuthenticatedUser seller, @PathVariable long id,
                                           @Valid @RequestBody DepositPaymentRequest request) {
         return deposits.recordDeposit(seller, id, request);
+    }
+
+    @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
+    @PostMapping("/deposits/split")
+    public SettlementResult recordSplitDeposit(@AuthenticationPrincipal AuthenticatedUser seller, @PathVariable long id,
+                                               @Valid @RequestBody DepositSplitRequest request) {
+        return deposits.recordSplitDeposit(seller, id, request);
     }
 
     @Operation(summary = "Change the expiry date of a deposit",
