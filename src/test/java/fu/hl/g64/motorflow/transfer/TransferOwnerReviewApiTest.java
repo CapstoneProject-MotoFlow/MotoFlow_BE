@@ -65,7 +65,12 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.code").value("MSG338"));
         mvc.perform(get("/api/v1/goods-receipt-notes/transfer-excess")
                         .header(HttpHeaders.AUTHORIZATION, signIn("owner")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$[0].receiptId").value(receipt));
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].receiptId").value(receipt))
+                .andExpect(jsonPath("$[0].sourceStoreName").isNotEmpty())
+                .andExpect(jsonPath("$[0].lines[0].excessQty").value(2))
+                .andExpect(jsonPath("$[0].lines[0].lots[0].lotId").value(matching))
+                .andExpect(jsonPath("$[0].lines[0].lots[0].quantity").value(2))
+                .andExpect(jsonPath("$[0].lines[0].blockedCode").doesNotExist());
         Long line = jdbc.queryForObject("SELECT id FROM goods_receipt_note_line WHERE goods_receipt_note_id = ?",
                 Long.class, receipt);
         String body = json(Map.of("lines", List.of(Map.of("lineId", line, "decision", "ACCEPTED"))));
@@ -103,6 +108,10 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
         confirm("bmlb", order, receipt).andExpect(status().isOk());
         Long line = jdbc.queryForObject("SELECT id FROM goods_receipt_note_line WHERE goods_receipt_note_id = ?",
                 Long.class, receipt);
+        mvc.perform(get("/api/v1/goods-receipt-notes/transfer-excess")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].lines[0].blockedCode").value("MSG341"))
+                .andExpect(jsonPath("$[0].lines[0].lots.length()").value(0));
         decide(order, receipt, json(Map.of("lines", List.of(Map.of("lineId", line, "decision", "ACCEPTED")))))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG341"))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString(

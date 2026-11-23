@@ -36,10 +36,12 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -59,20 +61,54 @@ public class TransferExcessService {
     private final JdbcClient jdbc;
     private final Clock clock;
 
+    /**
+     * Q7, review 73-6: the transfer receipts with excess awaiting the Owner, newest first, with the sending and
+     * receiving warehouse and, per pending line, the source lots an acceptance would take now ({@code blockedCode}
+     * MSG339 or MSG341 when it would be refused).
+     */
     @Transactional(readOnly = true)
     public List<PendingReceipt> pending(int page, int size) {
         int limit = Math.clamp(size, 1, 100);
-        return jdbc.sql("""
-                SELECT DISTINCT r.id, r.transfer_order_id, t.source_store_id, t.dest_store_id
+        record Row(long receiptId, long orderId, long sourceId, String sourceName, long destId, String destName) {
+        }
+        List<Row> rows = jdbc.sql("""
+                SELECT r.id, r.transfer_order_id, t.source_store_id, src.store_name AS source_name,
+                       t.dest_store_id, dst.store_name AS dest_name
                 FROM goods_receipt_note r
                 JOIN transfer_order t ON t.id = r.transfer_order_id
-                JOIN goods_receipt_note_line l ON l.goods_receipt_note_id = r.id
+                JOIN store src ON src.id = t.source_store_id
+                JOIN store dst ON dst.id = t.dest_store_id
                 WHERE r.receipt_type = 'TRANSFER_IN' AND r.status = 'CONFIRMED'
-                  AND l.excess_decision = 'AWAITING_OWNER'
+                  AND EXISTS (SELECT 1 FROM goods_receipt_note_line l
+                              WHERE l.goods_receipt_note_id = r.id AND l.excess_decision = 'AWAITING_OWNER')
                 ORDER BY r.id DESC LIMIT :limit OFFSET :offset
                 """).param("limit", limit).param("offset", (long) Math.max(page, 0) * limit)
-                .query((rs, row) -> new PendingReceipt(rs.getLong("id"), rs.getLong("transfer_order_id"),
-                        rs.getLong("source_store_id"), rs.getLong("dest_store_id"))).list();
+                .query((rs, row) -> new Row(rs.getLong("id"), rs.getLong("transfer_order_id"),
+                        rs.getLong("source_store_id"), rs.getString("source_name"), rs.getLong("dest_store_id"),
+                        rs.getString("dest_name"))).list();
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<GoodsReceiptNoteLine>> linesByReceipt = receiptLines.findByGoodsReceiptNoteIdInAndExcessDecision(
+                        rows.stream().map(Row::receiptId).toList(), ExcessDecision.AWAITING_OWNER).stream()
+                .collect(Collectors.groupingBy(GoodsReceiptNoteLine::getGoodsReceiptNoteId));
+        Map<Long, Product> parts = products.findAllById(linesByReceipt.values().stream().flatMap(List::stream)
+                        .map(GoodsReceiptNoteLine::getProductId).distinct().toList()).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        LocalDate today = LocalDate.now(clock);
+        Map<Long, Map<Long, PickingGuide.Part>> stockBySource = new HashMap<>();
+        rows.stream().collect(Collectors.groupingBy(Row::sourceId)).forEach((source, ofSource) ->
+                stockBySource.put(source, guide.parts(source, ofSource.stream()
+                        .flatMap(row -> linesByReceipt.getOrDefault(row.receiptId(), List.of()).stream())
+                        .map(GoodsReceiptNoteLine::getProductId).distinct().toList(), today)));
+        return rows.stream().map(row -> new PendingReceipt(row.receiptId(), row.orderId(), row.sourceId(),
+                row.destId(), row.sourceName(), row.destName(),
+                linesByReceipt.getOrDefault(row.receiptId(), List.of()).stream().map(line -> {
+                    Product part = parts.get(line.getProductId());
+                    Plan plan = plan(line, stockBySource.get(row.sourceId()).get(line.getProductId()));
+                    return new PendingLine(line.getId(), line.getProductId(), part.getSku(), part.getPartName(),
+                            line.getExcessQty(), line.getExpiryDate(), plan.lots(), plan.blockedCode());
+                }).toList())).toList();
     }
 
     @Transactional
@@ -120,33 +156,15 @@ public class TransferExcessService {
             for (GoodsReceiptNoteLine line : accepted) {
                 int quantity = line.getExcessQty();
                 String sku = skus.get(line.getProductId());
-                var available = availability.get(line.getProductId());
-                if (available == null || available.sellableQty() < quantity) {
-                    throw insufficient(sku);
-                }
-                // An expiry no sellable lot of the source has is most likely recorded wrong: block, do not guess.
-                if (line.getExpiryDate() != null && available.lotsInOrder().stream()
-                        .noneMatch(lot -> line.getExpiryDate().equals(lot.getExpiryDate()))) {
+                Plan plan = plan(line, availability.get(line.getProductId()));
+                if ("MSG341".equals(plan.blockedCode())) {
                     throw new BusinessException(HttpStatus.CONFLICT, "MSG341", sku, line.getExpiryDate().format(DAY));
                 }
-                List<LotQuantity> selected = new ArrayList<>();
-                int remaining = quantity;
-                for (int i = 0; i < available.lotsInOrder().size(); i++) {
-                    var lot = available.lotsInOrder().get(i);
-                    // Q7/B2: the lot of the expiry the destination recorded; with no expiry recorded, oldest first.
-                    if (line.getExpiryDate() != null && !Objects.equals(lot.getExpiryDate(), line.getExpiryDate())) {
-                        continue;
-                    }
-                    int take = Math.min(remaining, available.lotQuantities().get(i));
-                    selected.add(new LotQuantity(lot.getId(), take));
-                    remaining -= take;
-                    if (remaining == 0) {
-                        break;
-                    }
+                if (plan.blockedCode() != null) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG339", sku);
                 }
-                if (remaining != 0) {
-                    throw insufficient(sku);
-                }
+                List<LotQuantity> selected = plan.lots().stream()
+                        .map(lot -> new LotQuantity(lot.lotId(), lot.quantity())).toList();
                 moves.add(new MovePosting(line.getProductId(), source, StockStatus.AVAILABLE, destination,
                         StockStatus.AVAILABLE, quantity, selected, MovementType.TRANSFER_EXTRA_DISPATCH,
                         SourceRef.goodsReceiptNote(receiptId), owner.id(), "Owner duyệt hàng thừa điều chuyển"));
@@ -159,10 +177,48 @@ public class TransferExcessService {
         return transferReceipts.receipt(owner, orderId, receiptId);
     }
 
-    private static BusinessException insufficient(String sku) {
-        return new BusinessException(HttpStatus.CONFLICT, "MSG339", sku);
+    /**
+     * Q7/B2, G3: the source lots that would cover the excess of {@code line} now. The lots of the expiry the
+     * destination recorded; with no expiry recorded, oldest first. MSG341 when no sellable lot has that expiry (most
+     * likely recorded wrong: blocked, not guessed), MSG339 when the source cannot cover it.
+     */
+    private static Plan plan(GoodsReceiptNoteLine line, PickingGuide.Part available) {
+        int quantity = line.getExcessQty();
+        if (available == null || available.sellableQty() < quantity) {
+            return new Plan(List.of(), "MSG339");
+        }
+        if (line.getExpiryDate() != null && available.lotsInOrder().stream()
+                .noneMatch(lot -> line.getExpiryDate().equals(lot.getExpiryDate()))) {
+            return new Plan(List.of(), "MSG341");
+        }
+        List<PlannedLot> selected = new ArrayList<>();
+        int remaining = quantity;
+        for (int i = 0; i < available.lotsInOrder().size() && remaining > 0; i++) {
+            var lot = available.lotsInOrder().get(i);
+            if (line.getExpiryDate() != null && !Objects.equals(lot.getExpiryDate(), line.getExpiryDate())) {
+                continue;
+            }
+            int take = Math.min(remaining, available.lotQuantities().get(i));
+            if (take > 0) {
+                selected.add(new PlannedLot(lot.getId(), lot.getExpiryDate(), take));
+                remaining -= take;
+            }
+        }
+        return remaining == 0 ? new Plan(selected, null) : new Plan(List.of(), "MSG339");
     }
 
-    public record PendingReceipt(long receiptId, long transferOrderId, long sourceStoreId, long destStoreId) {
+    private record Plan(List<PlannedLot> lots, String blockedCode) {
+    }
+
+    public record PendingReceipt(long receiptId, long transferOrderId, long sourceStoreId, long destStoreId,
+                                 String sourceStoreName, String destStoreName, List<PendingLine> lines) {
+    }
+
+    /** {@code lots} is empty and {@code blockedCode} set when accepting now would be refused. */
+    public record PendingLine(long lineId, long productId, String sku, String partName, int excessQty,
+                              LocalDate expiryDate, List<PlannedLot> lots, String blockedCode) {
+    }
+
+    public record PlannedLot(long lotId, LocalDate expiryDate, int quantity) {
     }
 }
