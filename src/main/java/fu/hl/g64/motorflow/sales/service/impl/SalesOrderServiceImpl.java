@@ -455,10 +455,15 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 && requested.stream().anyMatch(line -> line.waits() && line.takenNow() == 0)) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG335");
         }
-        checkRequestedMargin(seller, requested, content.parts(), OrderPricing.totals(content.priced()), now);
-        checkPricing(rate, (sold.isEmpty() ? waiting : sold).stream().map(share -> priced(sold.isEmpty()
-                ? share.waitQty() : share.sellNow(), content.prices().get(share.line().productId()), rate))
-                .toList(), now);
+        // BR-16 and BR-88 (Q2) on the order opened now: what is sold now, or the waiting order when nothing is. Units
+        // declined are never sold and must not lift the margin; the waiting part is checked again on release.
+        List<Share> openedNow = sold.isEmpty() ? waiting : sold;
+        Map<Long, Integer> openedQty = openedNow.stream().collect(Collectors.toMap(share -> share.line().productId(),
+                share -> sold.isEmpty() ? share.waitQty() : share.sellNow()));
+        List<Priced> openedPrices = openedNow.stream().map(share -> priced(openedQty.get(share.line().productId()),
+                content.prices().get(share.line().productId()), rate)).toList();
+        checkPricing(rate, openedPrices, now);
+        checkMargin(seller, content.parts(), openedQty, OrderPricing.totals(openedPrices), now);
         List<SalesOrderDetail.Declined> declined = shares.stream().filter(share -> share.declinedQty() > 0)
                 .map(share -> new SalesOrderDetail.Declined(share.line().productId(), share.declinedQty())).toList();
         List<Share> refused = shares.stream().filter(share -> share.declinedQty() > 0).toList();
