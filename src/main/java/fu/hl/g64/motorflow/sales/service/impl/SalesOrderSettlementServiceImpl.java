@@ -290,14 +290,38 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         if (unpaid == 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG180");
         }
-        if (request.creditAmount() != unpaid) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG190", money(unpaid));
+        // Plan 23/11 (3b): a prepayment in this request is recorded first, verified; only payments from before it had
+        // to be verified (requireVerified above).
+        long cash = request.cash();
+        long transfer = request.transfer();
+        Long tendered = request.tenderedAmount();
+        if (tendered != null && (cash == 0 || tendered < cash)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG182");
+        }
+        long credit = unpaid - cash - transfer;
+        if (credit <= 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG347", money(unpaid));
+        }
+        if (request.creditAmount() != credit) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG190", money(credit));
         }
         if (request.dueDate().isBefore(LocalDate.now(clock))) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG178");
         }
-        order.approveCredit(unpaid, seller.id(), LocalDateTime.now(clock));
-        completeLocked(seller, order, lines, money, new Credit(customer.getId(), unpaid, request.dueDate()));
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (cash > 0) {
+            references.save(Payment.orderPayment(orderId, cash, tendered, PaymentMethod.CASH, null, true, seller.id(),
+                    now));
+        }
+        if (transfer > 0) {
+            references.save(Payment.orderPayment(orderId, transfer, null, PaymentMethod.BANK_TRANSFER,
+                    reference(PaymentMethod.BANK_TRANSFER, request.transactionReference()), true, seller.id(), now));
+        }
+        if (cash + transfer > 0) {
+            money = collections.of(orderId);
+        }
+        order.approveCredit(credit, seller.id(), now);
+        completeLocked(seller, order, lines, money, new Credit(customer.getId(), credit, request.dueDate()));
         return salesOrders.get(seller, orderId);
     }
 

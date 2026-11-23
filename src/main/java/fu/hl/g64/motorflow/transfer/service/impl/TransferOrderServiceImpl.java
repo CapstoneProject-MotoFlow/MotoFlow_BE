@@ -56,6 +56,8 @@ import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.helper.RequestedParts;
 import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
+import fu.hl.g64.motorflow.transfer.helper.TransferExcessAcceptance;
+import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
@@ -73,6 +75,7 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,6 +112,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
     private final PickingGuide guide;
     private final AttachmentService attachments;
     private final StockBalanceRepository balances;
+    private final DiscrepancyResolutionEventRepository events;
+    private final TransferExcessAcceptance excessAcceptance;
     private final Clock clock;
 
     // UC-71
@@ -349,7 +354,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
         // Only a transfer with a short, damaged or wrong item part is acknowledged; a clean one closes as before.
-        if (order.getDiscrepancyAcknowledgedAt() == null && !hasDiscrepancy(order, closingLines(order))) {
+        if (order.getDiscrepancyAcknowledgedAt() == null && !hasDiscrepancy(closingLines(order))) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
         if (order.getDiscrepancyAcknowledgedAt() == null) {
@@ -357,8 +362,12 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             order.acknowledgeDiscrepancy(user.id(), now);
             auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_DISCREPANCY_ACKNOWLEDGED", user.id(), null,
                     null, Map.of("destination_store_id", order.getDestStoreId()), now));
+            // PM 23/11 case 10: the Owner learns now what closing will write off as lost.
+            String toLoss = closingLines(order).stream().filter(row -> row.toLossQty() > 0)
+                    .map(row -> row.sku() + " x" + row.toLossQty()).collect(Collectors.joining(", "));
             notifications.notifyOwners("TRANSFER_DISCREPANCY_ACKNOWLEDGED",
-                    "Kho nhận đã xác nhận xử lý sai lệch phiếu chuyển kho #%d".formatted(id), ENTITY, id);
+                    "Kho nhận đã xác nhận xử lý sai lệch phiếu chuyển kho #%d".formatted(id)
+                            + (toLoss.isEmpty() ? "" : ". Sẽ tính là mất khi đóng: " + toLoss), ENTITY, id);
         }
         return detail(user, order);
     }
@@ -371,7 +380,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         TransferOrder order = orders.findById(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
         List<ClosingPreviewResponse.Line> rows = closingLines(order);
-        Map<String, String> blocked = order.getStatus() == TransferOrderStatus.RECONCILING
+        Map<String, Object[]> blocked = order.getStatus() == TransferOrderStatus.RECONCILING
                 ? blockers(order, rows, lines.openReceiptQty(id)) : Map.of();
         return new ClosingPreviewResponse(id, order.getStatus(),
                 order.getStatus() == TransferOrderStatus.RECONCILING && blocked.isEmpty()
@@ -393,15 +402,18 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
         List<ClosingPreviewResponse.Line> rows = closingLines(order);
-        Map<String, String> blocked = blockers(order, rows, lines.openReceiptQty(id));
+        Map<String, Object[]> blocked = blockers(order, rows, lines.openReceiptQty(id));
         if (order.getDiscrepancyAcknowledgedAt() != null && user.role() != Role.OWNER) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         if (!blocked.isEmpty()) {
-            Map.Entry<String, String> first = blocked.entrySet().iterator().next();
+            Map.Entry<String, Object[]> first = blocked.entrySet().iterator().next();
             throw new BusinessException(HttpStatus.CONFLICT, first.getKey(), first.getValue());
         }
         LocalDateTime now = LocalDateTime.now(clock);
+        List<Long> productIds = rows.stream().map(ClosingPreviewResponse.Line::productId).sorted().toList();
+        balances.findByStoreForUpdate(Math.min(order.getSourceStoreId(), order.getDestStoreId()), productIds);
+        balances.findByStoreForUpdate(Math.max(order.getSourceStoreId(), order.getDestStoreId()), productIds);
         List<MovePosting> moves = new ArrayList<>();
         List<Map<String, Object>> posted = new ArrayList<>();
         // BR-68: the confirmed excess leaves the source's available stock for the destination's, FEFO then FIFO.
@@ -414,33 +426,60 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             }
         }
         posting.moveAll(moves);
-        if (order.getDiscrepancyAcknowledgedAt() != null) {
-            Map<Long, List<LotQuantity>> remaining = orders.findTransitLots(id, order.getDestStoreId()).stream()
-                    .collect(Collectors.groupingBy(TransferOrderRepository.TransitLotOfPart::getProductId,
-                            Collectors.mapping(lot -> new LotQuantity(lot.getLotId(), Math.toIntExact(lot.getQuantity())),
-                                    Collectors.toList())));
-            List<OutPosting> shortage = new ArrayList<>();
-            for (ClosingPreviewResponse.Line row : rows) {
-                List<LotQuantity> lots = remaining.getOrDefault(row.productId(), List.of());
-                int quantity = lots.stream().mapToInt(LotQuantity::quantity).sum();
-                if (quantity != row.unresolvedQty()) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG337");
-                }
-                if (quantity > 0) {
-                    shortage.add(new OutPosting(order.getDestStoreId(), row.productId(), StockStatus.IN_TRANSIT,
-                            quantity, lots, MovementType.ADJUSTMENT, SourceRef.transferOrder(id), user.id(),
-                            "Thiếu khi nhận điều chuyển"));
-                }
+        // PM 23/11 B-7(a): the excess still awaiting the Owner is accepted.
+        excessAcceptance.accept(order, excessAcceptance.pending(id), user.id(), "Tự chấp nhận hàng thừa khi đóng phiếu");
+
+        // PM 23/11 B-7(b), (c): of what is still in transit at the destination, the part not to be replaced goes back
+        // to the source's available stock, lot by lot, and the rest is lost.
+        Map<Long, List<LotQuantity>> transit = new HashMap<>();
+        orders.findTransitLots(id, order.getDestStoreId()).forEach(lot -> transit.computeIfAbsent(lot.getProductId(),
+                key -> new ArrayList<>()).add(new LotQuantity(lot.getLotId(), Math.toIntExact(lot.getQuantity()))));
+        List<MovePosting> back = new ArrayList<>();
+        List<Map<String, Object>> returned = new ArrayList<>();
+        for (DiscrepancyResolutionEvent decision : events.findPendingNoReplacementForUpdate(id)) {
+            long productId = cases.findById(decision.getDiscrepancyCaseId()).orElseThrow().getProductId();
+            List<LotQuantity> lots = take(transit.getOrDefault(productId, new ArrayList<>()), decision.getQuantity());
+            if (lots.stream().mapToInt(LotQuantity::quantity).sum() != decision.getQuantity()) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG337");
             }
-            posting.takeOutAll(shortage);
-            orders.findCases(id).stream().filter(DiscrepancyCase::isOpen)
-                    .forEach(item -> item.close(ClosureType.CLOSED_BY_AGREEMENT,
-                            "Kho nhận đã xác nhận xử lý, Owner đã đóng phiếu.", user.id(), now));
+            back.add(new MovePosting(productId, order.getDestStoreId(), StockStatus.IN_TRANSIT,
+                    order.getSourceStoreId(), StockStatus.AVAILABLE, decision.getQuantity(), lots,
+                    MovementType.TRANSFER_SHORT_RETURNED, SourceRef.discrepancyResolutionEvent(decision.getId()),
+                    user.id(), "Không cần giao bù, trả lại kho gửi"));
+            decision.confirmNoReplacement(user.id(), now);
+            returned.add(Map.of("product_id", productId, "quantity", decision.getQuantity()));
         }
+        if (!back.isEmpty()) {
+            posting.moveAll(back);
+        }
+        List<OutPosting> lost = new ArrayList<>();
+        List<Map<String, Object>> written = new ArrayList<>();
+        for (ClosingPreviewResponse.Line row : rows) {
+            List<LotQuantity> lots = transit.getOrDefault(row.productId(), List.of()).stream()
+                    .filter(lot -> lot.quantity() > 0).toList();
+            int quantity = lots.stream().mapToInt(LotQuantity::quantity).sum();
+            if (quantity != row.toLossQty()) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG337");
+            }
+            if (quantity > 0) {
+                lost.add(new OutPosting(order.getDestStoreId(), row.productId(), StockStatus.IN_TRANSIT,
+                        quantity, lots, MovementType.ADJUSTMENT, SourceRef.transferOrder(id), user.id(),
+                        "Mất khi điều chuyển"));
+                written.add(Map.of("product_id", row.productId(), "quantity", quantity));
+            }
+        }
+        if (!lost.isEmpty()) {
+            posting.takeOutAll(lost);
+        }
+        orders.findCases(id).stream().filter(DiscrepancyCase::isOpen)
+                .forEach(item -> item.close(ClosureType.CLOSED_BY_AGREEMENT,
+                        order.getDiscrepancyAcknowledgedAt() != null
+                                ? "Kho nhận đã xác nhận xử lý, Owner đã đóng phiếu."
+                                : "Đã đóng phiếu chuyển kho.", user.id(), now));
         order.close(user.id(), now);
         warehouseTasks.cancelForDocument(TaskType.TRANSFER_RECEIVING, id);
         auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_ORDER_CLOSED", user.id(), null, null,
-                Map.of("extra_dispatch", posted), now));
+                Map.of("extra_dispatch", posted, "to_source", returned, "lost", written), now));
         String message = "Phiếu chuyển kho #%d đã đóng".formatted(id);
         notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_CLOSED", message, ENTITY, id);
         notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_CLOSED", message, ENTITY, id);
@@ -462,48 +501,85 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             TransferReconciliation.Part figure = figures.get(line.getProductId());
             PickingGuide.Part held = source.get(line.getProductId());
             return new ClosingPreviewResponse.Line(part.getId(), part.getSku(), part.getPartName(), part.getBaseUnit(),
-                    figure.dispatched(), figure.passed(), figure.returned(), figure.loss(), figure.unresolved(),
+                    figure.dispatched(), figure.passed(), figure.returned(), figure.lost(), figure.unresolved(),
                     figure.extraReceived(), line.getExtraDispatchedQty(), held == null ? 0 : held.sellableQty(),
-                    figure.damaged(), figure.legacyExcess(), figure.pendingExcess());
+                    figure.damaged(), figure.legacyExcess(), figure.pendingExcess(), figure.shortage(),
+                    figure.awaitingDecision(), figure.toSource(), figure.toLoss(), figure.pendingExcess(),
+                    figure.rules().wrongItem(), figure.wrongPending(), figure.rules().wrongAwaitingOwner(),
+                    figure.rules().miscounted(), figure.rules().latePending());
         }).toList();
+    }
+
+    /** Takes {@code quantity} from the lots in their order, lowering what is left in them. */
+    private static List<LotQuantity> take(List<LotQuantity> lots, int quantity) {
+        List<LotQuantity> taken = new ArrayList<>();
+        int left = quantity;
+        for (int i = 0; i < lots.size() && left > 0; i++) {
+            LotQuantity lot = lots.get(i);
+            int part = Math.min(left, lot.quantity());
+            if (part > 0) {
+                taken.add(new LotQuantity(lot.lotId(), part));
+                lots.set(i, new LotQuantity(lot.lotId(), lot.quantity() - part));
+                left -= part;
+            }
+        }
+        return taken;
     }
 
     private boolean hasPendingClaims(long id) {
         return reconciliation.pendingClaims(id).values().stream().anyMatch(qty -> qty > 0);
     }
 
-    /** Q4: a part received short or damaged, or a wrong item received in its place, needs the destination's acknowledgement. */
-    private boolean hasDiscrepancy(TransferOrder order, List<ClosingPreviewResponse.Line> rows) {
-        return rows.stream().anyMatch(row -> row.unresolvedQty() > 0 || row.damagedQty() > 0)
-                || orders.findCases(order.getId()).stream().anyMatch(c -> c.getWrongItemQty() > 0);
+    /**
+     * Q4, PM 23/11 B-6: a part still short, received damaged or with wrong items needs the destination's
+     * acknowledgement. What is not to be replaced is the destination's own choice and needs none; a line the Owner
+     * corrected as miscounted has none of these left.
+     */
+    private static boolean hasDiscrepancy(List<ClosingPreviewResponse.Line> rows) {
+        return rows.stream().anyMatch(row -> row.shortageQty() > 0 || row.damagedQty() > 0 || row.wrongItemQty() > 0);
     }
 
-    /** UC-77 step 2: each reason the order cannot close, with the parts it concerns, in the order checked. */
-    private Map<String, String> blockers(TransferOrder order, List<ClosingPreviewResponse.Line> rows,
-                                                List<TransferOrderLineRepository.ProductQty> open) {
-        Map<String, String> blocked = new LinkedHashMap<>();
-        String unresolved = rows.stream().filter(row -> row.unresolvedQty() > 0)
-                .map(row -> row.sku() + " x" + row.unresolvedQty()).collect(Collectors.joining(", "));
-        if (order.getDiscrepancyAcknowledgedAt() == null && hasDiscrepancy(order, rows)) {
-            blocked.put("MSG336", unresolved);
+    /** UC-77 step 2: each reason the order cannot close, with its message arguments, in the order checked. */
+    private Map<String, Object[]> blockers(TransferOrder order, List<ClosingPreviewResponse.Line> rows,
+                                           List<TransferOrderLineRepository.ProductQty> open) {
+        Map<String, Object[]> blocked = new LinkedHashMap<>();
+        String shortage = rows.stream().filter(row -> row.shortageQty() > 0)
+                .map(row -> row.sku() + " x" + row.shortageQty()).collect(Collectors.joining(", "));
+        if (order.getDiscrepancyAcknowledgedAt() == null && hasDiscrepancy(rows)) {
+            blocked.put("MSG336", new Object[]{shortage});
         }
-        if (order.getDiscrepancyAcknowledgedAt() != null && hasPendingClaims(order.getId())) {
-            blocked.put("MSG340", "");
+        // PM 23/11 B-7(d): every wrong item needs a phiếu nhận hàng giao sai the Owner confirmed.
+        String wrong = rows.stream().filter(row -> row.wrongPendingQty() + row.wrongAwaitingOwnerQty() > 0)
+                .map(row -> row.sku() + " x" + (row.wrongPendingQty() + row.wrongAwaitingOwnerQty()))
+                .collect(Collectors.joining(", "));
+        if (!wrong.isEmpty()) {
+            blocked.put("MSG342", new Object[]{wrong});
         }
-        if (rows.stream().anyMatch(row -> row.pendingExcessQty() > 0)) {
-            blocked.put("MSG338", "");
+        if (hasPendingClaims(order.getId())) {
+            blocked.put("MSG340", new Object[0]);
+        }
+        // PM Q1 23/11: what the destination chose to receive later must arrive before the order closes.
+        String late = rows.stream().filter(row -> row.latePendingQty() > 0)
+                .map(row -> row.sku() + " x" + row.latePendingQty()).collect(Collectors.joining(", "));
+        if (!late.isEmpty()) {
+            blocked.put("MSG348", new Object[]{late});
+        }
+        // PM 23/11 B-7(a): the excess awaiting the Owner is accepted on closing, so the source must be able to give it.
+        TransferExcessAcceptance.Refusal excess = excessAcceptance.check(order, excessAcceptance.pending(order.getId()));
+        if (excess != null) {
+            blocked.put(excess.code(), excess.args());
         }
         String unconfirmed = rows.stream().filter(row -> row.legacyExcessQty() > row.extraDispatchedQty())
                 .map(row -> row.sku() + " x" + (row.legacyExcessQty() - row.extraDispatchedQty()))
                 .collect(Collectors.joining(", "));
         if (!unconfirmed.isEmpty()) {
-            blocked.put("MSG222", unconfirmed);
+            blocked.put("MSG222", new Object[]{unconfirmed});
         }
         String shortAtSource = rows.stream().filter(row -> row.extraDispatchedQty() > row.sourceSellableQty())
                 .map(row -> row.sku() + " cần " + row.extraDispatchedQty() + ", còn " + row.sourceSellableQty())
                 .collect(Collectors.joining(", "));
         if (!shortAtSource.isEmpty()) {
-            blocked.put("MSG223", shortAtSource);
+            blocked.put("MSG223", new Object[]{shortAtSource});
         }
         // A receipt is only ever opened with lines expecting at least one unit, so any open receipt shows up here.
         Map<Long, Long> expected = open.stream().collect(Collectors.toMap(
@@ -511,7 +587,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         String opened = rows.stream().filter(row -> expected.getOrDefault(row.productId(), 0L) > 0)
                 .map(row -> row.sku() + " x" + expected.get(row.productId())).collect(Collectors.joining(", "));
         if (!opened.isEmpty()) {
-            blocked.put("MSG225", opened);
+            blocked.put("MSG225", new Object[]{opened});
         }
         return blocked;
     }
@@ -601,11 +677,14 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                     return new TransferOrderDetailResponse.Line(part.getId(), part.getSku(), part.getPartName(),
                             part.getBaseUnit(), line.getPlannedQty(), line.getPreparedQty(), line.getDispatchedQty(),
                             staff ? null : figure.passed(), staff ? null : figure.returned(),
-                            staff ? null : figure.loss(), staff ? null : figure.extraReceived(),
+                            staff ? null : figure.lost(), staff ? null : figure.extraReceived(),
                             staff ? null : line.getExtraDispatchedQty(),
-                            staff ? null : (order.getDiscrepancyAcknowledgedAt() == null ? figure.unresolved() : 0),
-                            staff ? null : figure.damaged(), staff ? null : figure.unresolved() + figure.closedShortage(),
-                            line.getMakeupForCaseId());
+                            staff ? null : figure.awaitingDecision(),
+                            staff ? null : figure.damaged(), staff ? null : figure.shortage(),
+                            line.getMakeupForCaseId(), staff ? null : figure.rules().wrongItem(),
+                            staff ? null : figure.wrongPending(), staff ? null : figure.rules().wrongAwaitingOwner(),
+                            staff ? null : figure.rules().noReplacement(), staff ? null : figure.rules().latePending(),
+                            staff ? null : figure.rules().miscounted());
                 }).toList(),
                 orders.findDispatchedLots(id).stream().map(lot -> new TransferOrderDetailResponse.Lot(
                         lot.getProductId(), lot.getLotId(), lot.getManufacturerLotNo(), lot.getExpiryDate(),
@@ -627,15 +706,27 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         if (found.isEmpty()) {
             return List.of();
         }
-        Map<Long, List<DiscrepancyResolutionEvent>> events = orders.findEvents(found.stream()
-                .map(DiscrepancyCase::getId).toList()).stream()
+        List<DiscrepancyResolutionEvent> all = orders.findEvents(found.stream().map(DiscrepancyCase::getId).toList());
+        Map<Long, List<DiscrepancyResolutionEvent>> events = all.stream()
                 .collect(Collectors.groupingBy(DiscrepancyResolutionEvent::getDiscrepancyCaseId));
+        Map<Long, Product> received = products.findAllById(all.stream()
+                        .map(DiscrepancyResolutionEvent::getReceivedProductId).filter(Objects::nonNull).distinct().toList())
+                .stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        Map<Long, String> names = users.findAllById(all.stream().map(DiscrepancyResolutionEvent::getRecordedBy)
+                        .filter(Objects::nonNull).distinct().toList()).stream()
+                .collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
         return found.stream().map(shortage -> new TransferOrderDetailResponse.Discrepancy(shortage.getId(),
-                shortage.getProductId(), shortage.getShortQty(), shortage.getWrongItemQty(), shortage.getDamagedQty(), shortage.getStatus(), shortage.getOpenedAt(),
-                shortage.getClosedAt(), events.getOrDefault(shortage.getId(), List.of()).stream()
-                        .map(event -> new TransferOrderDetailResponse.Event(event.getId(), event.getResolutionType(),
-                                event.getQuantity(), event.getGoodsReceiptNoteId(), event.getAdjustmentRequestId(),
-                                event.getReason(), event.getOccurredAt(), event.getConfirmedAt())).toList()))
+                shortage.getProductId(), shortage.getShortQty(), shortage.getWrongItemQty(), shortage.getDamagedQty(),
+                shortage.getStatus(), shortage.getOpenedAt(), shortage.getClosedAt(),
+                events.getOrDefault(shortage.getId(), List.of()).stream().map(event -> {
+                    Product part = event.getReceivedProductId() == null ? null : received.get(event.getReceivedProductId());
+                    return new TransferOrderDetailResponse.Event(event.getId(), event.getResolutionType(),
+                            event.getQuantity(), event.getGoodsReceiptNoteId(), event.getAdjustmentRequestId(),
+                            event.getReason(), event.getOccurredAt(), event.getConfirmedAt(),
+                            event.getReceivedProductId(), part == null ? null : part.getSku(),
+                            part == null ? null : part.getPartName(), event.getReceivedExpiryDate(), event.getStatus(),
+                            person(event.getRecordedBy(), names));
+                }).toList()))
                 .toList();
     }
 

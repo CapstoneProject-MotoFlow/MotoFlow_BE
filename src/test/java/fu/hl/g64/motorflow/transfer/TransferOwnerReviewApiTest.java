@@ -35,12 +35,16 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].receivedQty").value(6))
                 .andExpect(jsonPath("$.lines[0].damagedQty").value(8))
                 .andExpect(jsonPath("$.lines[0].shortageQty").value(1))
-                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(1));
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
+        // PM 23/11 case 10: the Owner is told what closing will write off.
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
+                + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED'", String.class)).contains("Sẽ tính là mất khi đóng: MA-PHANH x1");
 
         action("owner", order, "/close").andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CLOSED"))
-                .andExpect(jsonPath("$.lines[0].shortageQty").value(1));
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(0))
+                .andExpect(jsonPath("$.lines[0].lossQty").value(1));
         action("owner", order, "/close").andExpect(status().isOk());
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(6);
         assertThat(stock(dest, brake, "in_transit_qty")).isZero();
@@ -61,8 +65,10 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
                 .andExpect(status().isOk());
         confirm("bmlb", order, receipt).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].excessDecision").value("AWAITING_OWNER"));
-        action("owner", order, "/close").andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("MSG338"));
+        // PM 23/11 case 3: excess no longer blocks closing, it would be accepted by it.
+        mvc.perform(get(ORDERS + "/" + order + "/closing-preview").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(jsonPath("$.canClose").value(true))
+                .andExpect(jsonPath("$.lines[0].excessToAcceptQty").value(2));
         mvc.perform(get("/api/v1/goods-receipt-notes/transfer-excess")
                         .header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$[0].receiptId").value(receipt))
@@ -94,7 +100,7 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
     }
 
     @Test
-    void insufficientMatchingLotsLeaveTheDecisionPendingAndRejectionChangesNoStock() throws Exception {
+    void insufficientMatchingLotsBlockAcceptingAndClosingAndExcessIsNeverRejected() throws Exception {
         lot(source, brake, 10, 100_000, today.plusDays(30), "A");
         long order = dispatchedOrder(brake, 2);
         long receipt = arrive("bmlb", order);
@@ -118,10 +124,15 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
                         today.plusDays(60).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")))));
         receiptView("owner", order, receipt).andExpect(jsonPath("$.lines[0].excessDecision").value("AWAITING_OWNER"));
         decide(order, receipt, json(Map.of("lines", List.of(Map.of("lineId", line, "decision", "REJECTED")))))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].excessDecision").value("REJECTED"));
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG346"));
+        mvc.perform(get(ORDERS + "/" + order + "/closing-preview").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(jsonPath("$.canClose").value(false))
+                .andExpect(jsonPath("$.blockedBy", org.hamcrest.Matchers.contains("MSG341")));
+        action("owner", order, "/close").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG341"));
         assertThat(stock(source, brake, "available_qty")).isEqualTo(8);
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(2);
-        action("owner", order, "/close").andExpect(status().isOk());
+        receiptView("owner", order, receipt).andExpect(jsonPath("$.lines[0].excessDecision").value("AWAITING_OWNER"));
     }
 
     @Test

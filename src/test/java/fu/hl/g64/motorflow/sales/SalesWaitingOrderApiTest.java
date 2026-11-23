@@ -98,6 +98,20 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void declinedUnitsDoNotLiftTheMarginOfWhatIsSoldNow() throws Exception {
+        createOrder(pad, 8);
+        // BR-88 at 30%: oil sells at 85,000 on a 70,000 cost, pads at 100,000 on 60,000.
+        jdbc.update("UPDATE pricing_policy SET rate = 30 WHERE policy_type = 'MINIMUM_MARGIN'");
+        clearCaches();
+        // No pad left to sell: the 10 pads are declined, only the 4 oils are sold (340,000 < 4 x 70,000 x 1.3).
+        create(managerToken, order(null, customer, "RETAIL", null,
+                List.of(line(oil, 4, 4, false), line(pad, 10, 10, false))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG172"));
+        create(ownerToken, order(store, customer, "RETAIL", null, List.of(line(oil, 4, 4, false))))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG173"));
+    }
+
+    @Test
     void withoutWaitingTheUnitsNotTakenAreDeclined() throws Exception {
         // 7 wanted, 3 taken now, no waiting: 3 sold, 4 declined, no waiting order.
         create(managerToken, order(null, customer, "RETAIL", null, List.of(line(pad, 7, 3, false))))

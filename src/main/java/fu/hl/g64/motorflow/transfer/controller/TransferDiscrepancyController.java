@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.transfer.controller;
 
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.transfer.dto.ReceiverMiscountRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDecisionRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResponse;
@@ -31,9 +32,9 @@ public class TransferDiscrepancyController {
     private final TransferDiscrepancyService discrepancies;
     private final TransferReceiptService receipts;
 
-    @Operation(summary = "Decide how a missing quantity is handled (UC-76): late delivery, return to the source, or a "
-            + "loss linked to a STOCK_LOSS adjustment of the order. Owner or central warehouse Branch Manager. The "
-            + "quantity is settled only by the receipt or the applied adjustment")
+    @Operation(summary = "PM 23/11 case 1: the receiving store's Branch Manager or the Owner decides a short part comes "
+            + "later (LATE_DELIVERY) or is not to be replaced (NO_REPLACEMENT, back to the source's stock on closing). "
+            + "What nobody decides on is lost on closing. RETURN_TO_SOURCE and LOSS are refused (MSG345)")
     @PostMapping("/discrepancy/decisions")
     @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
     public TransferOrderDetailResponse decide(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long orderId,
@@ -41,8 +42,19 @@ public class TransferDiscrepancyController {
         return discrepancies.decide(user, orderId, request);
     }
 
-    @Operation(summary = "The source Branch Manager records goods coming back from the destination (UC-76, BR-61). "
-            + "Inspected and confirmed like any receipt under /receipts/{receiptId}")
+    @Operation(summary = "PM 23/11 case 7, Owner: the receiving store counted the line wrong. The destination gets "
+            + "what was dispatched, the source is unchanged, the line's excess, wrong items and decisions are void; the "
+            + "staff's receipt keeps its figures. Reason required (MSG343)")
+    @PostMapping("/discrepancies/{caseId}/receiver-miscount")
+    @PreAuthorize("hasRole('OWNER')")
+    public TransferOrderDetailResponse receiverMiscount(@AuthenticationPrincipal AuthenticatedUser user,
+                                                        @PathVariable long orderId, @PathVariable long caseId,
+                                                        @Valid @RequestBody ReceiverMiscountRequest request) {
+        return discrepancies.receiverMiscount(user, orderId, caseId, request);
+    }
+
+    @Operation(summary = "Orders before PM 23/11 only: the source Branch Manager records goods coming back from the "
+            + "destination for an earlier return decision (BR-61); without one refused (MSG345)")
     @PostMapping("/returns")
     @PreAuthorize("hasRole('BRANCH_MANAGER')")
     public ResponseEntity<TransferReceiptResponse> arriveReturn(@AuthenticationPrincipal AuthenticatedUser user,

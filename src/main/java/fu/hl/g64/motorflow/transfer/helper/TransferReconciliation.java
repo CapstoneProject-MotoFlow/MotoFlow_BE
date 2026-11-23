@@ -31,20 +31,70 @@ public class TransferReconciliation {
      * @param received      passed plus damaged on confirmed receipts at the destination, less their excess: exactly
      *                      what left IN_TRANSIT there
      * @param extraReceived the excess of those receipts, goods above what they expected, never in transit (BR-68)
-     * @param returned      passed plus damaged on confirmed receipts back at the source (BR-61)
-     * @param loss          approved loss whose adjustment was applied (BR-66)
-     * @param unresolved    dispatched minus every final result (BR-60)
-     *                      <p>Invariant: destination IN_TRANSIT of the order = dispatched - received - returned - loss.
+     * @param returned      passed plus damaged on confirmed receipts back at the source (BR-61, orders before PM 23/11)
+     * @param loss          approved loss whose adjustment was applied (BR-66, orders before PM 23/11)
+     * @param unresolved    what is still in transit at the destination for the order
+     * @param closedShortage written off as lost on closing (PM 23/11: the short part nobody decided on)
+     * @param rules         PM 23/11 figures from the order's discrepancy events
+     *                      <p>Invariant: destination IN_TRANSIT of the order = unresolved.
      */
     public record Part(int dispatched, int received, int extraReceived, int returned, int loss, int unresolved,
-                       int damaged, int legacyExcess, int pendingExcess, int closedShortage) {
+                       int damaged, int legacyExcess, int pendingExcess, int closedShortage, Rules rules) {
         public Part(int dispatched, int received, int extraReceived, int returned, int loss, int unresolved) {
-            this(dispatched, received, extraReceived, returned, loss, unresolved, 0, extraReceived, 0, 0);
+            this(dispatched, received, extraReceived, returned, loss, unresolved, 0, extraReceived, 0, 0, Rules.NONE);
         }
 
         public int passed() {
             return received - damaged;
         }
+
+        /**
+         * Thiếu: what never arrived and is not settled yet: dispatched less what arrived, came back, was lost or is
+         * not to be replaced. A wrong item never counts: the part ordered did not arrive.
+         */
+        public int shortage() {
+            return Math.max(unresolved - toSource(), 0);
+        }
+
+        /** Không giao bù not moved yet: on closing it leaves transit back to the source's available stock. */
+        public int toSource() {
+            return rules.noReplacement() - rules.noReplacementDone();
+        }
+
+        /** Chờ quyết: shortage the destination's BM has chosen nothing for (late delivery or no replacement). */
+        public int awaitingDecision() {
+            return Math.max(shortage() - rules.latePending() - rules.legacyClaims(), 0);
+        }
+
+        /**
+         * Written off as lost on closing: the shortage nobody chose anything for. PM Q1 23/11: a late delivery is not
+         * lost; the order cannot close until it arrives (MSG348).
+         */
+        public int toLoss() {
+            return awaitingDecision();
+        }
+
+        /** Mất: written off, by the closing (PM 23/11) or by an applied loss adjustment (before). */
+        public int lost() {
+            return loss + closedShortage;
+        }
+
+        /** Giao sai chờ: wrong items with no phiếu nhận hàng giao sai yet. */
+        public int wrongPending() {
+            return Math.max(rules.wrongItem() - rules.wrongAwaitingOwner() - rules.wrongConfirmed(), 0);
+        }
+    }
+
+    /**
+     * PM 23/11. {@code wrongItem} recorded on confirmed receipts at the destination; {@code wrongAwaitingOwner} and
+     * {@code wrongConfirmed} on phiếu nhận hàng giao sai; {@code noReplacement} decided not to be replaced,
+     * {@code noReplacementDone} of which moved back on closing; {@code latePending} decided to come later and not
+     * arrived; {@code legacyClaims} losses awaiting their adjustment and return decisions of orders before 23/11;
+     * {@code miscounted} the Owner found the receiver counted the line wrong.
+     */
+    public record Rules(int wrongItem, int wrongAwaitingOwner, int wrongConfirmed, int noReplacement,
+                        int noReplacementDone, int latePending, int legacyClaims, boolean miscounted) {
+        public static final Rules NONE = new Rules(0, 0, 0, 0, 0, 0, 0, false);
     }
 
     public Map<Long, Part> byProduct(long transferOrderId, List<TransferOrderLine> orderLines) {
@@ -56,19 +106,36 @@ public class TransferReconciliation {
         Map<Long, Long> shortages = lines.acknowledgedShortages(transferOrderId).stream()
                 .collect(Collectors.toMap(TransferOrderLineRepository.ProductQty::getProductId,
                         TransferOrderLineRepository.ProductQty::getQty));
+        Map<Long, TransferOrderLineRepository.EventTotals> events = lines.eventTotals(transferOrderId).stream()
+                .collect(Collectors.toMap(TransferOrderLineRepository.EventTotals::getProductId, Function.identity()));
+        Map<Long, Long> claims = pendingClaims(transferOrderId);
         return orderLines.stream().collect(Collectors.toMap(TransferOrderLine::getProductId, line -> {
             int dispatched = line.getDispatchedQty() == null ? 0 : line.getDispatchedQty();
             TransferOrderLineRepository.ReceiptTotals receipt = receipts.get(line.getProductId());
+            TransferOrderLineRepository.EventTotals event = events.get(line.getProductId());
+            if (event != null && event.getMiscounts() > 0) {
+                // PM 23/11 case 7: the destination holds what was dispatched; excess, damage, wrong items and
+                // shortage of the line are void. The receipts keep what the staff recorded.
+                return new Part(dispatched, dispatched, 0, 0, 0, 0, 0, 0, 0, 0,
+                        new Rules(0, 0, 0, 0, 0, 0, 0, true));
+            }
             int extra = receipt == null ? 0 : (int) receipt.getExcess();
             int received = receipt == null ? 0 : (int) receipt.getReceived() - extra;
             int returned = receipt == null ? 0 : (int) receipt.getReturned();
             int loss = losses.getOrDefault(line.getProductId(), 0L).intValue();
             int closedShortage = shortages.getOrDefault(line.getProductId(), 0L).intValue();
+            Rules rules = new Rules(receipt == null ? 0 : Math.toIntExact(receipt.getWrongItem()),
+                    event == null ? 0 : Math.toIntExact(event.getWrongAwaitingOwner()),
+                    event == null ? 0 : Math.toIntExact(event.getWrongConfirmed()),
+                    event == null ? 0 : Math.toIntExact(event.getNoReplacement()),
+                    event == null ? 0 : Math.toIntExact(event.getNoReplacementDone()),
+                    event == null ? 0 : Math.toIntExact(event.getLatePending()),
+                    claims.getOrDefault(line.getProductId(), 0L).intValue(), false);
             return new Part(dispatched, received, extra, returned, loss,
-                    Math.max(dispatched - received - returned - loss - closedShortage, 0),
+                    Math.max(dispatched - received - returned - loss - closedShortage - rules.noReplacementDone(), 0),
                     receipt == null ? 0 : Math.toIntExact(receipt.getDamaged()),
                     receipt == null ? 0 : Math.toIntExact(receipt.getLegacyExcess()),
-                    receipt == null ? 0 : Math.toIntExact(receipt.getPendingExcess()), closedShortage);
+                    receipt == null ? 0 : Math.toIntExact(receipt.getPendingExcess()), closedShortage, rules);
         }));
     }
 
@@ -118,8 +185,9 @@ public class TransferReconciliation {
     public Map<Long, Integer> uncovered(long transferOrderId, List<TransferOrderLine> orderLines) {
         Map<Long, Long> claimed = pendingClaims(transferOrderId);
         lines.openReceiptQty(transferOrderId).forEach(row -> claimed.merge(row.getProductId(), row.getQty(), Long::sum));
+        // PM 23/11: what is not to be replaced never comes, so a receipt never expects it.
         return byProduct(transferOrderId, orderLines).entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
-                entry -> Math.max(entry.getValue().unresolved()
+                entry -> Math.max(entry.getValue().shortage()
                         - claimed.getOrDefault(entry.getKey(), 0L).intValue(), 0)));
     }
 

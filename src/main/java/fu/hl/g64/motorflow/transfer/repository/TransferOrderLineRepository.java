@@ -59,7 +59,49 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
         long getLegacyExcess();
 
         long getPendingExcess();
+
+        long getWrongItem();
     }
+
+    /** PM 23/11: what the order's discrepancy events say per part, for {@code TransferReconciliation}. */
+    interface EventTotals {
+        long getProductId();
+
+        long getWrongAwaitingOwner();
+
+        long getWrongConfirmed();
+
+        long getNoReplacement();
+
+        long getNoReplacementDone();
+
+        long getLatePending();
+
+        long getMiscounts();
+    }
+
+    @Query("""
+            select c.productId as productId,
+                   sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+                            and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_OWNER
+                            then e.quantity else 0 end) as wrongAwaitingOwner,
+                   sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+                            and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.CONFIRMED
+                            then e.quantity else 0 end) as wrongConfirmed,
+                   sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.NO_REPLACEMENT
+                            then e.quantity else 0 end) as noReplacement,
+                   sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.NO_REPLACEMENT
+                            and e.confirmedAt is not null then e.quantity else 0 end) as noReplacementDone,
+                   sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.LATE_DELIVERY_RECEIVED
+                            and e.confirmedAt is null then e.quantity else 0 end) as latePending,
+                   sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVER_MISCOUNT
+                            then 1 else 0 end) as miscounts
+            from DiscrepancyResolutionEvent e
+            join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            where c.transferOrderId = :id
+            group by c.productId
+            """)
+    List<EventTotals> eventTotals(@Param("id") long transferOrderId);
 
     @Query("""
             select l.productId as productId,
@@ -76,7 +118,9 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
                             then l.excessQty else 0 end) as legacyExcess,
                    sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
                             and l.excessDecision = fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision.AWAITING_OWNER
-                            then l.excessQty else 0 end) as pendingExcess
+                            then l.excessQty else 0 end) as pendingExcess,
+                   sum(case when g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN
+                            then l.wrongItemQty else 0 end) as wrongItem
             from GoodsReceiptNoteLine l
             join GoodsReceiptNote g on g.id = l.goodsReceiptNoteId
             where g.transferOrderId = :id
@@ -129,31 +173,37 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
             """)
     List<ProductQty> pendingReturnDecisions(@Param("id") long transferOrderId);
 
-    /** Losses linked to an adjustment that may still be applied: they settle nothing yet but are spoken for. */
+    /** Transit losses of the order whose adjustment may still be applied: they settle nothing yet but are spoken for. */
     @Query("""
-            select c.productId as productId, sum(e.quantity) as qty
-            from DiscrepancyResolutionEvent e
-            join DiscrepancyCase c on c.id = e.discrepancyCaseId
-            join AdjustmentRequest a on a.id = e.adjustmentRequestId
-            where c.transferOrderId = :id
-              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.APPROVED_LOSS
+            select l.productId as productId, -sum(l.quantityChange) as qty
+            from AdjustmentStockLine l
+            join AdjustmentRequest a on a.id = l.adjustmentRequestId
+            join TransferOrder o on o.id = a.transferOrderId
+            where a.transferOrderId = :id and l.storeId = o.destStoreId
+              and l.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+              and l.quantityChange < 0
               and a.status in (fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.DRAFT,
                                fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.PENDING,
                                fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPROVED)
-            group by c.productId
+            group by l.productId
             """)
     List<ProductQty> pendingLoss(@Param("id") long transferOrderId);
 
-    /** BR-66: a loss settles transit goods only once its adjustment has been applied. */
+    /**
+     * BR-66: a loss settles transit goods only once its adjustment has been applied. PM 23/11: what the order's
+     * STOCK_LOSS adjustments write off the destination's transit, linked to a loss decision (before 23/11) or not
+     * (UC-83 reported directly), as that is what left transit.
+     */
     @Query("""
-            select c.productId as productId, sum(e.quantity) as qty
-            from DiscrepancyResolutionEvent e
-            join DiscrepancyCase c on c.id = e.discrepancyCaseId
-            join AdjustmentRequest a on a.id = e.adjustmentRequestId
-            where c.transferOrderId = :id
-              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.APPROVED_LOSS
+            select l.productId as productId, -sum(l.quantityChange) as qty
+            from AdjustmentStockLine l
+            join AdjustmentRequest a on a.id = l.adjustmentRequestId
+            join TransferOrder o on o.id = a.transferOrderId
+            where a.transferOrderId = :id and l.storeId = o.destStoreId
+              and l.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+              and l.quantityChange < 0
               and a.status = fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus.APPLIED
-            group by c.productId
+            group by l.productId
             """)
     List<ProductQty> appliedLoss(@Param("id") long transferOrderId);
 }

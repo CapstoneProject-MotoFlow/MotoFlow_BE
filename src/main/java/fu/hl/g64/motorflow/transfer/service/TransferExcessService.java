@@ -4,13 +4,6 @@ import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
-import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
-import fu.hl.g64.motorflow.inventory.dto.MovePosting;
-import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
-import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
-import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
-import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
-import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.receiving.dto.ExcessDecisionRequest;
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNoteLine;
 import fu.hl.g64.motorflow.receiving.entity.enums.ExcessDecision;
@@ -20,6 +13,10 @@ import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.transfer.helper.SourceLots;
+import fu.hl.g64.motorflow.transfer.helper.TransferExcessAcceptance;
+import fu.hl.g64.motorflow.transfer.helper.SourceLots.Plan;
+import fu.hl.g64.motorflow.transfer.helper.SourceLots.PlannedLot;
 import fu.hl.g64.motorflow.transfer.dto.TransferReceiptResponse;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
@@ -32,9 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -48,16 +42,13 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TransferExcessService {
 
-    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-
     private final TransferOrderRepository orders;
     private final ProductRepository products;
     private final GoodsReceiptNoteRepository receipts;
     private final GoodsReceiptNoteLineRepository receiptLines;
     private final TransferReceiptService transferReceipts;
-    private final StockBalanceRepository balances;
+    private final TransferExcessAcceptance acceptance;
     private final PickingGuide guide;
-    private final InventoryPostingService posting;
     private final JdbcClient jdbc;
     private final Clock clock;
 
@@ -117,6 +108,10 @@ public class TransferExcessService {
         if (owner.role() != Role.OWNER) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
+        // PM 23/11 case 3: transfer excess is always kept; the Owner accepts it early here or closing accepts it.
+        if (request.lines().stream().anyMatch(choice -> choice.decision() != ExcessDecisionRequest.Choice.ACCEPTED)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG346");
+        }
         TransferOrder order = orders.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
         var receipt = receipts.findByIdForUpdate(receiptId)
@@ -140,74 +135,12 @@ public class TransferExcessService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
 
-        List<GoodsReceiptNoteLine> accepted = pending.stream()
-                .filter(line -> choices.get(line.getId()) == ExcessDecisionRequest.Choice.ACCEPTED).toList();
-        List<MovePosting> moves = new ArrayList<>();
-        if (!accepted.isEmpty()) {
-            List<Long> productIds = accepted.stream().map(GoodsReceiptNoteLine::getProductId).toList();
-            long source = order.getSourceStoreId();
-            long destination = order.getDestStoreId();
-            balances.findByStoreForUpdate(Math.min(source, destination), productIds);
-            balances.findByStoreForUpdate(Math.max(source, destination), productIds);
-            LocalDate today = LocalDate.now(clock);
-            Map<Long, PickingGuide.Part> availability = guide.parts(source, productIds, today);
-            Map<Long, String> skus = products.findAllById(productIds).stream()
-                    .collect(Collectors.toMap(Product::getId, Product::getSku));
-            for (GoodsReceiptNoteLine line : accepted) {
-                int quantity = line.getExcessQty();
-                String sku = skus.get(line.getProductId());
-                Plan plan = plan(line, availability.get(line.getProductId()));
-                if ("MSG341".equals(plan.blockedCode())) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG341", sku, line.getExpiryDate().format(DAY));
-                }
-                if (plan.blockedCode() != null) {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG339", sku);
-                }
-                List<LotQuantity> selected = plan.lots().stream()
-                        .map(lot -> new LotQuantity(lot.lotId(), lot.quantity())).toList();
-                moves.add(new MovePosting(line.getProductId(), source, StockStatus.AVAILABLE, destination,
-                        StockStatus.AVAILABLE, quantity, selected, MovementType.TRANSFER_EXTRA_DISPATCH,
-                        SourceRef.goodsReceiptNote(receiptId), owner.id(), "Owner duyệt hàng thừa điều chuyển"));
-            }
-            posting.moveAll(moves);
-        }
-        pending.forEach(line -> line.decideExcess(choices.get(line.getId()) == ExcessDecisionRequest.Choice.ACCEPTED
-                ? ExcessDecision.ACCEPTED : ExcessDecision.REJECTED));
-        receipt.recordExcessDecision(owner.id(), LocalDateTime.now(clock));
+        acceptance.accept(order, pending, owner.id(), "Owner duyệt hàng thừa điều chuyển");
         return transferReceipts.receipt(owner, orderId, receiptId);
     }
 
-    /**
-     * Q7/B2, G3: the source lots that would cover the excess of {@code line} now. The lots of the expiry the
-     * destination recorded; with no expiry recorded, oldest first. MSG341 when no sellable lot has that expiry (most
-     * likely recorded wrong: blocked, not guessed), MSG339 when the source cannot cover it.
-     */
     private static Plan plan(GoodsReceiptNoteLine line, PickingGuide.Part available) {
-        int quantity = line.getExcessQty();
-        if (available == null || available.sellableQty() < quantity) {
-            return new Plan(List.of(), "MSG339");
-        }
-        if (line.getExpiryDate() != null && available.lotsInOrder().stream()
-                .noneMatch(lot -> line.getExpiryDate().equals(lot.getExpiryDate()))) {
-            return new Plan(List.of(), "MSG341");
-        }
-        List<PlannedLot> selected = new ArrayList<>();
-        int remaining = quantity;
-        for (int i = 0; i < available.lotsInOrder().size() && remaining > 0; i++) {
-            var lot = available.lotsInOrder().get(i);
-            if (line.getExpiryDate() != null && !Objects.equals(lot.getExpiryDate(), line.getExpiryDate())) {
-                continue;
-            }
-            int take = Math.min(remaining, available.lotQuantities().get(i));
-            if (take > 0) {
-                selected.add(new PlannedLot(lot.getId(), lot.getExpiryDate(), take));
-                remaining -= take;
-            }
-        }
-        return remaining == 0 ? new Plan(selected, null) : new Plan(List.of(), "MSG339");
-    }
-
-    private record Plan(List<PlannedLot> lots, String blockedCode) {
+        return SourceLots.plan(line.getExcessQty(), line.getExpiryDate(), available);
     }
 
     public record PendingReceipt(long receiptId, long transferOrderId, long sourceStoreId, long destStoreId,
@@ -219,6 +152,4 @@ public class TransferExcessService {
                               LocalDate expiryDate, List<PlannedLot> lots, String blockedCode) {
     }
 
-    public record PlannedLot(long lotId, LocalDate expiryDate, int quantity) {
-    }
 }

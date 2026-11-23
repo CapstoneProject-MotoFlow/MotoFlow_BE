@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * UC-83 Step 1_Transit loss and UC-84 Step 4_Transit write-off: goods lost on the way are reported against their
- * transfer at the destination, linked by the coordinator (UC-76) and settled once Owner's approval is applied (BR-66).
+ * transfer at the destination and settled once Owner's approval is applied (BR-66); PM 23/11 needs no loss decision.
  */
 class TransitLossAdjustmentApiTest extends TransferFlowTestData {
 
@@ -65,13 +65,9 @@ class TransitLossAdjustmentApiTest extends TransferFlowTestData {
         // The unit is spoken for.
         report("bmlb", order, null, 1).andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG257"));
 
-        // UC-76: the coordinator links the request; the quantity stays unresolved until it is applied.
-        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
-                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("productId", brake, "decision", "LOSS", "quantity", 1,
-                                "adjustmentRequestId", request))))
-                .andExpect(status().isOk());
-        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].unresolvedQty").value(1));
+        // PM 23/11: no loss decision any more; the request itself speaks for the unit until it is applied.
+        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].shortageQty").value(1))
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
 
         mvc.perform(post(REQUESTS + "/" + request + "/approve").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
@@ -81,7 +77,8 @@ class TransitLossAdjustmentApiTest extends TransferFlowTestData {
         assertThat(jdbc.queryForObject("SELECT quantity_change FROM stock_movement WHERE adjustment_request_id = ? "
                 + "AND stock_status = 'IN_TRANSIT' AND store_id = ? AND lot_id = ?", Integer.class, request, dest, lot))
                 .isEqualTo(-1);
-        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
+        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].shortageQty").value(0))
+                .andExpect(jsonPath("$.lines[0].lossQty").value(1));
         mvc.perform(post(ORDERS + "/" + order + "/close").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
     }
@@ -113,12 +110,7 @@ class TransitLossAdjustmentApiTest extends TransferFlowTestData {
         mvc.perform(post(REQUESTS + "/" + request + "/approve").header(HttpHeaders.AUTHORIZATION, signIn("bmkt")))
                 .andExpect(status().isForbidden());
 
-        // UC-76: the coordinator links it, and Owner's approval settles it.
-        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
-                        .header(HttpHeaders.AUTHORIZATION, signIn("bmkt")).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("productId", brake, "decision", "LOSS", "quantity", 1,
-                                "adjustmentRequestId", request))))
-                .andExpect(status().isOk());
+        // Owner's approval settles it (PM 23/11: no loss decision to link any more).
         mvc.perform(post(REQUESTS + "/" + request + "/approve").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
         assertThat(stock(dest, brake, "in_transit_qty")).isZero();

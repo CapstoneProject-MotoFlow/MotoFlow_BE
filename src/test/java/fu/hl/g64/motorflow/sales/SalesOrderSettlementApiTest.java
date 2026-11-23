@@ -388,6 +388,57 @@ class SalesOrderSettlementApiTest extends SalesOrderTestData {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG188"));
     }
 
+    /** Plan 23/11 (3b): part paid now in cash or by transfer, the rest on credit, in one request. */
+    @Test
+    void creditWithAPrepaymentRecordsThePaymentAndOwesTheRest() throws Exception {
+        jdbc.update("UPDATE customer SET credit_status = 'ELIGIBLE' WHERE id = ?", customer);
+        String due = TODAY.plusDays(30).toString();
+        String path = "/api/v1/sales-orders/%d/credit";
+
+        long cash = confirmedOrder(pad, 2, oil, 1);   // 285,000 đ
+        send(managerToken, path.formatted(cash), creditBody(285_000, due, Map.of("cashAmount", 200_000,
+                "tenderedAmount", 100_000)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG182"));
+        send(managerToken, path.formatted(cash), creditBody(285_000, due, Map.of("cashAmount", 200_000)))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG190"));
+        send(managerToken, path.formatted(cash), creditBody(85_000, due, Map.of("cashAmount", 200_000,
+                "tenderedAmount", 500_000)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.money.credit.amount").value(85_000))
+                .andExpect(jsonPath("$.money.receivable.originalAmount").value(85_000))
+                .andExpect(jsonPath("$.money.netCollected").value(200_000));
+        assertThat(jdbc.queryForMap("SELECT amount, tendered_amount, payment_method, status "
+                + "FROM payment WHERE sales_order_id = ?", cash)).containsEntry("amount", 200_000L)
+                .containsEntry("tendered_amount", 500_000L).containsEntry("payment_method", "CASH")
+                .containsEntry("status", "VERIFIED");
+
+        long transfer = confirmedOrder(pad, 2, oil, 1);
+        send(managerToken, path.formatted(transfer), creditBody(85_000, due, Map.of("transferAmount", 200_000)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG154"));
+        send(managerToken, path.formatted(transfer), creditBody(85_000, due, Map.of("transferAmount", 200_000,
+                "transactionReference", "FT-TRA-TRUOC")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.money.receivable.originalAmount").value(85_000));
+        assertThat(jdbc.queryForObject("SELECT transaction_reference FROM payment WHERE sales_order_id = ?",
+                String.class, transfer)).isEqualTo("FT-TRA-TRUOC");
+
+        // Paying it all now is a payment, not credit: nothing is recorded.
+        long full = confirmedOrder(pad, 2, oil, 1);
+        send(managerToken, path.formatted(full), creditBody(0, due, Map.of("cashAmount", 285_000)))
+                .andExpect(status().isBadRequest());
+        send(managerToken, path.formatted(full), creditBody(1, due, Map.of("cashAmount", 285_000)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG347"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM payment WHERE sales_order_id = ?", Integer.class, full))
+                .isZero();
+        detail(managerToken, full).andExpect(jsonPath("$.status").value("CONFIRMED"));
+    }
+
+    private static Map<String, Object> creditBody(long amount, String dueDate, Map<String, Object> prepay) {
+        Map<String, Object> body = new LinkedHashMap<>(Map.of("version", 1, "creditAmount", amount, "dueDate", dueDate,
+                "customerAgreed", true));
+        body.putAll(prepay);
+        return body;
+    }
+
     @Test
     void cancellingRefundsWhatTheOrderHoldsAndChangesNoStock() throws Exception {
         long order = confirmedOrder(pad, 2, oil, 1);   // 285,000 đ
