@@ -67,8 +67,8 @@ public interface SalesOrderService {
      * UC-58: sets the delivered quantities from the picked ones and confirms price and delivery for the version;
      * delivering less than requested saves a new version first. A confirmed order can be confirmed again with other
      * delivered quantities. MSG174 before picking, MSG164, MSG165, MSG166, MSG167, MSG169 more than picked, MSG170
-     * nothing delivered, MSG162 or MSG163 the threshold, MSG171 not enough unexpired stock (BR-76), MSG172 or MSG173
-     * the minimum margin (BR-88). A Branch Manager who picked the goods themself may
+     * nothing delivered, MSG162 or MSG163 the threshold, MSG171 not enough unexpired stock (BR-76).
+     * A Branch Manager who picked the goods themself may
      * confirm; the Owner is notified (K1, PM 19/11).
      */
     SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request);
@@ -76,7 +76,7 @@ public interface SalesOrderService {
     /**
      * GVHD 20/11: releases a waiting order to picking, line by line, as far as the store can sell now. All of it:
      * the order itself goes to picking with the same number; part of it: a new order is sold now and the waiting
-     * order keeps the rest. Prices in effect now (BR-18). MSG307 if not a waiting order, MSG171 if nothing can be
+     * order keeps the rest. Prices in effect now (BR-18); MSG172 or MSG173 if the released goods fail BR-88. MSG307 if not a waiting order, MSG171 if nothing can be
      * sold now.
      */
     SalesOrderDetail release(AuthenticatedUser seller, long id, ReleaseWaitingOrderRequest request);

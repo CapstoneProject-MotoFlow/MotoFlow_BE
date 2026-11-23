@@ -457,7 +457,7 @@ class SalesOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
-    void confirmationChecksStockMarginAndWhoPicked() throws Exception {
+    void creationChecksMarginAndConfirmationChecksStock() throws Exception {
         // The Owner may confirm what the Branch Manager picked.
         long order = createOrder(pad, 4);
         assign(managerToken, "PICKING", order, manager).andExpect(status().isOk());
@@ -474,19 +474,14 @@ class SalesOrderApiTest extends SalesOrderTestData {
         // BR-88 at 60%: 4 × 60,000 × 1.6 = 384,000; at 5% off the order makes 380,000.
         jdbc.update("UPDATE pricing_policy SET rate = 60 WHERE policy_type = 'MINIMUM_MARGIN'");
         clearCaches();
-        update(ownerToken, order, 1, order(null, customer, "WHOLESALE", "5", lines(pad, 4))).andExpect(status().isOk());
-        confirm(ownerToken, order, 2, pad, 4)
+        create(ownerToken, order(store, customer, "WHOLESALE", "5", lines(pad, 4)))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG173"))
                 .andExpect(jsonPath("$.message").value("Tổng tiền của đơn phải từ 384.000 đ trở lên theo biên lợi nhuận tối thiểu 60%."));
-        long other = createOrder(pad, 4);
-        assign(managerToken, "PICKING", other, staff);
-        pick(staffToken, other, 1, pad, 4, null);
-        update(managerToken, other, 1, order(null, customer, "WHOLESALE", "5", lines(pad, 4)));
-        confirm(managerToken, other, 2, pad, 4)
+        create(managerToken, order(null, customer, "WHOLESALE", "5", lines(pad, 4)))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG172"));
-        update(ownerToken, order, 2, order(null, customer, "WHOLESALE", "4", lines(pad, 4))).andExpect(status().isOk());
-        confirm(ownerToken, order, 3, pad, 4).andExpect(status().isOk())
-                .andExpect(jsonPath("$.total").value(384_000))
+        jdbc.update("UPDATE pricing_policy SET rate = 80 WHERE policy_type = 'MINIMUM_MARGIN'");
+        clearCaches();
+        confirm(ownerToken, order, 1, pad, 4).andExpect(status().isOk())
                 .andExpect(jsonPath("$.confirmedBy").value("Test owner"));
     }
 

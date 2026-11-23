@@ -37,7 +37,7 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG327"))
                 .andExpect(jsonPath("$.message").value(
                         "Tiền cọc dùng cho đơn tối đa 100.000 đ (không quá tiền cọc còn lại và tổng tiền đơn)."));
-        String body = release(waiting, 1, 100_000L, null)
+        String body = release(waiting, 1, null, null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.split.waitingOrderId").value((int) waiting))
                 .andExpect(jsonPath("$.money.depositApplied").value(100_000))
@@ -95,7 +95,7 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
         // BE-9: the invoice shows the deposit and what was left to pay; a retail sale prints small, wholesale large.
         print("SALES_ORDER", sold, "").andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Phiếu bán hàng"))
-                .andExpect(jsonPath("$.layout").value("SMALL"))
+                .andExpect(jsonPath("$.layout").value("LARGE"))
                 .andExpect(jsonPath("$.totals.total").value(100_000))
                 .andExpect(jsonPath("$.totals.deposit").value(100_000))
                 .andExpect(jsonPath("$.totals.amountDue").value(0))
@@ -108,8 +108,8 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.totals.amountDue").value(0));
         jdbc.update("UPDATE sales_order_line SET delivered_qty = 1 WHERE sales_order_id = ?", sold);
         print("SALES_ORDER", sold, "&layout=LARGE").andExpect(jsonPath("$.layout").value("LARGE"));
-        jdbc.update("UPDATE sales_order SET price_type = 'WHOLESALE' WHERE id = ?", sold);
-        print("SALES_ORDER", sold, "").andExpect(jsonPath("$.layout").value("LARGE"));
+        jdbc.update("UPDATE sales_order SET price_type = 'RETAIL' WHERE id = ?", sold);
+        print("SALES_ORDER", sold, "").andExpect(jsonPath("$.layout").value("SMALL"));
         print("PAYMENT", deposit, "").andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Phiếu thu tiền cọc"))
                 .andExpect(jsonPath("$.layout").value(nullValue()))
@@ -273,6 +273,20 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
                 + "AND payment_type = 'DEPOSIT_REFUND'", String.class, returned)).isEqualTo("DEPOSIT_REFUND");
     }
 
+    @Test
+    void releaseChecksTheMarginBeforeUsingTheDeposit() throws Exception {
+        long waiting = waitingOrder();
+        paidDeposit(waiting, 400_000, "2026-10-16");
+        jdbc.update("UPDATE pricing_policy SET rate = 100 WHERE policy_type = 'MINIMUM_MARGIN'");
+        clearCaches();
+
+        release(waiting, 1, null, null)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG172"));
+        detail(managerToken, waiting)
+                .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andExpect(jsonPath("$.deposit.remaining").value(400_000));
+    }
+
     /** A new order of the customer that takes none of 3 pads now and waits for them. */
     private long waitingOrder() throws Exception {
         Map<String, Object> line = new LinkedHashMap<>();
@@ -280,7 +294,7 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
         line.put("quantity", 3);
         line.put("nowQty", 0);
         line.put("waitForRest", true);
-        String body = create(managerToken, order(null, customer, "RETAIL", null, List.of(line)))
+        String body = create(managerToken, order(null, customer, "WHOLESALE", null, List.of(line)))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return ((Number) JsonPath.read(body, "$.id")).longValue();

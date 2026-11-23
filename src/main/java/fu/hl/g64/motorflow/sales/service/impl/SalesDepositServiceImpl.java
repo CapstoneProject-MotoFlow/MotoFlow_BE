@@ -10,11 +10,13 @@ import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
 import fu.hl.g64.motorflow.sales.dto.CancelSalesOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.DepositExpiryRequest;
 import fu.hl.g64.motorflow.sales.dto.DepositPaymentRequest;
+import fu.hl.g64.motorflow.sales.dto.DepositSplitRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SettlementResult;
 import fu.hl.g64.motorflow.sales.entity.SalesDepositExpiryChange;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
+import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
 import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
@@ -33,6 +35,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Objects;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -56,6 +60,57 @@ public class SalesDepositServiceImpl implements SalesDepositService {
     @Transactional
     @Override
     public SettlementResult recordDeposit(AuthenticatedUser seller, long orderId, DepositPaymentRequest request) {
+        prepareDeposit(seller, orderId, request.depositExpiresOn(), request.expectedDepositRecorded());
+        Long tendered = request.tenderedAmount();
+        if (tendered != null && (request.paymentMethod() != PaymentMethod.CASH || tendered < request.amount())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG182");
+        }
+        String reference = TransactionReferences.clean(request.transactionReference());
+        if (request.paymentMethod() == PaymentMethod.BANK_TRANSFER && reference == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG154");
+        }
+        references.requireUnused(reference);
+        LocalDateTime now = LocalDateTime.now(clock);
+        Payment payment = references.save(Payment.deposit(orderId, request.amount(), tendered,
+                request.paymentMethod(), reference, request.verified(), seller.id(), now));
+        if (request.evidence() != null && !request.evidence().isEmpty()) {
+            attachments.attach(OwnerType.PAYMENT, payment.getId(), request.evidence(), seller.id());
+        }
+        return new SettlementResult(salesOrders.get(seller, orderId), payment.getId(), false, null, null);
+    }
+
+    @Transactional
+    @Override
+    public SettlementResult recordSplitDeposit(AuthenticatedUser seller, long orderId, DepositSplitRequest request) {
+        long cash = request.cashAmount() == null ? 0 : request.cashAmount();
+        long transfer = request.transferAmount() == null ? 0 : request.transferAmount();
+        if (cash + transfer == 0) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG333");
+        }
+        prepareDeposit(seller, orderId, request.depositExpiresOn(), request.expectedDepositRecorded());
+        String reference = transfer > 0 ? TransactionReferences.clean(request.transactionReference()) : null;
+        if (transfer > 0 && reference == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG154");
+        }
+        references.requireUnused(reference);
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<Long> paymentIds = new ArrayList<>(2);
+        if (cash > 0) {
+            paymentIds.add(references.save(Payment.deposit(orderId, cash, null, PaymentMethod.CASH, null, true,
+                    seller.id(), now)).getId());
+        }
+        if (transfer > 0) {
+            paymentIds.add(references.save(Payment.deposit(orderId, transfer, null, PaymentMethod.BANK_TRANSFER,
+                    reference, true, seller.id(), now)).getId());
+        }
+        long paymentId = paymentIds.getLast();
+        if (request.evidence() != null && !request.evidence().isEmpty()) {
+            attachments.attach(OwnerType.PAYMENT, paymentId, request.evidence(), seller.id());
+        }
+        return new SettlementResult(salesOrders.get(seller, orderId), paymentId, false, null, null, List.copyOf(paymentIds));
+    }
+
+    private void prepareDeposit(AuthenticatedUser seller, long orderId, LocalDate expiry, long expected) {
         SalesOrder order = lockWaiting(orderId);
         boolean storeSeller = seller.role() == Role.OWNER || (seller.role() == Role.BRANCH_MANAGER
                 && Objects.equals(seller.storeId(), order.getStoreId()));
@@ -63,6 +118,9 @@ public class SalesDepositServiceImpl implements SalesDepositService {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         requireWaiting(order);
+        if (order.getPriceType() != PriceType.WHOLESALE) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG335");
+        }
         // Mạnh 21/11: a deposit belongs to a customer profile, so the store knows whose money it is.
         if (order.getCustomerId() == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG320");
@@ -77,7 +135,6 @@ public class SalesDepositServiceImpl implements SalesDepositService {
             requireNotExpired(order);
         }
         LocalDate today = LocalDate.now(clock);
-        LocalDate expiry = request.depositExpiresOn();
         if (fresh || order.getDepositExpiresOn() == null) {
             if (expiry == null || !expiry.isAfter(today)) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG322");
@@ -86,28 +143,12 @@ public class SalesDepositServiceImpl implements SalesDepositService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG323", order.getDepositExpiresOn().format(DAY));
         }
         // BR-45: the same deposit sent twice finds more already recorded.
-        if (request.expectedDepositRecorded() != held.recorded()) {
+        if (expected != held.recorded()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG194");
         }
-        Long tendered = request.tenderedAmount();
-        if (tendered != null && (request.paymentMethod() != PaymentMethod.CASH || tendered < request.amount())) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG182");
-        }
-        String reference = TransactionReferences.clean(request.transactionReference());
-        if (request.paymentMethod() == PaymentMethod.BANK_TRANSFER && reference == null) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG154");
-        }
-        references.requireUnused(reference);
-        LocalDateTime now = LocalDateTime.now(clock);
         if (fresh || order.getDepositExpiresOn() == null) {
-            order.setDepositExpiry(expiry, now);
+            order.setDepositExpiry(expiry, LocalDateTime.now(clock));
         }
-        Payment payment = references.save(Payment.deposit(orderId, request.amount(), tendered,
-                request.paymentMethod(), reference, request.verified(), seller.id(), now));
-        if (request.evidence() != null && !request.evidence().isEmpty()) {
-            attachments.attach(OwnerType.PAYMENT, payment.getId(), request.evidence(), seller.id());
-        }
-        return new SettlementResult(salesOrders.get(seller, orderId), payment.getId(), false, null, null);
     }
 
     // BE-4
