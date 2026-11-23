@@ -139,6 +139,40 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].productId").value(chain));
     }
 
+    @Test
+    void aCleanTransferHasNothingToAcknowledgeAndClosesAsBefore() throws Exception {
+        lot(source, brake, 5, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, inspected(order, brake, 5, 0)).andExpect(status().isOk());
+        action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG29"));
+        action("bmkt", order, "/close").andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
+    }
+
+    @Test
+    void excessWithoutARecordedExpiryTakesTheOldestLotsOfTheSource() throws Exception {
+        long earlier = lot(source, brake, 3, 100_000, today.plusDays(30), "A");
+        long later = lot(source, brake, 5, 100_000, today.plusDays(60), "B");
+        long order = dispatchedOrder(brake, 2);
+        long receipt = arrive("bmlb", order);
+        assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
+        mvc.perform(put(ORDERS + "/" + order + "/receipts/" + receipt + "/result")
+                        .header(HttpHeaders.AUTHORIZATION, signIn("nvlb")).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("inspectionNote", "Thua 2",
+                                "lines", List.of(Map.of("productId", brake, "passedQty", 4, "damagedQty", 0))))))
+                .andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        Long line = jdbc.queryForObject("SELECT id FROM goods_receipt_note_line WHERE goods_receipt_note_id = ?",
+                Long.class, receipt);
+        decide(order, receipt, json(Map.of("lines", List.of(Map.of("lineId", line, "decision", "ACCEPTED")))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].excessDecision").value("ACCEPTED"));
+        assertThat(lotStock(earlier, source, "AVAILABLE")).isZero();
+        assertThat(lotStock(later, source, "AVAILABLE")).isEqualTo(4);
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(4);
+    }
+
     private void countMovement(long count, long period, long product, long lot, String status, int amount) {
         jdbc.update("""
                 INSERT INTO stock_movement (store_id, product_id, lot_id, inventory_period_id, stock_status,

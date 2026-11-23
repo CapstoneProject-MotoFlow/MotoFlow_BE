@@ -118,7 +118,8 @@ public class TransferExcessService {
                 int remaining = quantity;
                 for (int i = 0; i < available.lotsInOrder().size(); i++) {
                     var lot = available.lotsInOrder().get(i);
-                    if (!Objects.equals(lot.getExpiryDate(), line.getExpiryDate())) {
+                    // Q7/B2: the lot of the expiry the destination recorded; with no expiry recorded, oldest first.
+                    if (line.getExpiryDate() != null && !Objects.equals(lot.getExpiryDate(), line.getExpiryDate())) {
                         continue;
                     }
                     int take = Math.min(remaining, available.lotQuantities().get(i));

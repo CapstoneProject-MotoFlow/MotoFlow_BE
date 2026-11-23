@@ -348,6 +348,10 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 || hasPendingClaims(id)) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
+        // Only a transfer with a short, damaged or wrong item part is acknowledged; a clean one closes as before.
+        if (order.getDiscrepancyAcknowledgedAt() == null && !hasDiscrepancy(order, closingLines(order))) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
         if (order.getDiscrepancyAcknowledgedAt() == null) {
             LocalDateTime now = LocalDateTime.now(clock);
             order.acknowledgeDiscrepancy(user.id(), now);
@@ -464,19 +468,23 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         }).toList();
     }
 
-    /** UC-77 step 2: each reason the order cannot close, with the parts it concerns, in the order checked. */
     private boolean hasPendingClaims(long id) {
         return reconciliation.pendingClaims(id).values().stream().anyMatch(qty -> qty > 0);
     }
 
+    /** Q4: a part received short or damaged, or a wrong item received in its place, needs the destination's acknowledgement. */
+    private boolean hasDiscrepancy(TransferOrder order, List<ClosingPreviewResponse.Line> rows) {
+        return rows.stream().anyMatch(row -> row.unresolvedQty() > 0 || row.damagedQty() > 0)
+                || orders.findCases(order.getId()).stream().anyMatch(c -> c.getWrongItemQty() > 0);
+    }
+
+    /** UC-77 step 2: each reason the order cannot close, with the parts it concerns, in the order checked. */
     private Map<String, String> blockers(TransferOrder order, List<ClosingPreviewResponse.Line> rows,
                                                 List<TransferOrderLineRepository.ProductQty> open) {
         Map<String, String> blocked = new LinkedHashMap<>();
         String unresolved = rows.stream().filter(row -> row.unresolvedQty() > 0)
                 .map(row -> row.sku() + " x" + row.unresolvedQty()).collect(Collectors.joining(", "));
-        if (order.getDiscrepancyAcknowledgedAt() == null
-                && (!unresolved.isEmpty() || rows.stream().anyMatch(row -> row.damagedQty() > 0)
-                || orders.findCases(order.getId()).stream().anyMatch(c -> c.getWrongItemQty() > 0))) {
+        if (order.getDiscrepancyAcknowledgedAt() == null && hasDiscrepancy(order, rows)) {
             blocked.put("MSG336", unresolved);
         }
         if (order.getDiscrepancyAcknowledgedAt() != null && hasPendingClaims(order.getId())) {

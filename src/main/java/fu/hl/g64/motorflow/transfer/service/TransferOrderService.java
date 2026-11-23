@@ -41,9 +41,14 @@ public interface TransferOrderService {
      */
     TransferOrderDetailResponse confirmExtraDispatch(AuthenticatedUser user, long id, ExtraDispatchRequest request);
 
-    /** UC-77: the Owner and the central warehouse Branch Manager. Changes nothing. */
+    /**
+     * Q4 (PM 22/11): the destination's Branch Manager acknowledges the short, damaged and wrong item parts of a
+     * reconciling order; the status stays and the Owner is notified. After it only the Owner closes the order, and the
+     * closing writes off what is still in transit (MSG29 when nothing is to be acknowledged or something is still open).
+     */
     TransferOrderDetailResponse acknowledgeDiscrepancy(AuthenticatedUser user, long id);
 
+    /** UC-77: the Owner and the central warehouse Branch Manager. Changes nothing. */
     ClosingPreviewResponse closingPreview(AuthenticatedUser user, long id);
 
     /**
