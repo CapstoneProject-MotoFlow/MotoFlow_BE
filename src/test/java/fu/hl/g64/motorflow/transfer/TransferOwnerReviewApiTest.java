@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.transfer;
 
+import fu.hl.g64.motorflow.account.entity.enums.Role;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -171,6 +172,39 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
         assertThat(lotStock(earlier, source, "AVAILABLE")).isZero();
         assertThat(lotStock(later, source, "AVAILABLE")).isEqualTo(4);
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(4);
+    }
+
+    @Test
+    void stockDocumentsKeepEachUserToTheirWarehouseAndHideValuesFromAllButTheOwner() throws Exception {
+        lot(source, brake, 5, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 5);
+        createUser("qtv", Role.ADMIN, null);
+
+        mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, signIn("qtv")))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, signIn("bmlb"))
+                        .param("storeId", String.valueOf(source)))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
+        // In transit is not stock of the destination yet: nothing there until the receipt.
+        mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, signIn("nvlb")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(0));
+        mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, signIn("nvcg"))
+                        .param("direction", "OUT"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.items[0].kind").value("TRANSFER_DISPATCH"))
+                .andExpect(jsonPath("$.items[0].sourceId").value(order))
+                .andExpect(jsonPath("$.items[0].quantity").value(5))
+                .andExpect(jsonPath("$.items[0].value").doesNotExist());
+        mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, signIn("owner"))
+                        .param("storeId", String.valueOf(source)).param("direction", "OUT"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].value").value(500000));
+        mvc.perform(get("/api/v1/stock-documents/TRANSFER_ORDER/" + order)
+                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).param("direction", "OUT"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG02"));
+        mvc.perform(get("/api/v1/stock-documents/TRANSFER_ORDER/" + order)
+                        .header(HttpHeaders.AUTHORIZATION, signIn("bmcg")).param("direction", "OUT"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].quantity").value(5))
+                .andExpect(jsonPath("$.lines[0].unitCost").doesNotExist());
     }
 
     private void countMovement(long count, long period, long product, long lot, String status, int amount) {
