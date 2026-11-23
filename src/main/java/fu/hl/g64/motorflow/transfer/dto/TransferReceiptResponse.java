@@ -25,8 +25,11 @@ public record TransferReceiptResponse(long id, long transferOrderId, ReceiptType
     /**
      * {@code documentQty}: what the order still expected when the goods arrived; above it is excess (BR-68).
      * {@code deliveredQty} = passed + wrong item + damaged.
+     * {@code damagedQty}: damaged within the dispatch (written off); {@code damagedBeyondQty}: damaged recorded above the
+     * dispatch, kept on the receipt only (PM 23/11).
      */
     public record Line(long productId, String sku, String partName, String baseUnit, int documentQty,
-                       int deliveredQty, int passedQty, int wrongItemQty, int damagedQty, int excessQty, Long lineId, LocalDate expiryDate, ExcessDecision excessDecision) {
+                       int deliveredQty, int passedQty, int wrongItemQty, int damagedQty, int excessQty, Long lineId, LocalDate expiryDate, ExcessDecision excessDecision,
+                       int damagedBeyondQty) {
     }
 }

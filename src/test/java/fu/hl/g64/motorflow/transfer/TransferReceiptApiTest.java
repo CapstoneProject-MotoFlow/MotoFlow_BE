@@ -112,6 +112,34 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
     }
 
+    /**
+     * PM 23/11 (test DC-0066): dispatched 5, recorded passed 3 and damaged 20. Damaged fills the dispatch first (5,
+     * written off from transit), the 3 passed are excess, and the 15 damaged above the dispatch stay on the receipt
+     * only: no stock moves for them in either store.
+     */
+    @Test
+    void damagedAboveTheDispatchStaysOnTheReceiptOnly() throws Exception {
+        long only = lot(source, brake, 10, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 5);
+        long receipt = arrive("bmlb", order);
+        assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
+
+        result("nvlb", order, receipt, brake, 3, 20).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].damagedQty").value(5))
+                .andExpect(jsonPath("$.lines[0].damagedBeyondQty").value(15))
+                .andExpect(jsonPath("$.lines[0].excessQty").value(3));
+        confirm("bmlb", order, receipt).andExpect(status().isOk());
+
+        assertThat(lotStock(only, dest, "IN_TRANSIT")).isZero();
+        assertThat(lotStock(only, dest, "AVAILABLE")).isZero();
+        assertThat(stock(dest, brake, "damaged_qty")).isZero();
+        assertThat(jdbc.queryForList("SELECT stock_status || ':' || quantity_change FROM stock_movement WHERE "
+                + "goods_receipt_note_id = ?", String.class, receipt)).containsExactly("IN_TRANSIT:-5");
+        view("owner", "/" + order).andExpect(jsonPath("$.lines[0].damagedQty").value(5))
+                .andExpect(jsonPath("$.lines[0].extraReceivedQty").value(3))
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
+    }
+
     /** Review FE PR #44 R-01: dispatched 10, passed 7, wrong item 1, damaged 1. */
     @Test
     void aWrongItemIsRecordedButTheExpectedPartStaysUnresolved() throws Exception {
@@ -169,8 +197,6 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         long receipt = arrive("bmlb", order);
         assign("bmlb", "INSPECTION", receipt, destStaff).andExpect(status().isOk());
 
-        result("nvlb", order, receipt, brake, 0, 3).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG212"));
         result("nvlb", order, receipt, brake, 3, 0).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].excessQty").value(1));
         confirm("bmlb", order, receipt).andExpect(status().isOk());

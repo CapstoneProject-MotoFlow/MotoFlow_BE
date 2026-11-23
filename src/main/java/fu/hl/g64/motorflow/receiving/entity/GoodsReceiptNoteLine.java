@@ -50,6 +50,13 @@ public class GoodsReceiptNoteLine {
     @Column(name = "excess_qty", nullable = false)
     private int excessQty;
 
+    /**
+     * Transfer receipt only (PM 23/11): damaged units recorded above what was dispatched. Kept on the receipt and
+     * never posted; {@link #damagedQty} holds the damaged units within the dispatch.
+     */
+    @Column(name = "damaged_beyond_qty", nullable = false)
+    private int damagedBeyondQty;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "excess_decision", nullable = false, length = 20)
     private ExcessDecision excessDecision;
@@ -96,6 +103,14 @@ public class GoodsReceiptNoteLine {
      * BR-68: transfer excess is not Owner's decision; it waits for the source to confirm an extra dispatch and is
      * posted when the transfer order is closed.
      */
+    /** PM 23/11: damaged units of a transfer receipt above the dispatched quantity, kept on the receipt only. */
+    public void recordDamagedBeyond(int beyond) {
+        if (beyond < 0) {
+            throw new IllegalArgumentException("damaged beyond " + beyond + " is negative");
+        }
+        damagedBeyondQty = beyond;
+    }
+
     public void settleTransferExcess(int excess) {
         if (excess < 0 || excess > passedQty) {
             throw new IllegalArgumentException("excess " + excess + " is outside 0.." + passedQty);
@@ -116,6 +131,7 @@ public class GoodsReceiptNoteLine {
         this.deliveredQty = deliveredQty;
         this.wrongItemQty = wrongItemQty;
         this.damagedQty = damagedQty;
+        this.damagedBeyondQty = 0;
         this.passedQty = deliveredQty - wrongItemQty - damagedQty;
         this.manufacturerLotNo = manufacturerLotNo;
         this.manufactureDate = manufactureDate;
