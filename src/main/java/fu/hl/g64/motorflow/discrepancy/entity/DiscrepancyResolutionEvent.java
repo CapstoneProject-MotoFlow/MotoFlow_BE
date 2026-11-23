@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.discrepancy.entity;
 
 import fu.hl.g64.motorflow.discrepancy.entity.enums.GoodsKind;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -14,6 +15,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /** One action taken to resolve a discrepancy case. */
@@ -44,6 +46,18 @@ public class DiscrepancyResolutionEvent {
 
     @Column(name = "goods_receipt_note_id")
     private Long goodsReceiptNoteId;
+
+    /** Plan 23/11 (V23): on a transfer phiếu A, the part the wrong item really is and the expiry the BM recorded. */
+    @Column(name = "received_product_id")
+    private Long receivedProductId;
+
+    @Column(name = "received_expiry_date")
+    private LocalDate receivedExpiryDate;
+
+    /** PM 23/11 (V23): on a transfer's phiếu nhận hàng giao sai only. */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 15)
+    private WrongItemReceiptStatus status;
 
     @Column(name = "adjustment_request_id")
     private Long adjustmentRequestId;
@@ -131,6 +145,61 @@ public class DiscrepancyResolutionEvent {
     public static DiscrepancyResolutionEvent returnDecision(long caseId, int quantity, String reason, long by,
                                                             LocalDateTime occurredAt) {
         return pending(caseId, ResolutionType.RECEIVED_BACK_AT_SOURCE, quantity, null, reason, by, occurredAt);
+    }
+
+    /**
+     * PM 23/11 (phiếu nhận hàng giao sai): the destination's BM recorded that {@code quantity} wrong items received with
+     * the case's part are really {@code receivedProductId}. Nothing moves until the Owner confirms it
+     * ({@link #confirmWrongItemReceipt}); there is no rejection.
+     */
+    public static DiscrepancyResolutionEvent wrongItemReceipt(long caseId, int quantity, long receivedProductId,
+                                                              LocalDate expiryDate, String reason, long by,
+                                                              LocalDateTime occurredAt) {
+        DiscrepancyResolutionEvent event = pending(caseId, ResolutionType.RECEIVED_AS_OTHER_PRODUCT, quantity, null,
+                reason, by, occurredAt);
+        event.receivedProductId = receivedProductId;
+        event.receivedExpiryDate = expiryDate;
+        event.status = WrongItemReceiptStatus.AWAITING_OWNER;
+        return event;
+    }
+
+    public void confirmWrongItemReceipt(long by, LocalDateTime now) {
+        if (status != WrongItemReceiptStatus.AWAITING_OWNER) {
+            throw new IllegalStateException("wrong item receipt " + id + " is " + status);
+        }
+        status = WrongItemReceiptStatus.CONFIRMED;
+        confirm(quantity, by, now);
+    }
+
+    /** PM 23/11: only the Owner's "receiver miscounted" on the line cancels a phiếu nhận hàng giao sai. */
+    public void cancelWrongItemReceipt() {
+        if (status != WrongItemReceiptStatus.AWAITING_OWNER) {
+            throw new IllegalStateException("wrong item receipt " + id + " is " + status);
+        }
+        status = WrongItemReceiptStatus.CANCELLED;
+    }
+
+    /**
+     * PM 23/11: the destination's BM decided the short part will come in a later delivery. Pending, with no GRN, until
+     * the receipt that brings it is confirmed ({@link #settle}).
+     */
+    public static DiscrepancyResolutionEvent lateDeliveryDecision(long caseId, int quantity, String reason, long by,
+                                                                  LocalDateTime occurredAt) {
+        return pending(caseId, ResolutionType.LATE_DELIVERY_RECEIVED, quantity, null, reason, by, occurredAt);
+    }
+
+    /**
+     * PM 23/11: the destination's BM does not need the short part any more. Pending until the order closes, which
+     * moves it out of transit back to the source and confirms the event.
+     */
+    public static DiscrepancyResolutionEvent noReplacementDecision(long caseId, int quantity, String reason, long by,
+                                                                   LocalDateTime occurredAt) {
+        return pending(caseId, ResolutionType.NO_REPLACEMENT, quantity, null, reason, by, occurredAt);
+    }
+
+    /** Confirms a pending NO_REPLACEMENT decision when the order closes. */
+    public void confirmNoReplacement(long by, LocalDateTime now) {
+        confirm(quantity, by, now);
     }
 
     /** A pending return decision settled by the confirmed return receipt {@code goodsReceiptNoteId}. */

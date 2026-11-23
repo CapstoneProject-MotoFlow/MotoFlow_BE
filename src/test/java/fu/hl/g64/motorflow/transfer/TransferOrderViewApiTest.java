@@ -142,7 +142,9 @@ class TransferOrderViewApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.lines[0].returnedQty").value(1))
                 .andExpect(jsonPath("$.lines[0].lossQty").value(1))
                 .andExpect(jsonPath("$.lines[0].extraReceivedQty").value(0))
-                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(1))
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(1))
+                // PM 23/11: the 1 short is spoken for by the pending loss, so nothing awaits a decision.
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0))
                 .andExpect(jsonPath("$.lines[1].receivedQty").value(3))
                 .andExpect(jsonPath("$.lines[1].extraReceivedQty").value(1))
                 .andExpect(jsonPath("$.lines[1].unresolvedQty").value(0))
@@ -154,7 +156,7 @@ class TransferOrderViewApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.discrepancies[0].events.length()").value(2));
 
         detail("bmkt", dispatched).andExpect(status().isOk())
-                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(1))
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(1))
                 .andExpect(jsonPath("$.lots[0].unitCost").value(nullValue()));
     }
 
@@ -239,6 +241,8 @@ class TransferOrderViewApiTest extends ApiTestUsers {
         long adjustment = jdbc.queryForObject("INSERT INTO adjustment_request (adjustment_type, store_id, "
                 + "transfer_order_id, reason, status, requested_by) VALUES ('STOCK_LOSS', ?, ?, 'Mất trên đường', ?, ?) "
                 + "RETURNING id", Long.class, branch, dispatched, adjustmentStatus, owner.getId());
+        jdbc.update("INSERT INTO adjustment_stock_line (adjustment_request_id, store_id, product_id, stock_status, "
+                + "quantity_change) VALUES (?, ?, ?, 'IN_TRANSIT', ?)", adjustment, branch, brake, -quantity);
         jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, resolution_type, quantity, "
                 + "adjustment_request_id, recorded_by, occurred_at) VALUES (?, 'APPROVED_LOSS', ?, ?, ?, now())",
                 caseId, quantity, adjustment, owner.getId());

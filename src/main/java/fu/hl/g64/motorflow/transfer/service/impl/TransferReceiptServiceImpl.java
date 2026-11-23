@@ -156,7 +156,8 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             String sku = catalog.get(line.productId()).getSku();
             long decidedQty = decided.getOrDefault(line.productId(), 0L);
             if (decidedQty == 0) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG226", sku);
+                // PM 23/11: returns to the source are no longer decided; only those decided before may still come.
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG345");
             }
             long allowed = decidedQty - opened.getOrDefault(line.productId(), 0L);
             if (line.quantity() > allowed) {
@@ -381,10 +382,12 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
                 continue;
             }
             int remaining = arrived;
-            if (settled == ResolutionType.RECEIVED_BACK_AT_SOURCE) {
-                // R-06: the coordinator's pending decisions are consumed, oldest first; a partial return splits one.
-                for (DiscrepancyResolutionEvent decision : events.findPendingReturnDecisionsForUpdate(id,
-                        line.getProductId())) {
+            {
+                // R-06, PM 23/11: the pending return or late-delivery decisions are consumed, oldest first; a partial
+                // arrival splits one.
+                for (DiscrepancyResolutionEvent decision : settled == ResolutionType.RECEIVED_BACK_AT_SOURCE
+                        ? events.findPendingReturnDecisionsForUpdate(id, line.getProductId())
+                        : events.findPendingForUpdate(id, line.getProductId(), settled)) {
                     if (remaining == 0) {
                         break;
                     }
@@ -405,7 +408,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         }
         List<String> missing = new ArrayList<>();
         for (TransferOrderLine part : parts) {
-            int unresolved = figures.get(part.getProductId()).unresolved();
+            int unresolved = figures.get(part.getProductId()).shortage();
             if (unresolved > 0 && !opened.containsKey(part.getProductId())) {
                 opened.put(part.getProductId(), cases.save(DiscrepancyCase.transfer(id, part.getProductId(), unresolved, now)));
                 missing.add(catalog.get(part.getProductId()).getSku() + " x" + unresolved);
@@ -425,20 +428,17 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         }
         opened.values().stream().filter(DiscrepancyCase::isOpen)
                 .filter(shortage -> shortage.getWrongItemQty() == 0 && shortage.getDamagedQty() == 0)
-                .filter(shortage -> figures.get(shortage.getProductId()).unresolved() == 0)
+                .filter(shortage -> figures.get(shortage.getProductId()).shortage() == 0)
                 .forEach(shortage -> shortage.close(ClosureType.ALL_SETTLED, null, user.id(), now));
         String wrong = lines.stream()
                 .filter(line -> line.getWrongItemQty() > 0)
-                .filter(line -> {
-                    TransferReconciliation.Part part = figures.get(line.getProductId());
-                    return part != null && part.unresolved() == 0;
-                })
                 .map(line -> catalog.get(line.getProductId()).getSku() + " x" + line.getWrongItemQty())
                 .collect(Collectors.joining(", "));
         if (!wrong.isEmpty() && receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
             notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_WRONG_ITEM",
-                    ("Phiếu chuyển kho #%d nhận giao sai %s. Món giao sai chưa nhập kho đích "
-                            + "và chưa trừ tồn kho nguồn.").formatted(id, wrong), ENTITY, id);
+                    ("Phiếu chuyển kho #%d nhận giao sai kèm %s. Hàng giao sai chưa nhập kho nhận và chưa trừ tồn "
+                            + "kho gửi cho tới khi Owner xác nhận phiếu nhận hàng giao sai.").formatted(id, wrong),
+                    ENTITY, id);
         }
         if (!missing.isEmpty()) {
             String message = "Phiếu chuyển kho #%d còn thiếu %s chưa có kết quả, cần xử lý chênh lệch"

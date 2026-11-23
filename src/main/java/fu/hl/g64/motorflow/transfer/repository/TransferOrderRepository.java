@@ -128,8 +128,8 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
     }
 
     /**
-     * BR-75: the order's own goods in transit, which only its dispatch put there and only its receipts, returns and
-     * write-offs take away; another order's goods of the same part in the same warehouse are never touched.
+     * BR-75: the order's own goods in transit, which only its dispatch put there and only its receipts, returns,
+     * write-offs and (PM 23/11) the parts not to be replaced or corrected as miscounted take away; another order's goods of the same part in the same warehouse are never touched.
      */
     @Query("""
             select m.lotId as lotId, sum(m.quantityChange) as quantity
@@ -139,12 +139,33 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
               and m.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
               and (m.transferOrderId = :id
                    or m.goodsReceiptNoteId in (select g.id from GoodsReceiptNote g where g.transferOrderId = :id)
-                   or m.adjustmentRequestId in (select a.id from AdjustmentRequest a where a.transferOrderId = :id))
+                   or m.adjustmentRequestId in (select a.id from AdjustmentRequest a where a.transferOrderId = :id)
+                   or m.discrepancyResolutionEventId in (select e.id from DiscrepancyResolutionEvent e
+                        join DiscrepancyCase c on c.id = e.discrepancyCaseId where c.transferOrderId = :id))
             group by m.lotId, l.expiryDate, l.receivedDate
             having sum(m.quantityChange) > 0
             order by l.expiryDate asc nulls last, l.receivedDate asc, m.lotId asc
             """)
     List<TransitLot> findTransitLots(@Param("id") long id, @Param("storeId") long storeId,
+                                     @Param("productId") long productId);
+
+    /**
+     * PM 23/11 case 7: the units of the part written off as damaged when the order's receipts at the warehouse were
+     * confirmed, per lot.
+     */
+    @Query("""
+            select m.lotId as lotId, -sum(m.quantityChange) as quantity
+            from StockMovement m
+            where m.storeId = :storeId and m.productId = :productId
+              and m.movementType = fu.hl.g64.motorflow.inventory.entity.enums.MovementType.ADJUSTMENT
+              and m.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
+              and m.quantityChange < 0
+              and m.goodsReceiptNoteId in (select g.id from GoodsReceiptNote g where g.transferOrderId = :id
+                   and g.receiptType = fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType.TRANSFER_IN)
+            group by m.lotId
+            order by m.lotId
+            """)
+    List<TransitLot> findDamagedLots(@Param("id") long id, @Param("storeId") long storeId,
                                      @Param("productId") long productId);
 
     /** Every part still in transit for one order, in the same lot order as {@link #findTransitLots}. */
@@ -156,7 +177,9 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
               and m.stockStatus = fu.hl.g64.motorflow.inventory.entity.enums.StockStatus.IN_TRANSIT
               and (m.transferOrderId = :id
                    or m.goodsReceiptNoteId in (select g.id from GoodsReceiptNote g where g.transferOrderId = :id)
-                   or m.adjustmentRequestId in (select a.id from AdjustmentRequest a where a.transferOrderId = :id))
+                   or m.adjustmentRequestId in (select a.id from AdjustmentRequest a where a.transferOrderId = :id)
+                   or m.discrepancyResolutionEventId in (select e.id from DiscrepancyResolutionEvent e
+                        join DiscrepancyCase c on c.id = e.discrepancyCaseId where c.transferOrderId = :id))
             group by m.productId, m.lotId, l.expiryDate, l.receivedDate
             having sum(m.quantityChange) > 0
             order by m.productId asc, l.expiryDate asc nulls last, l.receivedDate asc, m.lotId asc

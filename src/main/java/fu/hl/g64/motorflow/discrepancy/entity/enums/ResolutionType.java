@@ -14,5 +14,9 @@ public enum ResolutionType {
     /** GVHD 20/11 (PR 5, V15): Owner took dented goods into stock as the part's "-M" variant. */
     ACCEPTED_AS_VARIANT,
     /** GVHD 20/11 (PR 5, V15): Owner took goods delivered by mistake into stock as the part they really are. */
-    RECEIVED_AS_OTHER_PRODUCT
+    RECEIVED_AS_OTHER_PRODUCT,
+    /** PM 23/11 (V23): the transfer's receiving store does not need the short part; it goes back on closing. */
+    NO_REPLACEMENT,
+    /** PM 23/11 (V23): the Owner found the transfer's receiving store counted the line wrong. */
+    RECEIVER_MISCOUNT
 }

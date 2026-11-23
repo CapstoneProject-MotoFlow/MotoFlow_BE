@@ -5,8 +5,10 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * UC-76: how a coordinator handles a part still missing. {@code adjustmentRequestId}: the STOCK_LOSS request of this
- * order that writes the quantity off transit, required for LOSS.
+ * UC-76, PM 23/11: how the receiving store's BM (or the Owner) handles a short part: it comes in a later delivery, or
+ * it is not needed any more and goes back to the source's stock when the order closes. What nobody decides on is
+ * written off as lost on closing. RETURN_TO_SOURCE and LOSS are no longer accepted (MSG345); {@code
+ * adjustmentRequestId} stays for requests of older clients and is ignored.
  */
 public record TransferDecisionRequest(
         @NotNull(message = "Vui lòng chọn phụ tùng.")
@@ -26,7 +28,10 @@ public record TransferDecisionRequest(
 
     public enum Decision {
         LATE_DELIVERY,
+        NO_REPLACEMENT,
+        /** Before PM 23/11; refused (MSG345). */
         RETURN_TO_SOURCE,
+        /** Before PM 23/11; refused (MSG345). */
         LOSS
     }
 }

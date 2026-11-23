@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.transfer.dto;
 
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.entity.enums.ReceiptType;
@@ -32,10 +33,21 @@ public record TransferOrderDetailResponse(
     public record Person(long id, String fullName) {
     }
 
+    /**
+     * PM 23/11: {@code receivedQty} passed (đạt), {@code shortageQty} thiếu (dispatched less passed, damaged,
+     * returned, lost and not to be replaced; a wrong item never counts), {@code unresolvedQty} chờ quyết (shortage
+     * with no late delivery or no replacement chosen), {@code noReplacementQty} không giao bù, {@code lossQty} mất,
+     * {@code wrongItemQty} giao sai, {@code wrongPendingQty} giao sai without a phiếu nhận hàng giao sai,
+     * {@code wrongAwaitingOwnerQty} on phiếu awaiting the Owner, {@code latePendingQty} to come later and not arrived,
+     * {@code receiverMiscounted} the Owner found the destination counted the line wrong (it then holds what was
+     * dispatched and every other figure is 0).
+     */
     public record Line(long productId, String sku, String partName, String baseUnit, int plannedQty,
                        Integer preparedQty, Integer dispatchedQty, Integer receivedQty, Integer returnedQty,
                        Integer lossQty, Integer extraReceivedQty, Integer extraDispatchedQty, Integer unresolvedQty,
-                       Integer damagedQty, Integer shortageQty, Long makeupForCaseId) {
+                       Integer damagedQty, Integer shortageQty, Long makeupForCaseId, Integer wrongItemQty,
+                       Integer wrongPendingQty, Integer wrongAwaitingOwnerQty, Integer noReplacementQty,
+                       Integer latePendingQty, Boolean receiverMiscounted) {
     }
 
     /** A lot taken out of the source on dispatch (BR-75). */
@@ -53,8 +65,14 @@ public record TransferOrderDetailResponse(
                               LocalDateTime openedAt, LocalDateTime closedAt, List<Event> events) {
     }
 
+    /**
+     * PM 23/11: a phiếu nhận hàng giao sai (RECEIVED_AS_OTHER_PRODUCT) carries the part really received, its
+     * expiry and {@code status}; {@code recordedBy} made the event.
+     */
     public record Event(long id, ResolutionType resolutionType, int quantity, Long goodsReceiptNoteId,
                         Long adjustmentRequestId, String reason, LocalDateTime occurredAt,
-                        LocalDateTime confirmedAt) {
+                        LocalDateTime confirmedAt, Long receivedProductId, String receivedSku,
+                        String receivedPartName, LocalDate receivedExpiryDate, WrongItemReceiptStatus status,
+                        Person recordedBy) {
     }
 }

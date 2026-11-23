@@ -29,6 +29,48 @@ public interface DiscrepancyResolutionEventRepository extends JpaRepository<Disc
             order by e.occurredAt, e.id""")
     List<DiscrepancyResolutionEvent> findPendingReturnDecisionsForUpdate(long transferOrderId, long productId);
 
+    /** PM 23/11: one event, locked. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from DiscrepancyResolutionEvent e where e.id = :id")
+    java.util.Optional<DiscrepancyResolutionEvent> findByIdForUpdate(long id);
+
+    /** PM 23/11: the transfer phiếu nhận hàng giao sai awaiting the Owner, newest first. */
+    @Query("""
+            select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            where c.transferOrderId is not null
+              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+              and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_OWNER
+            order by e.occurredAt desc, e.id desc""")
+    List<DiscrepancyResolutionEvent> findPendingTransferSwaps(org.springframework.data.domain.Pageable page);
+
+    /** PM 23/11: the events of one transfer case still pending (decisions, phiếu nhận hàng giao sai), locked. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select e from DiscrepancyResolutionEvent e where e.discrepancyCaseId = :caseId
+              and (e.confirmedAt is null
+                   or e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_OWNER)
+            order by e.occurredAt, e.id""")
+    List<DiscrepancyResolutionEvent> findOpenByCaseForUpdate(long caseId);
+
+    /** PM 23/11: pending decisions of one type for one part of a transfer order, oldest first, locked. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            where c.transferOrderId = :transferOrderId and c.productId = :productId
+              and e.resolutionType = :type and e.confirmedAt is null
+            order by e.occurredAt, e.id""")
+    List<DiscrepancyResolutionEvent> findPendingForUpdate(long transferOrderId, long productId, ResolutionType type);
+
+    /** PM 23/11: pending NO_REPLACEMENT decisions of a transfer order, locked, for its closing. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            where c.transferOrderId = :transferOrderId
+              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.NO_REPLACEMENT
+              and e.confirmedAt is null
+            order by c.productId, e.occurredAt, e.id""")
+    List<DiscrepancyResolutionEvent> findPendingNoReplacementForUpdate(long transferOrderId);
+
     /**
      * The given receipts that are replacement deliveries (UC-106 Step 1_Supplier replacement): they settle
      * discrepancy cases instead of the PO.

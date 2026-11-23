@@ -48,24 +48,18 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
 
         // R-06: the return decision stays pending after a return recorded as 0, so it still claims the 2 units.
         arrive(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG210"));
-        // The coordinator gives it up for a late delivery, which frees the units.
-        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
-                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("productId", brake, "decision", "LATE_DELIVERY", "quantity", 2))))
-                .andExpect(status().isOk());
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event WHERE resolution_type = "
-                + "'RECEIVED_BACK_AT_SOURCE' AND confirmed_at IS NULL", Long.class)).isZero();
-        long again = arrive("bmlb", order);
-        assign("bmlb", "INSPECTION", again, destStaff).andExpect(status().isOk());
-        result("nvlb", order, again, brake, 2, 0).andExpect(status().isOk());
-        confirm("bmlb", order, again).andExpect(status().isOk());
+        // PM 23/11: no new decision may replace it; the source opens the return again and it comes back.
+        long again = openReturn(order, 2);
+        assign("bmcg", "INSPECTION", again, sourceStaff).andExpect(status().isOk());
+        result("nvcg", order, again, brake, 2, 0).andExpect(status().isOk());
+        confirm("bmcg", order, again).andExpect(status().isOk());
         assertInvariant(order, 0);
 
         mvc.perform(post(ORDERS + "/" + order + "/close").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
-        assertThat(stock(dest, brake, "available_qty")).isEqualTo(4);
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(2);
         assertThat(stock(dest, brake, "in_transit_qty")).isZero();
-        assertThat(stock(source, brake, "available_qty")).isEqualTo(afterDispatch);
+        assertThat(stock(source, brake, "available_qty")).isEqualTo(afterDispatch + 2);
     }
 
     @Test
@@ -75,7 +69,7 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
         int afterDispatch = stock(source, brake, "available_qty");
         confirm("bmlb", order, inspected(order, brake, 1, 0)).andExpect(status().isOk());
 
-        decide(order, "RETURN_TO_SOURCE", 2);
+        legacyDecision(order, brake, "RECEIVED_BACK_AT_SOURCE", 2, null);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note WHERE receipt_type = "
                 + "'RETURN_TO_SOURCE'", Long.class)).isZero();
         long late = arrive("bmlb", order);
@@ -87,18 +81,18 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
         result("nvlb", order, late, brake, 1, 0).andExpect(status().isOk());
         confirm("bmlb", order, late).andExpect(status().isOk());
 
-        decide(order, "LATE_DELIVERY", 2);
+        // PM 23/11: the decision from before is still carried out by the source.
+        long back = openReturn(order, 2);
+        assign("bmcg", "INSPECTION", back, sourceStaff).andExpect(status().isOk());
+        result("nvcg", order, back, brake, 2, 0).andExpect(status().isOk());
+        confirm("bmcg", order, back).andExpect(status().isOk());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event WHERE resolution_type = "
                 + "'RECEIVED_BACK_AT_SOURCE' AND confirmed_at IS NULL", Long.class)).isZero();
-        long again = arrive("bmlb", order);
-        assign("bmlb", "INSPECTION", again, destStaff).andExpect(status().isOk());
-        result("nvlb", order, again, brake, 2, 0).andExpect(status().isOk());
-        confirm("bmlb", order, again).andExpect(status().isOk());
         close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
 
-        assertThat(stock(dest, brake, "available_qty")).isEqualTo(4);
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(2);
         assertThat(stock(dest, brake, "in_transit_qty")).isZero();
-        assertThat(stock(source, brake, "available_qty")).isEqualTo(afterDispatch);
+        assertThat(stock(source, brake, "available_qty")).isEqualTo(afterDispatch + 2);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM goods_receipt_note_line l JOIN goods_receipt_note g ON "
                 + "g.id = l.goods_receipt_note_id WHERE g.transfer_order_id = ? AND l.excess_qty > 0", Long.class,
                 order)).isZero();
@@ -122,11 +116,7 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
                 + "'PENDING', ?) RETURNING id", Long.class, dest, order, destManager.getId());
         jdbc.update("INSERT INTO adjustment_stock_line (adjustment_request_id, store_id, product_id, stock_status, "
                 + "quantity_change) VALUES (?, ?, ?, 'IN_TRANSIT', -1)", adjustment, dest, brake);
-        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
-                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("productId", brake, "decision", "LOSS", "quantity", 1,
-                                "adjustmentRequestId", adjustment))))
-                .andExpect(status().isOk());
+        legacyDecision(order, brake, "APPROVED_LOSS", 1, adjustment);
         long late = arrive("bmlb", order);
         assign("bmlb", "INSPECTION", late, destStaff).andExpect(status().isOk());
 
@@ -210,26 +200,21 @@ class TransferConsistencyApiTest extends TransferFlowTestData {
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(3);
     }
 
-    /** UC-76 Step 3_Return to source of {@code quantity} brakes by the source Branch Manager; the receipt's id. */
+    /**
+     * UC-76 Step 3_Return to source of {@code quantity} brakes by the source Branch Manager, for a return decided
+     * before PM 23/11 (R-06); the receipt's id.
+     */
     private long arriveReturn(long order, int quantity) throws Exception {
-        // R-06: the coordinator decides the return before the source may open it.
-        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
-                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("productId", brake, "decision", "RETURN_TO_SOURCE",
-                                "quantity", quantity))))
-                .andExpect(status().isOk());
+        legacyDecision(order, brake, "RECEIVED_BACK_AT_SOURCE", quantity, null);
+        return openReturn(order, quantity);
+    }
+
+    private long openReturn(long order, int quantity) throws Exception {
         mvc.perform(post(ORDERS + "/" + order + "/returns").header(HttpHeaders.AUTHORIZATION, signIn("bmcg"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of("lines", List.of(Map.of("productId", brake, "quantity", quantity))))))
                 .andExpect(status().isCreated());
         return jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
-    }
-
-    private void decide(long order, String decision, int quantity) throws Exception {
-        mvc.perform(post(ORDERS + "/" + order + "/discrepancy/decisions")
-                        .header(HttpHeaders.AUTHORIZATION, signIn("owner")).contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("productId", brake, "decision", decision, "quantity", quantity))))
-                .andExpect(status().isOk());
     }
 
     private ResultActions close(long order) throws Exception {

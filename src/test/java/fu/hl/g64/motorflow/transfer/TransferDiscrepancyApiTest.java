@@ -16,15 +16,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** UC-76. */
+/** UC-76, PM 23/11: late delivery or no replacement; returns and losses decided before 23/11 still settle. */
 class TransferDiscrepancyApiTest extends TransferFlowTestData {
 
     @Test
     void lateDeliveryIsSettledByTheLaterReceipt() throws Exception {
         long order = shortOrder(4, 1);
 
-        decide("bmkt", order, brake, "LATE_DELIVERY", 3, null).andExpect(status().isOk())
-                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(3));
+        decide("bmlb", order, brake, "LATE_DELIVERY", 3, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(3))
+                .andExpect(jsonPath("$.lines[0].latePendingQty").value(3))
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
         assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log WHERE action = 'TRANSFER_DISCREPANCY_DECIDED'",
                 Long.class)).isEqualTo(1);
         long late = inspected(order, brake, 3, 0);
@@ -50,7 +52,7 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
         long order = dispatchedOrder(brake, 4);
         confirm("bmlb", order, inspected(order, brake, 1, 0)).andExpect(status().isOk());
 
-        decide("owner", order, brake, "RETURN_TO_SOURCE", 3, null).andExpect(status().isOk());
+        legacyDecision(order, brake, "RECEIVED_BACK_AT_SOURCE", 3, null);
         long back = arriveReturn("bmcg", order, brake, 3).andExpect(status().isCreated())
                 .andExpect(jsonPath("$.receiptType").value("RETURN_TO_SOURCE"))
                 .andExpect(jsonPath("$.lines[0].documentQty").value(3)).andReturn().getResponse().getHeader("Location")
@@ -80,11 +82,11 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
     void nothingCoversMoreThanIsStillMissing() throws Exception {
         long order = shortOrder(4, 1);
 
-        decide("bmkt", order, brake, "LATE_DELIVERY", 4, null).andExpect(status().isBadRequest())
+        decide("bmlb", order, brake, "LATE_DELIVERY", 4, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG217"));
-        decide("bmkt", order, chain, "LATE_DELIVERY", 1, null).andExpect(status().isBadRequest())
+        decide("bmlb", order, chain, "LATE_DELIVERY", 1, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG216"));
-        decide("bmkt", order, brake, "RETURN_TO_SOURCE", 2, null).andExpect(status().isOk());
+        legacyDecision(order, brake, "RECEIVED_BACK_AT_SOURCE", 2, null);
         arriveReturn("bmcg", order, brake, 4).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG217"));
         arriveReturn("bmcg", order, brake, 2).andExpect(status().isCreated());
@@ -94,7 +96,8 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
                 Integer.class, late)).isEqualTo(1);
         arriveReturn("bmcg", order, brake, 1).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG217"));
-        decide("bmkt", order, brake, "RETURN_TO_SOURCE", 1, null).andExpect(status().isBadRequest())
+        // The last 1 is awaited by the open receipt, so nothing is left to decide on.
+        decide("bmlb", order, brake, "NO_REPLACEMENT", 1, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG217"));
     }
 
@@ -104,16 +107,15 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
         long adjustment = transitLoss(order, brake, 2);
         long other = transitLoss(order, brake, 3);
 
-        decide("owner", order, brake, "LOSS", 2, null).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG218"));
-        decide("owner", order, brake, "LOSS", 2, other).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG219"));
-        decide("owner", order, brake, "LOSS", 2, adjustment).andExpect(status().isOk())
+        legacyDecision(order, brake, "APPROVED_LOSS", 2, adjustment);
+        jdbc.update("UPDATE adjustment_request SET status = 'REJECTED' WHERE id = ?", other);
+        view("owner", "/" + order).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].lossQty").value(0))
-                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(3))
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(3))
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(1))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].resolutionType").value("APPROVED_LOSS"))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].adjustmentRequestId").value(adjustment));
-        decide("owner", order, brake, "LOSS", 2, adjustment).andExpect(status().isBadRequest())
+        decide("owner", order, brake, "LATE_DELIVERY", 2, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG217"));
 
         // The pending loss is spoken for: only 1 may still arrive late.
@@ -124,20 +126,18 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
         jdbc.update("UPDATE adjustment_request SET status = 'APPLIED', applied_at = now() WHERE id = ?", adjustment);
         view("owner", "/" + order).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].lossQty").value(2))
-                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(1));
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(1));
     }
 
     @Test
     void aRejectedLossFreesTheQuantity() throws Exception {
         long order = shortOrder(4, 1);
         long adjustment = transitLoss(order, brake, 3);
-        decide("owner", order, brake, "LOSS", 3, adjustment).andExpect(status().isOk());
+        legacyDecision(order, brake, "APPROVED_LOSS", 3, adjustment);
         arrive(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG210"));
 
         jdbc.update("UPDATE adjustment_request SET status = 'REJECTED' WHERE id = ?", adjustment);
         arrive(order).andExpect(status().isCreated());
-        decide("owner", order, brake, "LOSS", 3, adjustment).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG217"));
     }
 
     @Test
@@ -163,13 +163,15 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
     }
 
     @Test
-    void onlyCoordinatorsDecideAndOnlyTheSourceReceivesReturns() throws Exception {
+    void onlyTheReceivingStoreOrTheOwnerDecidesAndOnlyTheSourceReceivesReturns() throws Exception {
         long order = shortOrder(4, 1);
 
-        decide("bmlb", order, brake, "LATE_DELIVERY", 1, null).andExpect(status().isForbidden())
+        decide("bmkt", order, brake, "LATE_DELIVERY", 1, null).andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
         decide("bmcg", order, brake, "LATE_DELIVERY", 1, null).andExpect(status().isForbidden());
         decide("nvlb", order, brake, "LATE_DELIVERY", 1, null).andExpect(status().isForbidden());
+        decide("bmlb", order, brake, "LATE_DELIVERY", 1, null).andExpect(status().isOk());
+        legacyDecision(order, brake, "RECEIVED_BACK_AT_SOURCE", 1, null);
         arriveReturn("bmlb", order, brake, 1).andExpect(status().isForbidden());
         arriveReturn("owner", order, brake, 1).andExpect(status().isForbidden());
         arriveReturn("bmcg", order, chain, 1).andExpect(status().isBadRequest())
@@ -177,11 +179,16 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
     }
 
     @Test
-    void aReturnNeedsTheCoordinatorsDecision() throws Exception {
+    void returnsAndLossesAreNoLongerDecided() throws Exception {
         long order = shortOrder(4, 1);
 
         arriveReturn("bmcg", order, brake, 1).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG226"));
+                .andExpect(jsonPath("$.code").value("MSG345"));
+        decide("owner", order, brake, "RETURN_TO_SOURCE", 1, null).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG345"));
+        decide("bmlb", order, brake, "LOSS", 1, transitLoss(order, brake, 1)).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG345"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event", Long.class)).isZero();
     }
 
     @Test
@@ -233,9 +240,13 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
     void decisionsTogetherCannotExceedWhatIsUnresolved() throws Exception {
         long order = shortOrder(4, 1);
 
-        decide("owner", order, brake, "RETURN_TO_SOURCE", 2, null).andExpect(status().isOk());
-        decide("owner", order, brake, "RETURN_TO_SOURCE", 2, null).andExpect(status().isBadRequest())
+        decide("owner", order, brake, "LATE_DELIVERY", 2, null).andExpect(status().isOk());
+        decide("bmlb", order, brake, "NO_REPLACEMENT", 2, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG217"));
+        decide("bmlb", order, brake, "NO_REPLACEMENT", 1, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].noReplacementQty").value(1))
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(2))
+                .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
     }
 
     @Test
@@ -246,6 +257,9 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
 
         jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, resolution_type, quantity, "
                 + "recorded_by, occurred_at) VALUES (?, 'RECEIVED_BACK_AT_SOURCE', 1, ?, now())", shortage,
+                owner.getId());
+        jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, resolution_type, quantity, "
+                + "recorded_by, occurred_at) VALUES (?, 'LATE_DELIVERY_RECEIVED', 1, ?, now())", shortage,
                 owner.getId());
         assertThatThrownBy(() -> jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, "
                 + "resolution_type, quantity, recorded_by, occurred_at) VALUES (?, 'REPLACEMENT_RECEIVED', 1, ?, now())",
@@ -258,7 +272,7 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
 
     /** A RETURN_TO_SOURCE decision of {@code decided}, then a return of {@code quantity} opened and given to staff. */
     private long decidedReturn(long order, int decided, int quantity) throws Exception {
-        decide("owner", order, brake, "RETURN_TO_SOURCE", decided, null).andExpect(status().isOk());
+        legacyDecision(order, brake, "RECEIVED_BACK_AT_SOURCE", decided, null);
         arriveReturn("bmcg", order, brake, quantity).andExpect(status().isCreated());
         long back = jdbc.queryForObject("SELECT max(id) FROM goods_receipt_note", Long.class);
         assign("bmcg", "INSPECTION", back, sourceStaff).andExpect(status().isOk());
@@ -272,32 +286,20 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
     }
 
     @Test
-    void aReturnDecisionNotOpenedIsReleasedByALossAndTheOrderCloses() throws Exception {
+    void aDecisionFromBeforeStillBlocksClosingUntilItIsSettled() throws Exception {
         long order = shortOrder(3, 1);
-        long back = decidedReturn(order, 2, 2);
-        result("nvcg", order, back, brake, 0, 0).andExpect(status().isOk());
-        confirm("bmcg2", order, back).andExpect(status().isOk());
-        long adjustment = transitLoss(order, brake, 2);
+        legacyDecision(order, brake, "RECEIVED_BACK_AT_SOURCE", 2, null);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(ORDERS + "/" + order
+                        + "/closing-preview").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(jsonPath("$.blockedBy", org.hamcrest.Matchers.hasItem("MSG340")));
 
-        decide("owner", order, brake, "LOSS", 2, adjustment).andExpect(status().isOk());
-
-        assertThat(returnEvents(order)).isEmpty();
-        assertThat(jdbc.queryForObject("SELECT new_data::text FROM audit_log WHERE action = "
-                + "'TRANSFER_DISCREPANCY_DECIDED' ORDER BY id DESC LIMIT 1", String.class))
-                .contains("released_return_qty");
-        jdbc.update("UPDATE adjustment_request SET status = 'APPLIED', applied_at = now() WHERE id = ?", adjustment);
+        long back = arriveReturn("bmcg", order, brake, 2).andExpect(status().isCreated()).andReturn().getResponse()
+                .getHeader("Location").transform(location -> Long.parseLong(location.substring(location.lastIndexOf('/') + 1)));
+        assign("bmcg", "INSPECTION", back, sourceStaff).andExpect(status().isOk());
+        result("nvcg", order, back, brake, 2, 0).andExpect(status().isOk());
+        confirm("bmcg", order, back).andExpect(status().isOk());
         mvc.perform(post(ORDERS + "/" + order + "/close").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
-                .andExpect(status().isOk());
-    }
-
-    @Test
-    void anOpenReturnIsNotReleasedByALoss() throws Exception {
-        long order = shortOrder(4, 1);
-        decidedReturn(order, 2, 2);
-        long adjustment = transitLoss(order, brake, 2);
-
-        decide("owner", order, brake, "LOSS", 2, adjustment).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG217"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
     }
 
     /** Dispatched {@code sent} brakes, {@code received} confirmed at the destination: the rest is missing. */

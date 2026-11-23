@@ -248,6 +248,18 @@ abstract class TransferFlowTestData extends ApiTestUsers {
         return mvc.perform(get(ORDERS + path).header(HttpHeaders.AUTHORIZATION, signIn(username)));
     }
 
+    /**
+     * A decision of an order from before PM 23/11, no longer made through the API: a pending return to the source
+     * ({@code RECEIVED_BACK_AT_SOURCE}) or a loss linked to an adjustment ({@code APPROVED_LOSS}).
+     */
+    protected void legacyDecision(long order, long product, String type, int quantity, Long adjustment) {
+        long shortage = jdbc.queryForObject("SELECT id FROM discrepancy_case WHERE transfer_order_id = ? "
+                + "AND product_id = ? AND status = 'OPEN'", Long.class, order, product);
+        jdbc.update("INSERT INTO discrepancy_resolution_event (discrepancy_case_id, resolution_type, quantity, "
+                + "adjustment_request_id, recorded_by, occurred_at) VALUES (?, ?, ?, ?, ?, now())", shortage, type,
+                quantity, adjustment, owner.getId());
+    }
+
     protected int stock(long store, long product, String column) {
         return jdbc.queryForObject("SELECT coalesce(max(" + column + "), 0) FROM stock_balance WHERE store_id = ? "
                 + "AND product_id = ?", Integer.class, store, product);

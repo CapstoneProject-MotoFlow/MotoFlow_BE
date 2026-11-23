@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyCaseRepository;
+import fu.hl.g64.motorflow.discrepancy.repository.DiscrepancyResolutionEventRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
@@ -21,6 +22,7 @@ import fu.hl.g64.motorflow.store.helper.StoreScope;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrderLine;
 import fu.hl.g64.motorflow.transfer.helper.RequestedParts;
+import fu.hl.g64.motorflow.transfer.helper.TransferExcessAcceptance;
 import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
@@ -67,6 +69,7 @@ abstract class TransferOrderUnitTestBase {
     @Mock DiscrepancyCaseRepository cases;
     @Mock StoreRepository stores;
     @Mock TransferReconciliation reconciliation;
+    @Mock TransferExcessAcceptance excessAcceptance;
     @Mock ProductRepository products;
     @Mock InventoryService inventory;
     @Mock UserAccountRepository users;
@@ -106,7 +109,8 @@ abstract class TransferOrderUnitTestBase {
         service = new TransferOrderServiceImpl(orders, lines, requests, requestLines, cases, stores,
                 new StoreScope(stores), new RequestedParts(products), reconciliation, products, inventory, users,
                 auditLog, notifications, posting, tasks, warehouseTasks, guide, attachments,
-                mock(StockBalanceRepository.class), CLOCK);
+                mock(StockBalanceRepository.class), mock(DiscrepancyResolutionEventRepository.class), excessAcceptance,
+                CLOCK);
         allStores.put(1L, store(1, StoreStatus.ACTIVE, true));
         allStores.put(2L, store(2, StoreStatus.ACTIVE, false));
         allStores.put(3L, store(3, StoreStatus.ACTIVE, false));

@@ -13,4 +13,8 @@ public interface TransferDiscrepancyService {
      * decision nor a make-up shipment lowers the unresolved quantity by itself (BR-60, BR-62).
      */
     TransferOrderDetailResponse decide(AuthenticatedUser user, long transferOrderId, TransferDecisionRequest request);
+
+    /** PM 23/11 case 7: the Owner corrects a line the receiving store counted wrong ("Bên nhận kiểm sai"). */
+    TransferOrderDetailResponse receiverMiscount(AuthenticatedUser user, long transferOrderId, long caseId,
+                                                 fu.hl.g64.motorflow.transfer.dto.ReceiverMiscountRequest request);
 }

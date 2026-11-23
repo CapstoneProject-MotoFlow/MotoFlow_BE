@@ -19,5 +19,11 @@ public enum MovementType {
     /** GVHD 20/11 (PR 5, V15): damaged goods leave the part and come in as its dented-goods variant. */
     DAMAGED_TO_VARIANT,
     /** GVHD 20/11 (PR 5, V15): wrong items leave the part ordered and come in as the part they really are. */
-    WRONG_ITEM_RECLASSIFIED
+    WRONG_ITEM_RECLASSIFIED,
+    /** PM 23/11 (V23): an Owner-confirmed transfer wrong item leaves the source for the destination. */
+    TRANSFER_WRONG_ITEM,
+    /** PM 23/11 (V23): on closing, a short part not to be replaced leaves transit back to the source. */
+    TRANSFER_SHORT_RETURNED,
+    /** PM 23/11 (V23): the receiver miscounted; the destination gets what was dispatched. */
+    TRANSFER_RECEIPT_CORRECTED
 }
