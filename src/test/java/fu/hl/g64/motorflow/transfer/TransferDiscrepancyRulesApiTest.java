@@ -240,6 +240,56 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
     }
 
+    /** Review 23/11 R-02 (PM Q1): a late delivery is not lost; the order closes only once it has arrived. */
+    @Test
+    void aLateDeliveryMustArriveBeforeTheOrderCloses() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, received(order, 3, 0, 0)).andExpect(status().isOk());
+        decide("bmlb", order, "LATE_DELIVERY", 2).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].latePendingQty").value(2));
+        action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
+                + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED' AND recipient_id = ?", String.class, owner.getId()))
+                .doesNotContain("Sẽ tính là mất");
+
+        closingPreview(order).andExpect(jsonPath("$.canClose").value(false))
+                .andExpect(jsonPath("$.blockedBy", contains("MSG348")))
+                .andExpect(jsonPath("$.lines[0].latePendingQty").value(2))
+                .andExpect(jsonPath("$.lines[0].toLossQty").value(0));
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG348"));
+        assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(2);
+
+        confirm("bmlb", order, received(order, 2, 0, 0)).andExpect(status().isOk());
+        close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.lines[0].lossQty").value(0));
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
+        assertThat(stock(dest, brake, "in_transit_qty")).isZero();
+    }
+
+    /** Review 23/11 R-01: a line counted above what was dispatched can be corrected too; its excess is void. */
+    @Test
+    void theOwnerCorrectsALineCountedAboveWhatWasDispatched() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 5);
+        long receipt = received(order, 6, 0, 0);
+        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        long caseId = jdbc.queryForObject("SELECT id FROM discrepancy_case WHERE transfer_order_id = ? "
+                + "AND status = 'OPEN'", Long.class, order);
+
+        miscount("owner", order, caseId, "Kho nhận đếm dư 1").andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].receivedQty").value(5))
+                .andExpect(jsonPath("$.lines[0].receiverMiscounted").value(true))
+                .andExpect(jsonPath("$.discrepancies[0].status").value("CLOSED"));
+        assertThat(jdbc.queryForObject("SELECT excess_decision FROM goods_receipt_note_line "
+                + "WHERE goods_receipt_note_id = ?", String.class, receipt)).isEqualTo("REJECTED");
+        closingPreview(order).andExpect(jsonPath("$.canClose").value(true))
+                .andExpect(jsonPath("$.lines[0].excessToAcceptQty").value(0));
+        close(order).andExpect(status().isOk());
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
+        assertThat(stock(source, brake, "available_qty")).isEqualTo(5);
+    }
+
     /** (9) Once Y has moved on a confirmed wrong item receipt, the line can no longer be corrected. */
     @Test
     void aConfirmedWrongItemReceiptStopsTheCorrection() throws Exception {

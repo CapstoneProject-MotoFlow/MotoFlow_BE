@@ -66,9 +66,12 @@ public class TransferReconciliation {
             return Math.max(shortage() - rules.latePending() - rules.legacyClaims(), 0);
         }
 
-        /** Written off as lost on closing: the shortage still in transit, late deliveries that did not come included. */
+        /**
+         * Written off as lost on closing: the shortage nobody chose anything for. PM Q1 23/11: a late delivery is not
+         * lost; the order cannot close until it arrives (MSG348).
+         */
         public int toLoss() {
-            return Math.max(shortage() - rules.legacyClaims(), 0);
+            return awaitingDecision();
         }
 
         /** Mất: written off, by the closing (PM 23/11) or by an applied loss adjustment (before). */

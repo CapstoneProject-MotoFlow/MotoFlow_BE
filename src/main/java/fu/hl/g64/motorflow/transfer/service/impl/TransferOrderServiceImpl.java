@@ -506,7 +506,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                     figure.damaged(), figure.legacyExcess(), figure.pendingExcess(), figure.shortage(),
                     figure.awaitingDecision(), figure.toSource(), figure.toLoss(), figure.pendingExcess(),
                     figure.rules().wrongItem(), figure.wrongPending(), figure.rules().wrongAwaitingOwner(),
-                    figure.rules().miscounted());
+                    figure.rules().miscounted(), figure.rules().latePending());
         }).toList();
     }
 
@@ -557,6 +557,12 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         }
         if (hasPendingClaims(order.getId())) {
             blocked.put("MSG340", new Object[0]);
+        }
+        // PM Q1 23/11: what the destination chose to receive later must arrive before the order closes.
+        String late = rows.stream().filter(row -> row.latePendingQty() > 0)
+                .map(row -> row.sku() + " x" + row.latePendingQty()).collect(Collectors.joining(", "));
+        if (!late.isEmpty()) {
+            blocked.put("MSG348", new Object[]{late});
         }
         // PM 23/11 B-7(a): the excess awaiting the Owner is accepted on closing, so the source must be able to give it.
         TransferExcessAcceptance.Refusal excess = excessAcceptance.check(order, excessAcceptance.pending(order.getId()));

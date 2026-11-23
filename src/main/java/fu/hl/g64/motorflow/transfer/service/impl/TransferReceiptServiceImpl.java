@@ -415,8 +415,10 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             }
         }
         if (receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
+            // Review 23/11 R-01: a line counted above what was dispatched also gets a case, so the Owner can correct a
+            // receiver miscount on it (the excess would otherwise be accepted on closing).
             for (GoodsReceiptNoteLine line : lines) {
-                if (line.getWrongItemQty() > 0 || line.getDamagedQty() > 0) {
+                if (line.getWrongItemQty() > 0 || line.getDamagedQty() > 0 || line.getExcessQty() > 0) {
                     DiscrepancyCase record = opened.get(line.getProductId());
                     if (record == null) {
                         record = cases.save(DiscrepancyCase.transfer(id, line.getProductId(), 0, now));
@@ -429,6 +431,9 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         opened.values().stream().filter(DiscrepancyCase::isOpen)
                 .filter(shortage -> shortage.getWrongItemQty() == 0 && shortage.getDamagedQty() == 0)
                 .filter(shortage -> figures.get(shortage.getProductId()).shortage() == 0)
+                .filter(shortage -> receipt.getReceiptType() != ReceiptType.TRANSFER_IN || lines.stream()
+                        .noneMatch(line -> Objects.equals(line.getProductId(), shortage.getProductId())
+                                && line.getExcessQty() > 0))
                 .forEach(shortage -> shortage.close(ClosureType.ALL_SETTLED, null, user.id(), now));
         String wrong = lines.stream()
                 .filter(line -> line.getWrongItemQty() > 0)

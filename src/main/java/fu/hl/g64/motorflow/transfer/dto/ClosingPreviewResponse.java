@@ -9,8 +9,9 @@ import java.util.List;
  *
  * @param blockedBy the message codes closing would fail with, in the order they are checked: MSG336 not acknowledged
  *                  by the destination, MSG342 wrong items without a confirmed phiếu nhận hàng giao sai, MSG340 return
- *                  or loss decisions of orders before PM 23/11 still open, MSG339 / MSG341 the source cannot give the
- *                  excess to accept, MSG222 / MSG223 excess of orders before Q7, MSG225 receipts not yet confirmed
+ *                  or loss decisions of orders before PM 23/11 still open, MSG348 late deliveries not arrived yet,
+ *                  MSG339 / MSG341 the source cannot give the excess to accept, MSG222 / MSG223 excess of orders
+ *                  before Q7, MSG225 receipts not yet confirmed
  */
 public record ClosingPreviewResponse(long id, TransferOrderStatus status, boolean canClose, List<String> blockedBy,
                                      List<Line> lines) {
@@ -23,13 +24,14 @@ public record ClosingPreviewResponse(long id, TransferOrderStatus status, boolea
      * off as lost. {@code unresolvedQty} is what is still in transit at the destination, {@code shortageQty} of it
      * not to be replaced excluded; {@code awaitingDecisionQty} the shortage without a decision yet.
      * {@code wrongPendingQty}: wrong items without a phiếu nhận hàng giao sai; {@code receiverMiscounted}: the Owner
-     * corrected the line, the destination holds what was dispatched.
+     * corrected the line, the destination holds what was dispatched. {@code latePendingQty}: chosen to come in a later
+     * delivery and not arrived yet; it stops the order from closing (MSG348).
      */
     public record Line(long productId, String sku, String partName, String baseUnit, int dispatchedQty,
                        int receivedQty, int returnedQty, int lossQty, int unresolvedQty, int extraReceivedQty,
                        int extraDispatchedQty, int sourceSellableQty, int damagedQty, int legacyExcessQty,
                        int pendingExcessQty, int shortageQty, int awaitingDecisionQty, int toSourceQty, int toLossQty,
                        int excessToAcceptQty, int wrongItemQty, int wrongPendingQty, int wrongAwaitingOwnerQty,
-                       boolean receiverMiscounted) {
+                       boolean receiverMiscounted, int latePendingQty) {
     }
 }
