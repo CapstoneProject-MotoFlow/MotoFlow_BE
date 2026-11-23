@@ -104,7 +104,9 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
         Long line = jdbc.queryForObject("SELECT id FROM goods_receipt_note_line WHERE goods_receipt_note_id = ?",
                 Long.class, receipt);
         decide(order, receipt, json(Map.of("lines", List.of(Map.of("lineId", line, "decision", "ACCEPTED")))))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG339"));
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG341"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString(
+                        today.plusDays(60).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy")))));
         receiptView("owner", order, receipt).andExpect(jsonPath("$.lines[0].excessDecision").value("AWAITING_OWNER"));
         decide(order, receipt, json(Map.of("lines", List.of(Map.of("lineId", line, "decision", "REJECTED")))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.lines[0].excessDecision").value("REJECTED"));

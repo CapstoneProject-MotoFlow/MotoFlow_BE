@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.transfer.service;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.catalog.entity.Product;
+import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
@@ -31,18 +33,23 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class TransferExcessService {
 
+    private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
     private final TransferOrderRepository orders;
+    private final ProductRepository products;
     private final GoodsReceiptNoteRepository receipts;
     private final GoodsReceiptNoteLineRepository receiptLines;
     private final TransferReceiptService transferReceipts;
@@ -108,11 +115,19 @@ public class TransferExcessService {
             balances.findByStoreForUpdate(Math.max(source, destination), productIds);
             LocalDate today = LocalDate.now(clock);
             Map<Long, PickingGuide.Part> availability = guide.parts(source, productIds, today);
+            Map<Long, String> skus = products.findAllById(productIds).stream()
+                    .collect(Collectors.toMap(Product::getId, Product::getSku));
             for (GoodsReceiptNoteLine line : accepted) {
                 int quantity = line.getExcessQty();
+                String sku = skus.get(line.getProductId());
                 var available = availability.get(line.getProductId());
                 if (available == null || available.sellableQty() < quantity) {
-                    throw insufficient(line);
+                    throw insufficient(sku);
+                }
+                // An expiry no sellable lot of the source has is most likely recorded wrong: block, do not guess.
+                if (line.getExpiryDate() != null && available.lotsInOrder().stream()
+                        .noneMatch(lot -> line.getExpiryDate().equals(lot.getExpiryDate()))) {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG341", sku, line.getExpiryDate().format(DAY));
                 }
                 List<LotQuantity> selected = new ArrayList<>();
                 int remaining = quantity;
@@ -130,7 +145,7 @@ public class TransferExcessService {
                     }
                 }
                 if (remaining != 0) {
-                    throw insufficient(line);
+                    throw insufficient(sku);
                 }
                 moves.add(new MovePosting(line.getProductId(), source, StockStatus.AVAILABLE, destination,
                         StockStatus.AVAILABLE, quantity, selected, MovementType.TRANSFER_EXTRA_DISPATCH,
@@ -144,8 +159,8 @@ public class TransferExcessService {
         return transferReceipts.receipt(owner, orderId, receiptId);
     }
 
-    private static BusinessException insufficient(GoodsReceiptNoteLine line) {
-        return new BusinessException(HttpStatus.CONFLICT, "MSG339", line.getProductId());
+    private static BusinessException insufficient(String sku) {
+        return new BusinessException(HttpStatus.CONFLICT, "MSG339", sku);
     }
 
     public record PendingReceipt(long receiptId, long transferOrderId, long sourceStoreId, long destStoreId) {
