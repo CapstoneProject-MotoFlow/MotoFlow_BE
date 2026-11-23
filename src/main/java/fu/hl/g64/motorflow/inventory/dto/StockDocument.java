@@ -11,6 +11,9 @@ import java.util.List;
 /**
  * Q8 (PM 23/11): a stock document is the stock movements of one source document in one warehouse in one direction.
  * Values and unit costs are only for the Owner (BR-72), left out for others.
+ * <p>{@code code}: SO-{id} for a sale, PN-, DC-, KK-, DCH- (adjustment request) and TNCC- (supplier return) with the
+ * id padded to 4 digits, so the code on screen is also what {@code q} finds. {@code discrepancyReceiptId} is the
+ * supplier receipt of a supplier return's discrepancy case, for the link to its handling screen.</p>
  */
 public final class StockDocument {
 
@@ -31,7 +34,7 @@ public final class StockDocument {
     public record Summary(SourceType sourceType, long sourceId, String code, Kind kind, long storeId, String storeName,
                           Direction direction, LocalDateTime occurredAt, String performedByName,
                           long lineCount, long quantity, @JsonInclude(JsonInclude.Include.NON_NULL) BigDecimal value,
-                          Long transferOrderId, Long discrepancyCaseId) {
+                          Long transferOrderId, Long discrepancyCaseId, Long discrepancyReceiptId) {
     }
 
     public record Detail(Summary document, List<Line> lines) {

@@ -27,7 +27,7 @@ public class StockDocumentQuery {
     // Dispatch records the goods in transit at the destination. Only the actual receipt creates its incoming document.
     private static final String MOVEMENTS = """
             WITH movements AS (
-                SELECT m.*, p.sku, p.part_name, s.store_name, u.full_name, l.expiry_date, r.transfer_order_id AS receipt_transfer_order_id, r.receipt_type, e.discrepancy_case_id,
+                SELECT m.*, p.sku, p.part_name, s.store_name, u.full_name, l.expiry_date, r.transfer_order_id AS receipt_transfer_order_id, r.receipt_type, e.discrepancy_case_id, c.goods_receipt_note_id AS case_receipt_id,
                        CASE WHEN m.sales_order_id IS NOT NULL THEN 'SALES_ORDER'
                             WHEN m.goods_receipt_note_id IS NOT NULL THEN 'GOODS_RECEIPT_NOTE'
                             WHEN m.transfer_order_id IS NOT NULL THEN 'TRANSFER_ORDER'
@@ -43,6 +43,7 @@ public class StockDocumentQuery {
                 LEFT JOIN lot l ON l.id = m.lot_id
                 LEFT JOIN goods_receipt_note r ON r.id = m.goods_receipt_note_id
                 LEFT JOIN discrepancy_resolution_event e ON e.id = m.discrepancy_resolution_event_id
+                LEFT JOIN discrepancy_case c ON c.id = e.discrepancy_case_id
                 WHERE m.store_id = COALESCE(:store, m.store_id) AND (
                    (m.movement_type IN ('SALE_ISSUE', 'SUPPLIER_RETURN') AND m.quantity_change < 0)
                    OR (m.movement_type IN ('RECEIPT_CONFIRMED', 'EXCESS_ACCEPTED', 'EXCESS_REJECTED', 'TRANSFER_RECEIPT')
@@ -83,11 +84,14 @@ public class StockDocumentQuery {
                            ELSE 'STOCK_COUNT' END AS kind,
                        CASE source_type
                            WHEN 'SALES_ORDER' THEN 'SO-' || source_id
-                           WHEN 'GOODS_RECEIPT_NOTE' THEN 'PN-' || LPAD(CAST(source_id AS text),
-                                    GREATEST(4, LENGTH(CAST(source_id AS text))), '0')
-                           WHEN 'TRANSFER_ORDER' THEN 'DC-' || LPAD(CAST(source_id AS text),
-                                    GREATEST(4, LENGTH(CAST(source_id AS text))), '0')
-                           ELSE source_type || '-' || source_id END AS code
+                           ELSE CASE source_type
+                                    WHEN 'GOODS_RECEIPT_NOTE' THEN 'PN-'
+                                    WHEN 'TRANSFER_ORDER' THEN 'DC-'
+                                    WHEN 'STOCK_COUNT' THEN 'KK-'
+                                    WHEN 'ADJUSTMENT_REQUEST' THEN 'DCH-'
+                                    ELSE 'TNCC-' END
+                                || LPAD(CAST(source_id AS text), GREATEST(4, LENGTH(CAST(source_id AS text))), '0')
+                       END AS code
                 FROM physical
             )
             """;
@@ -98,6 +102,7 @@ public class StockDocumentQuery {
                        MAX(occurred_at) AS occurred_at,
                        MAX(receipt_transfer_order_id) AS receipt_transfer_order_id,
                        MAX(discrepancy_case_id) AS discrepancy_case_id,
+                       MAX(case_receipt_id) AS discrepancy_receipt_id,
                        (ARRAY_AGG(full_name ORDER BY occurred_at DESC, id DESC))[1] AS performed_by_name,
                        COUNT(*) AS line_count, SUM(ABS(document_quantity)) AS quantity,
                        SUM(ABS(document_value)) AS total_value
@@ -166,6 +171,7 @@ public class StockDocumentQuery {
                 rs.getString("store_name"), Direction.valueOf(rs.getString("direction")),
                 rs.getObject("occurred_at", LocalDateTime.class), rs.getString("performed_by_name"),
                 rs.getLong("line_count"), rs.getLong("quantity"), withValue ? rs.getBigDecimal("total_value") : null,
-                rs.getObject("receipt_transfer_order_id", Long.class), rs.getObject("discrepancy_case_id", Long.class));
+                rs.getObject("receipt_transfer_order_id", Long.class), rs.getObject("discrepancy_case_id", Long.class),
+                rs.getObject("discrepancy_receipt_id", Long.class));
     }
 }

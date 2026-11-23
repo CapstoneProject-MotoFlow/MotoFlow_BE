@@ -133,8 +133,13 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalItems").value(1))
                 .andExpect(jsonPath("$.items[0].direction").value("OUT"))
+                .andExpect(jsonPath("$.items[0].code").value("KK-%04d".formatted(count)))
                 .andExpect(jsonPath("$.items[0].quantity").value(1))
                 .andExpect(jsonPath("$.items[0].value").doesNotExist());
+        // The code shown is what the search finds.
+        mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, signIn("bmcg"))
+                        .param("q", "kk-%04d".formatted(count)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(1));
         mvc.perform(get("/api/v1/stock-documents/STOCK_COUNT/" + count)
                         .header(HttpHeaders.AUTHORIZATION, signIn("owner"))
                         .param("storeId", String.valueOf(source)).param("direction", "OUT"))
