@@ -71,7 +71,7 @@ DECLARE
     tr1 bigint; tr2 bigint; tr3 bigint;
     so1 bigint; so2 bigint; so3 bigint; so4 bigint; so5 bigint;
     total bigint; pay bigint; rcv bigint; rcv2 bigint;
-    sc_cycle bigint; scr1 bigint; adj1 bigint; dc1 bigint;
+    sc_cycle bigint; scr1 bigint; adj1 bigint; dc1 bigint; ev1 bigint;
     st record;
 BEGIN
     IF EXISTS (SELECT 1 FROM store WHERE store_name = 'Kho tổng Nga Minh') THEN
@@ -374,6 +374,24 @@ BEGIN
                                   damaged_return_required_qty, replacement_required_qty, status, opened_at)
     VALUES ('SUPPLIER', gr2, pg_temp.pid('CUROA-VISION'), 2, 2, 2, 2, 4, 'OPEN', pg_temp.ts(0.42))
     RETURNING id INTO dc1;
+    -- The agreed return moves the 2 damaged units to awaiting return, as DiscrepancyServiceImpl.hold writes it: one
+    -- MOVED_TO_AWAITING_RETURN event, final when recorded, and two RETURN_HOLD movements on the same lot.
+    INSERT INTO discrepancy_resolution_event (discrepancy_case_id, resolution_type, quantity, reason, recorded_by,
+                                              occurred_at, confirmed_by, confirmed_at)
+    VALUES (dc1, 'MOVED_TO_AWAITING_RETURN', 2, 'Trả nhà cung cấp 2 dây curoa hỏng', u_bm_kho,
+            pg_temp.ts(0.43), u_bm_kho, pg_temp.ts(0.43))
+    RETURNING id INTO ev1;
+    -- pg_temp.mv cannot name an event, so the two rows are written here; cost from the lot, as in pg_temp.mv.
+    INSERT INTO stock_movement (store_id, product_id, stock_status, quantity_change, movement_type,
+                                discrepancy_resolution_event_id, reason, performed_by, occurred_at, lot_id,
+                                inventory_period_id, unit_cost, value)
+    SELECT l.store_id, l.product_id, v.status, v.qty, 'RETURN_HOLD', ev1, 'Trả nhà cung cấp 2 dây curoa hỏng',
+           u_bm_kho, pg_temp.ts(0.43), l.id, ip.id, l.purchase_unit_price, v.qty::bigint * l.purchase_unit_price
+    FROM lot l
+    JOIN goods_receipt_note_line gl ON gl.id = l.goods_receipt_note_line_id
+    JOIN inventory_period ip ON ip.period_month = date_trunc('month', pg_temp.ts(0.43))::date
+    CROSS JOIN (VALUES ('DAMAGED', -2), ('AWAITING_SUPPLIER_RETURN', 2)) AS v(status, qty)
+    WHERE gl.goods_receipt_note_id = gr2 AND gl.product_id = pg_temp.pid('CUROA-VISION');
 
     -- GRR3: goods just arrived and wait for inspection (no stock yet).
     INSERT INTO purchase_order (supplier_id, store_id, expected_arrival, status, created_by, created_at, updated_at)
@@ -573,11 +591,12 @@ BEGIN
     FROM stock_movement GROUP BY lot_id, store_id, stock_status HAVING sum(quantity_change) <> 0;
     UPDATE lot SET status = 'DEPLETED' WHERE NOT EXISTS (SELECT 1 FROM lot_balance b WHERE b.lot_id = lot.id);
 
-    INSERT INTO stock_balance (store_id, product_id, available_qty, damaged_qty, in_transit_qty, storage_area, bin_location,
-                               low_stock_threshold, updated_at)
+    INSERT INTO stock_balance (store_id, product_id, available_qty, damaged_qty, awaiting_supplier_return_qty,
+                               in_transit_qty, storage_area, bin_location, low_stock_threshold, updated_at)
     SELECT m.store_id, m.product_id,
            coalesce(sum(m.quantity_change) FILTER (WHERE m.stock_status = 'AVAILABLE'), 0),
            coalesce(sum(m.quantity_change) FILTER (WHERE m.stock_status = 'DAMAGED'), 0),
+           coalesce(sum(m.quantity_change) FILTER (WHERE m.stock_status = 'AWAITING_SUPPLIER_RETURN'), 0),
            coalesce(sum(m.quantity_change) FILTER (WHERE m.stock_status = 'IN_TRANSIT'), 0),
            CASE WHEN m.store_id = s_central THEN 'Khu ' || chr(64 + (coalesce(c.parent_id, c.id) % 5 + 1)::int) ELSE 'Quầy' END,
            CASE WHEN m.store_id = s_central THEN 'K' || lpad((m.product_id % 30 + 1)::text, 2, '0') END,
