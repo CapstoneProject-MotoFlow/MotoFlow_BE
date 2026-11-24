@@ -42,6 +42,14 @@ public interface ReplenishmentRequestService {
     void prepareForPurchase(AuthenticatedUser owner, long id, long storeId, Map<Long, Integer> quantities,
                             boolean includeUnallocated);
 
+    /**
+     * UC-77 step 6: closes the request when every transfer order of it is closed, every PO of it that is not cancelled
+     * is fully received, every part is received or bought on a PO of its own, and each part is covered in full. Called
+     * when a transfer order closes and when a PO of the request is fully received; {@code trigger} says which, for the
+     * audit log. Nothing happens while any of these is still open.
+     */
+    void closeIfDone(AuthenticatedUser user, long requestId, String trigger);
+
     // PM 17/11: drafts. Only the creator sees, saves, submits or deletes one; anyone else gets 404 MSG95.
 
     /** The caller's drafts, last saved first. {@code storeId} filters for the Owner. */

@@ -112,6 +112,7 @@ class TransferClosingApiTest extends TransferFlowTestData {
                 + "VALUES (?, ?) RETURNING id", Long.class, dest, destManager.getId());
         jdbc.update("INSERT INTO replenishment_request_line (replenishment_request_id, product_id, requested_qty, "
                 + "to_purchase_qty) VALUES (?, ?, 5, 2)", request, brake);
+        purchaseOrderFor(request, "FULLY_RECEIVED", brake, 2);
         long first = linkedOrder(request, 1);
         long second = linkedOrder(request, 2);
 
@@ -134,6 +135,42 @@ class TransferClosingApiTest extends TransferFlowTestData {
                 + "VALUES (?, ?, 5)", request, brake);
         close("owner", linkedOrder(request, 3)).andExpect(status().isOk());
         assertThat(requestStatus(request)).isEqualTo("IN_PROGRESS");
+    }
+
+    // UC-77 step 6: 2 of the 5 brakes are bought on a PO, the 3 others come by transfer order.
+    @Test
+    void aRequestPartlyBoughtStaysOpenWhileItsPoIsNotPlaced() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long request = mixedRequest();
+        close("owner", linkedOrder(request, 3)).andExpect(status().isOk());
+        assertThat(requestStatus(request)).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void aRequestPartlyBoughtStaysOpenWhileItsPoIsNotFullyReceived() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long request = mixedRequest();
+        purchaseOrderFor(request, "RECEIVING", brake, 2);
+        close("owner", linkedOrder(request, 3)).andExpect(status().isOk());
+        assertThat(requestStatus(request)).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void aCancelledPoDoesNotCloseARequestPartlyBought() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long request = mixedRequest();
+        purchaseOrderFor(request, "CANCELLED", brake, 2);
+        close("owner", linkedOrder(request, 3)).andExpect(status().isOk());
+        assertThat(requestStatus(request)).isEqualTo("IN_PROGRESS");
+    }
+
+    @Test
+    void aRequestPartlyBoughtClosesWithItsTransferOnceItsPoIsFullyReceived() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        long request = mixedRequest();
+        purchaseOrderFor(request, "FULLY_RECEIVED", brake, 2);
+        close("owner", linkedOrder(request, 3)).andExpect(status().isOk());
+        assertThat(requestStatus(request)).isEqualTo("CLOSED");
     }
 
     @Test
@@ -224,6 +261,25 @@ class TransferClosingApiTest extends TransferFlowTestData {
         jdbc.update("INSERT INTO replenishment_request_line (replenishment_request_id, product_id, requested_qty) "
                 + "VALUES (?, ?, 5)", request, brake);
         return request;
+    }
+
+    /** A request for 5 brakes of which 2 are passed to purchasing. */
+    private long mixedRequest() {
+        long request = jdbc.queryForObject("INSERT INTO replenishment_request (requesting_store_id, created_by) "
+                + "VALUES (?, ?) RETURNING id", Long.class, dest, destManager.getId());
+        jdbc.update("INSERT INTO replenishment_request_line (replenishment_request_id, product_id, requested_qty, "
+                + "to_purchase_qty) VALUES (?, ?, 5, 2)", request, brake);
+        return request;
+    }
+
+    /** A PO bought for the request, in {@code status}, for {@code quantity} of {@code product}. */
+    private void purchaseOrderFor(long request, String status, long product, int quantity) {
+        long order = jdbc.queryForObject("INSERT INTO purchase_order (supplier_id, store_id, replenishment_request_id, "
+                + "status, created_by, cancellation_reason) VALUES ((SELECT min(id) FROM supplier), ?, ?, ?, ?, ?) "
+                + "RETURNING id", Long.class, source, request, status, owner.getId(),
+                "CANCELLED".equals(status) ? "Nhà cung cấp hủy" : null);
+        jdbc.update("INSERT INTO purchase_order_line (purchase_order_id, product_id, ordered_qty, purchase_price) "
+                + "VALUES (?, ?, ?, 100000)", order, product, quantity);
     }
 
     private ResultActions toPurchase(long request, int quantity) throws Exception {

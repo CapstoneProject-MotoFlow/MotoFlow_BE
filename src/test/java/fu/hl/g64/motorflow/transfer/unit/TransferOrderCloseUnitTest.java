@@ -8,14 +8,10 @@ import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
-import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequest;
-import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequestLine;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrderLine;
-import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
-import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,7 +32,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -155,21 +150,12 @@ class TransferOrderCloseUnitTest extends TransferOrderUnitTestBase {
     }
 
     @Test
-    @DisplayName("UTCID06 N: order for request 3, nothing left to send -> request CLOSED")
+    @DisplayName("UTCID06 N: order for request 3 closes -> the request is checked to close (UC-77 step 6)")
     void utcid06() {
         order = reconciling(3L);
-        ReplenishmentRequest request3 = withId(ReplenishmentRequest.create(2L, null, 21L, NOW), 3);
-        request3.startCoordination();
-        when(requests.findByIdForUpdate(3L)).thenReturn(Optional.of(request3));
-        TransferOrderRepository.LinkedOrder linked = mock(TransferOrderRepository.LinkedOrder.class);
-        when(linked.getTransferOrder()).thenAnswer(inv -> order);
-        when(orders.findLinkedOrders(3L)).thenReturn(List.of(linked));
-        when(reconciliation.fulfilled(3L)).thenReturn(Map.of(P1, 5L));
-        when(requestLines.findByReplenishmentRequestIdOrderById(3L))
-                .thenReturn(List.of(ReplenishmentRequestLine.create(3L, P1, 5)));
 
         assertClosed(service.close(owner, 1));
-        assertThat(request3.getStatus()).isEqualTo(ReplenishmentRequestStatus.CLOSED);
+        verify(replenishments).closeIfDone(owner, 3L, "TRANSFER_ORDER_CLOSED");
     }
 
     @Test

@@ -26,6 +26,7 @@ import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNoteLine;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrder;
 import fu.hl.g64.motorflow.receiving.entity.PurchaseOrderLine;
 import fu.hl.g64.motorflow.receiving.helper.GoodsReceiptViews;
+import fu.hl.g64.motorflow.transfer.service.ReplenishmentRequestService;
 import fu.hl.g64.motorflow.receiving.helper.PurchaseOrderReceiving;
 import fu.hl.g64.motorflow.receiving.helper.ReceivingLedger;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
@@ -97,6 +98,7 @@ abstract class GoodsReceiptUnitTestBase {
     @Mock ProductRepository products;
     @Mock StoreRepository stores;
     @Mock UserAccountRepository users;
+    @Mock ReplenishmentRequestService replenishments;
 
     GoodsReceiptServiceImpl service;
     final AuthenticatedUser staff = auth(7, Role.STAFF, 2L);
@@ -116,7 +118,7 @@ abstract class GoodsReceiptUnitTestBase {
                 stockBalances, products, suppliers, stores, users, tasks, attachments, ledger, settlement);
         service = new GoodsReceiptServiceImpl(tasks, receipts, receiptLines, orders, orderLines, suppliers,
                 discrepancies, events, lots, warehouseTasks, posting, attachments, notifications, auditLog, ledger,
-                purchaseOrderReceiving, settlement, views, CLOCK);
+                purchaseOrderReceiving, settlement, views, replenishments, CLOCK);
 
         order = withId(PurchaseOrder.create(3, 2, null, null, 1, NOW.minusDays(3)), 30);
         outstanding.put(PAD, 10);
