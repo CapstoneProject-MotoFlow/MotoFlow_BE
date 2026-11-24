@@ -29,6 +29,7 @@ import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequest;
 import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequestLine;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.enums.ReplenishmentRequestStatus;
+import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.helper.RequestedParts;
 import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepository;
@@ -250,6 +251,40 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         }
         if (!changes.isEmpty()) {
             recordToPurchase(owner, request, changes);
+        }
+    }
+
+    // UC-77 step 6
+    @Transactional
+    @Override
+    public void closeIfDone(AuthenticatedUser user, long requestId, String trigger) {
+        ReplenishmentRequest request = requests.findByIdForUpdate(requestId).orElseThrow();
+        // A PO not cancelled must be fully received; a cancelled one closes nothing (BR-21, BR-22).
+        if (request.getStatus() == ReplenishmentRequestStatus.CLOSED
+                || transferOrders.findLinkedOrders(requestId).stream()
+                .anyMatch(row -> row.getTransferOrder().getStatus() != TransferOrderStatus.CLOSED)
+                || requests.findPurchaseOrders(requestId).stream()
+                .anyMatch(row -> row.getPurchaseOrder().getStatus() != PurchaseOrderStatus.CANCELLED
+                        && row.getPurchaseOrder().getStatus() != PurchaseOrderStatus.FULLY_RECEIVED)) {
+            return;
+        }
+        Map<Long, Long> fulfilled = reconciliation.fulfilled(requestId);
+        // A part short of stock is bought on a PO of its own, not merely planned or passed to purchase (BR-55).
+        Set<Long> purchased = Set.copyOf(requests.findPurchasedProductIds(requestId));
+        boolean done = lines.findByReplenishmentRequestIdOrderById(requestId).stream().allMatch(line ->
+                (line.getToPurchaseQty() == 0 || purchased.contains(line.getProductId()))
+                        && fulfilled.getOrDefault(line.getProductId(), 0L) + line.getToPurchaseQty()
+                        >= line.getRequestedQty());
+        if (!done) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        request.close(now);
+        auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", requestId, "REPLENISHMENT_REQUEST_CLOSED", user.id(),
+                null, null, Map.of("trigger", trigger), now));
+        if (request.getCreatedBy() != user.id()) {
+            notifications.notify(request.getCreatedBy(), "REPLENISHMENT_CLOSED",
+                    "Yêu cầu bổ sung #%d đã hoàn tất".formatted(requestId), "REPLENISHMENT_REQUEST", requestId);
         }
     }
 

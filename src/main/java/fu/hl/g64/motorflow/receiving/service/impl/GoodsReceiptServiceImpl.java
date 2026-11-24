@@ -60,6 +60,7 @@ import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.PurchaseOrderRepository;
 import fu.hl.g64.motorflow.receiving.service.GoodsReceiptService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
+import fu.hl.g64.motorflow.transfer.service.ReplenishmentRequestService;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
@@ -118,6 +119,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
     private final PurchaseOrderReceiving purchaseOrderReceiving;
     private final DiscrepancySettlement settlement;
     private final GoodsReceiptViews views;
+    private final ReplenishmentRequestService replenishments;
     private final Clock clock;
 
     // UC-39 (Staff)
@@ -409,12 +411,18 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
 
         receipt.confirm(manager.id(), now);
         // BR-22: the PO is fully received once no line is outstanding; a replacement covers none of it.
+        boolean fullyReceived = false;
         if (!replacement && order.getStatus() == PurchaseOrderStatus.RECEIVING
                 && !ledger.of(order.getId()).anyOutstanding()) {
             order.completeReceiving(now);
+            fullyReceived = true;
         }
         if (!purchaseOrderReceiving.of(order).any()) {
             warehouseTasks.cancelForDocument(TaskType.SUPPLIER_RECEIVING, order.getId());
+        }
+        // UC-77 step 6: the request this PO bought for may be done now that the PO is fully received.
+        if (fullyReceived && order.getReplenishmentRequestId() != null) {
+            replenishments.closeIfDone(manager, order.getReplenishmentRequestId(), "PURCHASE_ORDER_FULLY_RECEIVED");
         }
         if (anyExcess) {
             notifications.notifyOwners("EXCESS_AWAITING_DECISION",

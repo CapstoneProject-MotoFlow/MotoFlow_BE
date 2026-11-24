@@ -28,6 +28,7 @@ import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepositor
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
+import fu.hl.g64.motorflow.transfer.service.ReplenishmentRequestService;
 import fu.hl.g64.motorflow.transfer.service.impl.TransferOrderServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -80,6 +81,7 @@ abstract class TransferOrderUnitTestBase {
     @Mock WarehouseTaskService warehouseTasks;
     @Mock PickingGuide guide;
     @Mock AttachmentService attachments;
+    @Mock ReplenishmentRequestService replenishments;
 
     TransferOrderServiceImpl service;
 
@@ -110,7 +112,7 @@ abstract class TransferOrderUnitTestBase {
                 new StoreScope(stores), new RequestedParts(products), reconciliation, products, inventory, users,
                 auditLog, notifications, posting, tasks, warehouseTasks, guide, attachments,
                 mock(StockBalanceRepository.class), mock(DiscrepancyResolutionEventRepository.class), excessAcceptance,
-                CLOCK);
+                replenishments, CLOCK);
         allStores.put(1L, store(1, StoreStatus.ACTIVE, true));
         allStores.put(2L, store(2, StoreStatus.ACTIVE, false));
         allStores.put(3L, store(3, StoreStatus.ACTIVE, false));

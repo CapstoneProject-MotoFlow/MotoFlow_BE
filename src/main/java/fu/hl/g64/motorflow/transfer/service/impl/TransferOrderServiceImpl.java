@@ -62,6 +62,7 @@ import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestLineRepositor
 import fu.hl.g64.motorflow.transfer.repository.ReplenishmentRequestRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
+import fu.hl.g64.motorflow.transfer.service.ReplenishmentRequestService;
 import fu.hl.g64.motorflow.transfer.service.TransferOrderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -114,6 +115,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
     private final StockBalanceRepository balances;
     private final DiscrepancyResolutionEventRepository events;
     private final TransferExcessAcceptance excessAcceptance;
+    private final ReplenishmentRequestService replenishments;
     private final Clock clock;
 
     // UC-71
@@ -484,7 +486,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_CLOSED", message, ENTITY, id);
         notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_CLOSED", message, ENTITY, id);
         if (order.getReplenishmentRequestId() != null) {
-            closeRequestIfDone(user, order.getReplenishmentRequestId(), now);
+            replenishments.closeIfDone(user, order.getReplenishmentRequestId(), "TRANSFER_ORDER_CLOSED");
         }
         return detail(user, order);
     }
@@ -590,29 +592,6 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             blocked.put("MSG225", new Object[]{opened});
         }
         return blocked;
-    }
-
-    /** UC-77 step 6: all the request's orders are closed and each part was received or passed to purchasing. */
-    private void closeRequestIfDone(AuthenticatedUser user, long requestId, LocalDateTime now) {
-        ReplenishmentRequest request = requests.findByIdForUpdate(requestId).orElseThrow();
-        if (request.getStatus() == ReplenishmentRequestStatus.CLOSED
-                || orders.findLinkedOrders(requestId).stream()
-                .anyMatch(row -> row.getTransferOrder().getStatus() != TransferOrderStatus.CLOSED)) {
-            return;
-        }
-        Map<Long, Long> fulfilled = reconciliation.fulfilled(requestId);
-        boolean done = requestLines.findByReplenishmentRequestIdOrderById(requestId).stream().allMatch(line ->
-                fulfilled.getOrDefault(line.getProductId(), 0L) + line.getToPurchaseQty() >= line.getRequestedQty());
-        if (!done) {
-            return;
-        }
-        request.close(now);
-        auditLog.save(AuditLog.record("REPLENISHMENT_REQUEST", requestId, "REPLENISHMENT_REQUEST_CLOSED", user.id(),
-                null, null, Map.of("transfer_order_closed", true), now));
-        if (request.getCreatedBy() != user.id()) {
-            notifications.notify(request.getCreatedBy(), "REPLENISHMENT_CLOSED",
-                    "Yêu cầu bổ sung #%d đã hoàn tất".formatted(requestId), "REPLENISHMENT_REQUEST", requestId);
-        }
     }
 
     /** UC-74 step 3: one line per part of the order, each equal to what was prepared, not all zero. */
