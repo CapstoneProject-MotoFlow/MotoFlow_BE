@@ -273,7 +273,7 @@ public class TransferWrongItemService {
                 .filter(found -> cases.findById(found.getDiscrepancyCaseId())
                         .map(item -> order.getId().equals(item.getTransferOrderId())).orElse(false))
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG70"));
-        if (event.getStatus() != WrongItemReceiptStatus.AWAITING_OWNER) {
+        if (event.getStatus() != WrongItemReceiptStatus.AWAITING_SOURCE) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
         return event;

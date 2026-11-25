@@ -18,5 +18,7 @@ public enum ResolutionType {
     /** PM 23/11 (V23): the transfer's receiving store does not need the short part; it goes back on closing. */
     NO_REPLACEMENT,
     /** PM 23/11 (V23): the Owner found the transfer's receiving store counted the line wrong. */
-    RECEIVER_MISCOUNT
+    RECEIVER_MISCOUNT,
+    /** GVHD 24/11 (V27): the transfer's receiving store hands wrong items back to the source; nothing moves. */
+    WRONG_ITEM_RETURNED
 }

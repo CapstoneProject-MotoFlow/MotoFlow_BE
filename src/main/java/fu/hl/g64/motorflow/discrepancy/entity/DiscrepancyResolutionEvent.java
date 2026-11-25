@@ -56,8 +56,18 @@ public class DiscrepancyResolutionEvent {
 
     /** PM 23/11 (V23): on a transfer's phiếu nhận hàng giao sai only. */
     @Enumerated(EnumType.STRING)
-    @Column(length = 15)
+    @Column(length = 20)
     private WrongItemReceiptStatus status;
+
+    /** GVHD 24/11 (V27): the source's BM who rejected a phiếu nhận hàng giao sai, when and why. */
+    @Column(name = "rejected_by")
+    private Long rejectedBy;
+
+    @Column(name = "rejected_at")
+    private LocalDateTime rejectedAt;
+
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
 
     @Column(name = "adjustment_request_id")
     private Long adjustmentRequestId;
@@ -149,8 +159,8 @@ public class DiscrepancyResolutionEvent {
 
     /**
      * PM 23/11 (phiếu nhận hàng giao sai): the destination's BM recorded that {@code quantity} wrong items received with
-     * the case's part are really {@code receivedProductId}. Nothing moves until the Owner confirms it
-     * ({@link #confirmWrongItemReceipt}); there is no rejection.
+     * the case's part are really {@code receivedProductId}. Nothing moves until the source's BM confirms it
+     * ({@link #confirmWrongItemReceipt}); GVHD 24/11: that BM may reject it ({@link #rejectWrongItemReceipt}).
      */
     public static DiscrepancyResolutionEvent wrongItemReceipt(long caseId, int quantity, long receivedProductId,
                                                               LocalDate expiryDate, String reason, long by,
@@ -159,21 +169,43 @@ public class DiscrepancyResolutionEvent {
                 reason, by, occurredAt);
         event.receivedProductId = receivedProductId;
         event.receivedExpiryDate = expiryDate;
-        event.status = WrongItemReceiptStatus.AWAITING_OWNER;
+        event.status = WrongItemReceiptStatus.AWAITING_SOURCE;
+        return event;
+    }
+
+    /**
+     * GVHD 24/11: the destination's BM handed {@code quantity} wrong items, really {@code receivedProductId}, back to
+     * the source. Final when recorded; nothing moves, as they never left the source's books.
+     */
+    public static DiscrepancyResolutionEvent wrongItemReturned(long caseId, int quantity, long receivedProductId,
+                                                               String reason, long by, LocalDateTime now) {
+        DiscrepancyResolutionEvent event = done(caseId, ResolutionType.WRONG_ITEM_RETURNED, quantity, reason, by, now);
+        event.receivedProductId = receivedProductId;
         return event;
     }
 
     public void confirmWrongItemReceipt(long by, LocalDateTime now) {
-        if (status != WrongItemReceiptStatus.AWAITING_OWNER) {
+        if (status != WrongItemReceiptStatus.AWAITING_SOURCE) {
             throw new IllegalStateException("wrong item receipt " + id + " is " + status);
         }
         status = WrongItemReceiptStatus.CONFIRMED;
         confirm(quantity, by, now);
     }
 
+    /** GVHD 24/11: the source's BM rejects a phiếu nhận hàng giao sai; its wrong items are undecided again. */
+    public void rejectWrongItemReceipt(long by, String reason, LocalDateTime now) {
+        if (status != WrongItemReceiptStatus.AWAITING_SOURCE) {
+            throw new IllegalStateException("wrong item receipt " + id + " is " + status);
+        }
+        status = WrongItemReceiptStatus.REJECTED;
+        rejectedBy = by;
+        rejectedAt = now;
+        rejectionReason = reason;
+    }
+
     /** PM 23/11: only the Owner's "receiver miscounted" on the line cancels a phiếu nhận hàng giao sai. */
     public void cancelWrongItemReceipt() {
-        if (status != WrongItemReceiptStatus.AWAITING_OWNER) {
+        if (status != WrongItemReceiptStatus.AWAITING_SOURCE) {
             throw new IllegalStateException("wrong item receipt " + id + " is " + status);
         }
         status = WrongItemReceiptStatus.CANCELLED;

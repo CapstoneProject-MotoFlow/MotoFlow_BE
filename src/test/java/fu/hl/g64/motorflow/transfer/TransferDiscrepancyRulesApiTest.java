@@ -54,10 +54,10 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
 
         record("bmlb", order, chain, 2, today.plusDays(90)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(0))
-                .andExpect(jsonPath("$.lines[0].wrongAwaitingOwnerQty").value(2))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].resolutionType").value("RECEIVED_AS_OTHER_PRODUCT"))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].receivedSku").value("XICH-XE"))
-                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("AWAITING_OWNER"));
+                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("AWAITING_SOURCE"));
         assertThat(stock(dest, chain, "available_qty")).isZero();
         assertThat(stock(source, chain, "available_qty")).isEqualTo(7);
         assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(owner.getId());
@@ -70,7 +70,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$[0].blockedCode").doesNotExist()));
         confirmWrongItem("bmlb", order, eventId).andExpect(status().isForbidden());
         confirmWrongItem("owner", order, eventId).andExpect(status().isOk())
-                .andExpect(jsonPath("$.lines[0].wrongAwaitingOwnerQty").value(0))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(0))
                 .andExpect(jsonPath("$.lines[0].shortageQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("CONFIRMED"));
 

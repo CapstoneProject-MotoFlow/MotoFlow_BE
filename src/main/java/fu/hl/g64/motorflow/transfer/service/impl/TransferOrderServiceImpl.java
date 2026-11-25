@@ -507,8 +507,9 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                     figure.extraReceived(), line.getExtraDispatchedQty(), held == null ? 0 : held.sellableQty(),
                     figure.damaged(), figure.legacyExcess(), figure.pendingExcess(), figure.shortage(),
                     figure.awaitingDecision(), figure.toSource(), figure.toLoss(), figure.pendingExcess(),
-                    figure.rules().wrongItem(), figure.wrongPending(), figure.rules().wrongAwaitingOwner(),
-                    figure.rules().miscounted(), figure.rules().latePending());
+                    figure.rules().wrongItem(), figure.wrongPending(), figure.rules().wrongAwaitingSource(),
+                    figure.rules().wrongConfirmed(), figure.rules().wrongReturned(), figure.rules().miscounted(),
+                    figure.rules().latePending());
         }).toList();
     }
 
@@ -551,8 +552,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             blocked.put("MSG336", new Object[]{shortage});
         }
         // PM 23/11 B-7(d): every wrong item needs a phiếu nhận hàng giao sai the Owner confirmed.
-        String wrong = rows.stream().filter(row -> row.wrongPendingQty() + row.wrongAwaitingOwnerQty() > 0)
-                .map(row -> row.sku() + " x" + (row.wrongPendingQty() + row.wrongAwaitingOwnerQty()))
+        String wrong = rows.stream().filter(row -> row.wrongPendingQty() + row.wrongAwaitingSourceQty() > 0)
+                .map(row -> row.sku() + " x" + (row.wrongPendingQty() + row.wrongAwaitingSourceQty()))
                 .collect(Collectors.joining(", "));
         if (!wrong.isEmpty()) {
             blocked.put("MSG342", new Object[]{wrong});
@@ -661,7 +662,9 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                             staff ? null : figure.awaitingDecision(),
                             staff ? null : figure.damaged(), staff ? null : figure.shortage(),
                             line.getMakeupForCaseId(), staff ? null : figure.rules().wrongItem(),
-                            staff ? null : figure.wrongPending(), staff ? null : figure.rules().wrongAwaitingOwner(),
+                            staff ? null : figure.wrongPending(), staff ? null : figure.rules().wrongAwaitingSource(),
+                            staff ? null : figure.rules().wrongConfirmed(),
+                            staff ? null : figure.rules().wrongReturned(),
                             staff ? null : figure.rules().noReplacement(), staff ? null : figure.rules().latePending(),
                             staff ? null : figure.rules().miscounted());
                 }).toList(),

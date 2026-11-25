@@ -38,7 +38,8 @@ public record TransferOrderDetailResponse(
      * returned, lost and not to be replaced; a wrong item never counts), {@code unresolvedQty} chờ quyết (shortage
      * with no late delivery or no replacement chosen), {@code noReplacementQty} không giao bù, {@code lossQty} mất,
      * {@code wrongItemQty} giao sai, {@code wrongPendingQty} giao sai without a phiếu nhận hàng giao sai,
-     * {@code wrongAwaitingOwnerQty} on phiếu awaiting the Owner, {@code latePendingQty} to come later and not arrived,
+     * {@code wrongAwaitingSourceQty} on phiếu awaiting the source's BM, {@code wrongConfirmedQty} on phiếu it
+     * confirmed, {@code wrongReturnedQty} handed back to the source (GVHD 24/11), {@code latePendingQty} to come later and not arrived,
      * {@code receiverMiscounted} the Owner found the destination counted the line wrong (it then holds what was
      * dispatched and every other figure is 0).
      */
@@ -46,8 +47,9 @@ public record TransferOrderDetailResponse(
                        Integer preparedQty, Integer dispatchedQty, Integer receivedQty, Integer returnedQty,
                        Integer lossQty, Integer extraReceivedQty, Integer extraDispatchedQty, Integer unresolvedQty,
                        Integer damagedQty, Integer shortageQty, Long makeupForCaseId, Integer wrongItemQty,
-                       Integer wrongPendingQty, Integer wrongAwaitingOwnerQty, Integer noReplacementQty,
-                       Integer latePendingQty, Boolean receiverMiscounted) {
+                       Integer wrongPendingQty, Integer wrongAwaitingSourceQty, Integer wrongConfirmedQty,
+                       Integer wrongReturnedQty, Integer noReplacementQty, Integer latePendingQty,
+                       Boolean receiverMiscounted) {
     }
 
     /** A lot taken out of the source on dispatch (BR-75). */

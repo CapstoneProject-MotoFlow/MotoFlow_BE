@@ -67,9 +67,11 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
     interface EventTotals {
         long getProductId();
 
-        long getWrongAwaitingOwner();
+        long getWrongAwaitingSource();
 
         long getWrongConfirmed();
+
+        long getWrongReturned();
 
         long getNoReplacement();
 
@@ -83,11 +85,13 @@ public interface TransferOrderLineRepository extends JpaRepository<TransferOrder
     @Query("""
             select c.productId as productId,
                    sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
-                            and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_OWNER
-                            then e.quantity else 0 end) as wrongAwaitingOwner,
+                            and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_SOURCE
+                            then e.quantity else 0 end) as wrongAwaitingSource,
                    sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
                             and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.CONFIRMED
                             then e.quantity else 0 end) as wrongConfirmed,
+                   sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.WRONG_ITEM_RETURNED
+                            then e.quantity else 0 end) as wrongReturned,
                    sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.NO_REPLACEMENT
                             then e.quantity else 0 end) as noReplacement,
                    sum(case when e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.NO_REPLACEMENT
