@@ -1127,6 +1127,339 @@
           ]
         }
       ]
+    },
+    {
+      "name": "GVHD 24-11 / Điều chuyển",
+      "description": "GVHD 24/11 phần C: phiếu nhận hàng giao sai chờ BM kho gửi xác nhận hoặc từ chối (Owner chỉ xem); hoàn trả hàng giao sai; yêu cầu đối soát do BM kho nhận gửi, BM kho gửi xác nhận rồi Owner mới đóng phiếu. Chỉ đọc hoặc ca bị từ chối, không tạo dữ liệu.",
+      "item": [
+        {
+          "name": "BM xem phiếu giao sai chờ kho mình (kho gửi) xác nhận",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/wrong-items/pending",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Là danh sách', () => pm.expect(b).to.be.an('array'));",
+                  "pm.test('Mỗi phiếu có mặt hàng thật nhận và ảnh', () => b.forEach(i => { pm.expect(i.receivedSku).to.be.a('string'); pm.expect(i.attachments).to.be.an('array'); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner chỉ xem phiếu giao sai chờ xác nhận",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/wrong-items/pending",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Là danh sách', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xác nhận phiếu giao sai bị 403",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/999999/wrong-items/999999/confirm",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));",
+                  "pm.test('MSG05', () => pm.expect(pm.response.json().code).to.eql('MSG05'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM từ chối phiếu giao sai không ghi lý do bị MSG361",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/999999/wrong-items/999999/reject",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"  \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('MSG361', () => pm.expect(pm.response.json().code).to.eql('MSG361'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM hoàn trả hàng giao sai số lượng 0 bị báo lỗi",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/999999/wrong-items/returns",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 1,\n  \"receivedProductId\": 2,\n  \"quantity\": 0,\n  \"note\": \"Trả lại kho gửi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Báo lỗi số lượng', () => pm.expect(pm.response.json().fieldErrors.quantity).to.eql('Số lượng phải từ 1 trở lên.'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM hoàn trả hàng giao sai của phiếu không tồn tại bị 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/999999/wrong-items/returns",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 1,\n  \"receivedProductId\": 2,\n  \"quantity\": 1,\n  \"note\": \"Trả lại kho gửi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('MSG175', () => pm.expect(pm.response.json().code).to.eql('MSG175'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM gửi yêu cầu đối soát phiếu không tồn tại bị 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/999999/discrepancy-acknowledgement",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Thiếu 1, hỏng 2\",\n  \"files\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('MSG175', () => pm.expect(pm.response.json().code).to.eql('MSG175'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM kho gửi xác nhận đối soát phiếu không tồn tại bị 404",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/999999/reconciliation-confirmation",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+                  "pm.test('MSG175', () => pm.expect(pm.response.json().code).to.eql('MSG175'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xác nhận đối soát bị 403",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/transfer-orders/999999/reconciliation-confirmation",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
