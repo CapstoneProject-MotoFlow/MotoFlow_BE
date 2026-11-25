@@ -112,6 +112,9 @@ public class UnmetDemandServiceImpl implements UnmetDemandService {
             for (Object[] entry : found) {
                 SalesOrderLine line = (SalesOrderLine) entry[0];
                 SalesOrder order = (SalesOrder) entry[1];
+                if (search.orderId() != null && !search.orderId().equals(order.getId())) {
+                    continue;
+                }
                 boolean cancelled = order.getStatus() == SalesOrderStatus.CANCELLED;
                 int delivered = order.getStatus() == SalesOrderStatus.COMPLETED && line.getDeliveredQty() != null
                         ? line.getDeliveredQty() : 0;
@@ -135,6 +138,9 @@ public class UnmetDemandServiceImpl implements UnmetDemandService {
     private static boolean matches(UnmetDemandSearch search, String needle, SalesOrderLine line, SalesOrder order,
                                    Product part) {
         if (search.productId() != null && !search.productId().equals(line.getProductId())) {
+            return false;
+        }
+        if (search.orderId() != null && !search.orderId().equals(order.getId())) {
             return false;
         }
         if (search.customerId() != null && !search.customerId().equals(order.getCustomerId())) {

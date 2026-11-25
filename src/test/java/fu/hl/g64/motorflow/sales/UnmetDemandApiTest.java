@@ -98,6 +98,11 @@ class UnmetDemandApiTest extends SalesOrderTestData {
         // 2 more: the second order can take 2 of its 4 now.
         update(managerToken, hold, 2, order(null, customer, "RETAIL", null, lines(pad, 2))).andExpect(status().isOk());
         unmetDemand(managerToken).andExpect(jsonPath("$.items[*].readyQty", contains(4, 2, 0)));
+        // Review 25/11 (R-08): the lines of one order, whatever page they are on.
+        unmetDemand(managerToken, "orderId", String.valueOf(second), "size", "1")
+                .andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.items[0].orderId").value((int) second))
+                .andExpect(jsonPath("$.items[0].readyQty").value(2));
 
         // The first is released in full and holds its 4; the third is cancelled.
         release(first, lineOf(first), 4).andExpect(status().isOk());

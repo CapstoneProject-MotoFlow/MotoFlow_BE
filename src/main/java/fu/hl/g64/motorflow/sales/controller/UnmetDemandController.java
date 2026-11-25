@@ -43,9 +43,11 @@ public class UnmetDemandController {
                                              @RequestParam(required = false)
                                              @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
                                              @RequestParam(required = false) Set<WaitingOrderState> state,
+                                             @RequestParam(required = false) Long orderId,
                                              @RequestParam(defaultValue = "0") int page,
                                              @RequestParam(defaultValue = "20") int size) {
-        return unmetDemand.list(user, new UnmetDemandSearch(storeId, productId, customerId, q, from, to, state), page,
+        return unmetDemand.list(user, new UnmetDemandSearch(storeId, productId, customerId, q, from, to, state,
+                orderId), page,
                 size);
     }
 }
