@@ -9,6 +9,7 @@ import fu.hl.g64.motorflow.discrepancy.dto.ReceiveWrongItemsRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.RejectAcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.SupplierReturnRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.WaiveReplacementRequest;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.service.DiscrepancyService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
@@ -81,10 +82,12 @@ public class DiscrepancyController {
                                                       @DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
                                                       LocalDate deliveredTo,
                                                       @RequestParam(required = false) String q,
+                                                      @RequestParam(required = false)
+                                                      DecisionStatus decisionStatus,
                                                       @RequestParam(defaultValue = "0") int page,
                                                       @RequestParam(defaultValue = "20") int size) {
         return discrepancies.list(user, new DiscrepancySearch(status, storeId, purchaseOrderId, goodsReceiptNoteId,
-                supplierId, deliveredFrom, deliveredTo, q), page, size);
+                supplierId, deliveredFrom, deliveredTo, q, decisionStatus), page, size);
     }
 
     @Operation(summary = "A discrepancy case with what was done on it (UC-46 step 2)")
@@ -115,6 +118,7 @@ public class DiscrepancyController {
             description = "Branch Manager of the receiving store or Owner. type DAMAGED (as the \"-M\" variant) or "
                     + "WRONG_ITEM (productId: the part they really are, optional). MSG309: more than is held and not "
                     + "decided of that kind. Owner is notified; MSG314: that kind already has a request waiting. The case shows it in pendingRequests.")
+    @Deprecated
     @PostMapping("/{id}/acceptance-requests")
     @PreAuthorize("hasAnyRole('BRANCH_MANAGER', 'OWNER')")
     public DiscrepancyCaseResponse requestAcceptance(@AuthenticationPrincipal AuthenticatedUser user,
@@ -125,6 +129,7 @@ public class DiscrepancyController {
 
     @Operation(summary = "Refuse the pending request to take goods into stock (GVHD 20/11)",
             description = "Owner only. MSG29 when nothing is pending. The goods stay held; the store's managers are told.")
+    @Deprecated
     @PostMapping("/{id}/acceptance-requests/reject")
     @PreAuthorize("hasRole('OWNER')")
     public DiscrepancyCaseResponse rejectAcceptance(@AuthenticationPrincipal AuthenticatedUser owner,

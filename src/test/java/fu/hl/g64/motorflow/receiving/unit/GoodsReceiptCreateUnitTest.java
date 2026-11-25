@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ClosureType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement;
 import fu.hl.g64.motorflow.operation.dto.AttachmentUpload;
@@ -56,6 +57,8 @@ class GoodsReceiptCreateUnitTest extends GoodsReceiptUnitTestBase {
         when(orders.findByIdForUpdate(anyLong())).thenReturn(Optional.empty());
         when(orders.findByIdForUpdate(30L)).thenAnswer(inv -> Optional.of(order));
         case77 = withId(DiscrepancyCase.supplier(40, PAD, 3, 0, 0, 3, NOW.minusDays(1)), 77);
+        // GVHD 24/11: a replacement comes once the direction is decided.
+        case77.decide(DecisionType.RETURN_AND_REPLACE, 1, NOW.minusDays(1));
         when(discrepancies.findAllByIdForUpdate(any())).thenAnswer(inv -> List.of(case77));
         when(discrepancies.findAllById(any())).thenAnswer(inv -> List.of(case77));
         GoodsReceiptNote grn40 = withId(GoodsReceiptNote.supplierDelivery(30, "PX-000", TODAY, null, null,

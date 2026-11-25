@@ -370,9 +370,12 @@ BEGIN
     END LOOP;
 
     -- V21: the return agreed is 2 damaged (no wrong item, no rejected excess), so return_required_qty = damaged_return_required_qty.
+    -- V26 (GVHD 24/11): the BM decided "trả và yêu cầu giao bù" with the full replacement (2 short + 2 damaged).
     INSERT INTO discrepancy_case (source_type, goods_receipt_note_id, product_id, short_qty, damaged_qty, return_required_qty,
-                                  damaged_return_required_qty, replacement_required_qty, status, opened_at)
-    VALUES ('SUPPLIER', gr2, pg_temp.pid('CUROA-VISION'), 2, 2, 2, 2, 4, 'OPEN', pg_temp.ts(0.42))
+                                  damaged_return_required_qty, replacement_required_qty, status, opened_at,
+                                  decision_type, decision_status, decided_by, decided_at)
+    VALUES ('SUPPLIER', gr2, pg_temp.pid('CUROA-VISION'), 2, 2, 2, 2, 4, 'OPEN', pg_temp.ts(0.42),
+            'RETURN_AND_REPLACE', 'DECIDED', u_bm_kho, pg_temp.ts(0.43))
     RETURNING id INTO dc1;
     -- The agreed return moves the 2 damaged units to awaiting return, as DiscrepancyServiceImpl.hold writes it: one
     -- MOVED_TO_AWAITING_RETURN event, final when recorded, and two RETURN_HOLD movements on the same lot.

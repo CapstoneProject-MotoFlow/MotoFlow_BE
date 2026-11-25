@@ -2,6 +2,8 @@ package fu.hl.g64.motorflow.discrepancy.dto;
 
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ClosureType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.GoodsKind;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
@@ -51,7 +53,12 @@ public record DiscrepancyCaseResponse(
         List<Event> events, int damagedUndecidedQty, int wrongUndecidedQty, boolean canRequestAcceptance,
         boolean canApproveAcceptance, List<PendingRequest> pendingRequests,
         int wrongReturnRequiredQty, int damagedReturnRequiredQty, int excessOutstandingReturnQty,
-        int wrongOutstandingReturnQty, int damagedOutstandingReturnQty) {
+        int wrongOutstandingReturnQty, int damagedOutstandingReturnQty,
+        DecisionType decisionType, DecisionStatus decisionStatus, Integer proposedWrongReturnQty,
+        Integer proposedDamagedReturnQty, Integer proposedReplacementQty, boolean needsOwner,
+        Long decidedById, String decidedByName, LocalDateTime decidedAt,
+        Long approvedById, String approvedByName, LocalDateTime approvedAt,
+        boolean decisionLocked, boolean canApproveDecision) {
 
     /** GVHD 20/11 (PR 5): a request to take held goods into stock, waiting for Owner. */
     public record PendingRequest(String type, Long productId, String sku, String partName, int quantity, String note,

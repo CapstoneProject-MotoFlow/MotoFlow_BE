@@ -7,6 +7,8 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
@@ -238,6 +240,12 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             Set<Long> parts = new LinkedHashSet<>();
             for (Long caseId : caseIds) {
                 DiscrepancyCase found = caseById.get(caseId);
+                // GVHD 24/11: a replacement comes only once the direction is decided (MSG359 while the Owner has it).
+                if (found.isOpen() && !found.isDecided()) {
+                    throw new BusinessException(HttpStatus.CONFLICT,
+                            found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER ? "MSG359" : "MSG358",
+                            "#" + caseId);
+                }
                 int open = new Standing(found, progress.get(caseId)).openReplacement();
                 if (!found.isOpen() || open == 0) {
                     throw new BusinessException(HttpStatus.CONFLICT, "MSG141", "#" + caseId);
@@ -518,6 +526,10 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 DiscrepancyCase found = caseByProduct.computeIfAbsent(line.getProductId(), productId ->
                         discrepancies.save(DiscrepancyCase.supplier(id, productId, 0, 0, 0, 0, now)));
                 found.addRejectedExcess(line.getExcessQty());
+                // GVHD 24/11, review 25/11: rejected excess alone leaves nothing to decide; it just goes back.
+                if (!found.isDecided() && found.getShortQty() + found.getWrongItemQty() + found.getDamagedQty() == 0) {
+                    found.decide(DecisionType.RETURN_NO_REPLACEMENT, owner.id(), now);
+                }
             }
         }
         receipt.recordExcessDecision(owner.id(), now);

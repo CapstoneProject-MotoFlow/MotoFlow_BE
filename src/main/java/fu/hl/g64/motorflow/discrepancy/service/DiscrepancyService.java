@@ -4,6 +4,8 @@ import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.AcceptAsVariantRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.AcceptanceRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
+import fu.hl.g64.motorflow.discrepancy.dto.DecisionApprovalRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.DecisionRejectionRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancySearch;
 import fu.hl.g64.motorflow.discrepancy.dto.ReceiveWrongItemsRequest;
@@ -40,6 +42,24 @@ public interface DiscrepancyService {
                                                DiscrepancyHandlingRequest request);
 
     /**
+     * GVHD 24/11, Owner only: the directions Branch Managers proposed are decided and carried out as
+     * {@link #saveHandling} would. MSG360 when no chosen case awaits the Owner.
+     *
+     * @return every case of the receipt
+     */
+    List<DiscrepancyCaseResponse> approveDecisions(AuthenticatedUser owner, long receiptId,
+                                                   DecisionApprovalRequest request);
+
+    /**
+     * GVHD 24/11, Owner only: proposed directions are sent back with a reason (MSG356); the cases are undecided again
+     * and the store's managers are told. MSG360 when no chosen case awaits the Owner.
+     *
+     * @return every case of the receipt
+     */
+    List<DiscrepancyCaseResponse> rejectDecisions(AuthenticatedUser owner, long receiptId,
+                                                  DecisionRejectionRequest request);
+
+    /**
      * UC-46 Step 1_Actual supplier return, receiving Branch Manager only: the goods leave awaiting return to supplier.
      * MSG135 for a quantity above what is still to be returned.
      */
@@ -55,9 +75,11 @@ public interface DiscrepancyService {
      * GVHD 20/11 (PR 5): the receiving Branch Manager (or Owner) asks Owner to take held damaged or wrong goods into
      * stock; Owner is told. MSG309 for more than is held and not decided of that kind.
      */
+    @Deprecated(since = "GVHD 24/11: the direction ACCEPT_NO_REPLACEMENT, proposed on the receipt, replaces it")
     DiscrepancyCaseResponse requestAcceptance(AuthenticatedUser user, long id, AcceptanceRequest request);
 
     /** GVHD 20/11 (PR 5), Owner only: refuses the pending request (MSG29 if none); the store's managers are told. */
+    @Deprecated(since = "GVHD 24/11: see rejectDecisions")
     DiscrepancyCaseResponse rejectAcceptance(AuthenticatedUser owner, long id, RejectAcceptanceRequest request);
 
     /**
