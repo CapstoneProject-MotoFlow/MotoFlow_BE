@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.sales.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
+import fu.hl.g64.motorflow.sales.dto.ExpectedReadyDateRequest;
 import fu.hl.g64.motorflow.sales.dto.ReleaseWaitingOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.PickingRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
@@ -129,5 +130,16 @@ public class SalesOrderController {
     public SalesOrderDetail release(@AuthenticationPrincipal AuthenticatedUser seller, @PathVariable long id,
                                     @Valid @RequestBody ReleaseWaitingOrderRequest request) {
         return salesOrders.release(seller, id, request);
+    }
+
+    @Operation(summary = "Set or clear the expected ready date of a waiting order (GVHD 24/11)",
+            description = "Owner or the store's Branch Manager. Only an AWAITING_STOCK order (MSG352); the date is "
+                    + "today or later (MSG349), null clears it. UC-59 shows the order overdue once the date passed "
+                    + "and it is not ready.")
+    @PutMapping("/{id}/expected-ready-date")
+    public SalesOrderDetail changeExpectedReadyDate(@AuthenticationPrincipal AuthenticatedUser seller,
+                                                    @PathVariable long id,
+                                                    @RequestBody ExpectedReadyDateRequest request) {
+        return salesOrders.changeExpectedReadyDate(seller, id, request);
     }
 }

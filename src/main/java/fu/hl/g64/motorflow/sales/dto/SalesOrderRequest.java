@@ -10,6 +10,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -18,6 +19,8 @@ import java.util.List;
  * {@code customerId} it is a walk-in sale, whose name and phone may be recorded. {@code discountRate} is one rate in
  * percent for the whole order and only for a wholesale order (BR-10, BR-12; MSG161 for a retail order).
  * {@code note} is the seller's free-text note on the order; blank means none.
+ * <p>GVHD 24/11: {@code expectedReadyDate} is the day the store expects the goods of what waits, today or later
+ * (MSG349); optional, and ignored when nothing waits.</p>
  */
 public record SalesOrderRequest(
         Long storeId,
@@ -43,5 +46,13 @@ public record SalesOrderRequest(
 
         @NotEmpty(message = "Vui lòng chọn ít nhất một phụ tùng.")
         @Size(max = 200, message = "Tối đa 200 phụ tùng.")
-        List<@NotNull @Valid SalesOrderLineRequest> lines) {
+        List<@NotNull @Valid SalesOrderLineRequest> lines,
+
+        LocalDate expectedReadyDate) {
+
+    public SalesOrderRequest(Long storeId, Long customerId, String walkInName, String walkInPhone,
+                             PriceType priceType, BigDecimal discountRate, String note,
+                             List<SalesOrderLineRequest> lines) {
+        this(storeId, customerId, walkInName, walkInPhone, priceType, discountRate, note, lines, null);
+    }
 }

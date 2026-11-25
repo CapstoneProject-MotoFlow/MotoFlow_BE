@@ -26,6 +26,8 @@ public final class SalesOrderHistory {
     public static final String PAYMENT_REJECTED = "SALES_ORDER_PAYMENT_REJECTED";
     public static final String COMPLETED = "SALES_ORDER_COMPLETED";
     public static final String CANCELLED = "SALES_ORDER_CANCELLED";
+    /** GVHD 24/11: the expected ready date of a waiting order changed; not a version, not in the history list. */
+    public static final String EXPECTED_READY_DATE_CHANGED = "SALES_ORDER_EXPECTED_DATE_CHANGED";
     public static final List<String> ACTIONS = List.of(CREATED, VERSIONED, PICKED, CONFIRMED, PAYMENT_REJECTED,
             COMPLETED, CANCELLED);
     public static final List<String> VERSION_ACTIONS = List.of(CREATED, VERSIONED);
@@ -40,6 +42,8 @@ public final class SalesOrderHistory {
      * (Confirmations made before góp ý UI 21/11 may also carry waiting_order_id and requested_before.)
      */
     public static final String SPLIT_FROM = "split_from_order_id";
+    /** GVHD 24/11: on a confirmation, the waiting order that took what the warehouse could not pick. */
+    public static final String SHORT_WAITING_ORDER = "short_waiting_order_id";
 
     private SalesOrderHistory() {
     }

@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.sales.unit;
 
+import fu.hl.g64.motorflow.sales.helper.WaitingOrderReadiness;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
@@ -105,6 +106,7 @@ abstract class SettlementUnitTestBase {
     @Mock PlatformTransactionManager transactionManager;
     @Mock SalesDepositApplicationRepository depositApplications;
     @Mock SalesDepositExpiryChangeRepository depositExpiry;
+    @Mock WaitingOrderReadiness readiness;
 
     SalesOrderSettlementServiceImpl service;
     OrderCollections collections;
@@ -129,7 +131,7 @@ abstract class SettlementUnitTestBase {
         service = new SalesOrderSettlementServiceImpl(orders, orderLines, products, customers, payments,
                 new TransactionReferences(payments, transactionManager), receivables, auditLog, tasks,
                 warehouseTasks, notifications, attachments, inventory, collections, deposits, pricing, guide,
-                salesOrders, transactions, messages, CLOCK);
+                salesOrders, transactions, messages, readiness, CLOCK);
         parts.put(OIL, product(OIL, "NHOT-01", ProductStatus.ACTIVE));
         parts.put(FILTER, product(FILTER, "LOC-01", ProductStatus.ACTIVE));
         sellable.put(OIL, 5);

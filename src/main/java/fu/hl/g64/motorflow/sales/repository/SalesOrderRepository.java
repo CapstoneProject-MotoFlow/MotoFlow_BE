@@ -8,7 +8,9 @@ import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -112,4 +114,12 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
     /** As {@link #depositFigures} for these orders. */
     @Query(value = DEPOSIT_FIGURES + " AND o.id IN (:ids)", nativeQuery = true)
     List<Object[]> depositFiguresOf(List<Long> ids);
+
+    /**
+     * Review 25/11 (R-07): marks a waiting order as told it is ready, only if no one did yet. Two checks committing at
+     * once both read it untold; the second update waits for the first and then matches no row, so only one tells.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("update SalesOrder o set o.readyNotifiedAt = :now where o.id = :id and o.readyNotifiedAt is null")
+    int markReadyNotified(@Param("id") long id, @Param("now") LocalDateTime now);
 }

@@ -1,5 +1,7 @@
 package fu.hl.g64.motorflow.inventory.service.impl;
 
+import fu.hl.g64.motorflow.inventory.event.AvailableStockChanged;
+import org.springframework.context.ApplicationEventPublisher;
 import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
@@ -80,6 +82,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private final StoreRepository stores;
     private final Clock clock;
     private final EntityManager em;
+    private final ApplicationEventPublisher events;
 
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
@@ -511,6 +514,10 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         balance.change(status, change, now);
         movements.save(StockMovement.record(balance.getStoreId(), balance.getProductId(), lot.getId(), period.getId(),
                 status, change, unitCost, type, source, reason, by, occurredAt));
+        if (status == StockStatus.AVAILABLE && change != 0) {
+            // GVHD 24/11: a waiting order may have become ready, or no longer be (checked after commit).
+            events.publishEvent(new AvailableStockChanged(balance.getStoreId(), balance.getProductId()));
+        }
     }
 
     /** The period a posting goes into and the time it is recorded at. */

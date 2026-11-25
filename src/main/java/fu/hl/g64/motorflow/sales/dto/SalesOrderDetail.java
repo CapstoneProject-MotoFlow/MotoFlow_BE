@@ -33,6 +33,9 @@ import java.util.List;
  * order and the units the customer declined.</p>
  *
  * <p>PM 21/11: {@code deposit} is the deposit of a waiting order (null for Staff and for a draft).</p>
+ *
+ * <p>GVHD 24/11: {@code waitedForStock} once the order waited for stock (it stays after a release or a cancel);
+ * {@code expectedReadyDate} the day the store expects its goods, if given.</p>
  */
 public record SalesOrderDetail(
         long id, int version, SalesOrderStatus status, long storeId, String storeName,
@@ -42,7 +45,8 @@ public record SalesOrderDetail(
         Long confirmedById, String confirmedBy, LocalDateTime confirmedAt,
         String quantityBasis, Long referenceTotal, Long discountAmount, Long total, BigDecimal invoiceDiscountRate,
         BigDecimal discountThreshold, Money money, Closing closing, List<Line> lines, Actions actions,
-        List<HistoryEntry> history, Long splitFromOrderId, Split split, Deposit deposit) {
+        List<HistoryEntry> history, Long splitFromOrderId, Split split, Deposit deposit, boolean waitedForStock,
+        LocalDate expectedReadyDate) {
 
     /**
      * GVHD 20/11: how one request was split. An order id is null when nothing went to it; {@code declinedOrderId} is
@@ -61,7 +65,7 @@ public record SalesOrderDetail(
                 customerAddress, note, priceType, discountRate, picker, createdById, createdBy, createdAt, updatedAt,
                 confirmedById, confirmedBy, confirmedAt, quantityBasis, referenceTotal, discountAmount, total,
                 invoiceDiscountRate, discountThreshold, money, closing, lines, actions, history, splitFromOrderId,
-                made, deposit);
+                made, deposit, waitedForStock, expectedReadyDate);
     }
 
     /**
