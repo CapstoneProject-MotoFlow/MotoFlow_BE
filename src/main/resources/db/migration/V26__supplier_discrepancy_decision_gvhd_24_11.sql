@@ -26,9 +26,14 @@ ALTER TABLE discrepancy_case
 UPDATE discrepancy_case c
 SET decision_status = 'DECIDED',
     decision_type = CASE
+        -- Only a waiver of all the replacement still owed (a part waived leaves a replacement to come).
         WHEN c.wrong_return_required_qty + c.damaged_return_required_qty > 0
              AND EXISTS (SELECT 1 FROM discrepancy_resolution_event e
                          WHERE e.discrepancy_case_id = c.id AND e.resolution_type = 'CLOSED_BY_AGREEMENT')
+             AND (SELECT COALESCE(SUM(e.quantity), 0) FROM discrepancy_resolution_event e
+                  WHERE e.discrepancy_case_id = c.id
+                    AND e.resolution_type IN ('CLOSED_BY_AGREEMENT', 'REPLACEMENT_RECEIVED'))
+                 >= c.replacement_required_qty
             THEN 'RETURN_NO_REPLACEMENT'
         WHEN c.wrong_return_required_qty + c.damaged_return_required_qty = 0
              AND EXISTS (SELECT 1 FROM discrepancy_resolution_event e

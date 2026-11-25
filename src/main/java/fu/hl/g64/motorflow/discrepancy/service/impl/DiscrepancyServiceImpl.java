@@ -489,8 +489,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         GoodsKind kind = request.goodsKind();
         // GVHD 24/11: wrong items and damaged goods go back once the direction is decided; the excess Owner rejected
         // always goes back.
+        // Without a kind, no more than the excess may go back then (review 25/11: the wrong items or damaged goods of
+        // a direction under review stay until the Owner answers).
         if (!found.isDecided() && (kind != null && kind != GoodsKind.REJECTED_EXCESS
-                || standing.outstandingReturn(GoodsKind.REJECTED_EXCESS) == 0)) {
+                || standing.outstandingReturn(GoodsKind.REJECTED_EXCESS) == 0
+                || kind == null && request.quantity() > standing.outstandingReturn(GoodsKind.REJECTED_EXCESS))) {
             throw undecided(found, "MSG357");
         }
         if (standing.outstandingReturn() == 0) {
