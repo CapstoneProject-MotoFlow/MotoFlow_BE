@@ -442,10 +442,10 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .collect(Collectors.toMap(DiscrepancyCase::getId, DiscrepancyCase::getProductId));
         List<DiscrepancyResolutionEvent> all = found.isEmpty() ? List.of()
                 : orders.findEvents(partOfCase.keySet()).stream()
-                .filter(event -> event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED
-                        || (event.getResolutionType() == ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+                .filter(event -> (event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED
+                        || event.getResolutionType() == ResolutionType.RECEIVED_AS_OTHER_PRODUCT)
                         && (event.getStatus() == WrongItemReceiptStatus.AWAITING_SOURCE
-                        || event.getStatus() == WrongItemReceiptStatus.CONFIRMED)))
+                        || event.getStatus() == WrongItemReceiptStatus.CONFIRMED))
                 .toList();
         Map<Long, String> skus = products.findAllById(all.stream().map(DiscrepancyResolutionEvent::getReceivedProductId)
                 .distinct().toList()).stream().collect(Collectors.toMap(Product::getId, Product::getSku));

@@ -42,7 +42,8 @@ public record TransferOrderDetailResponse(
      * with no late delivery or no replacement chosen), {@code noReplacementQty} không giao bù, {@code lossQty} mất,
      * {@code wrongItemQty} giao sai, {@code wrongPendingQty} giao sai without a phiếu nhận hàng giao sai,
      * {@code wrongAwaitingSourceQty} on phiếu awaiting the source's BM, {@code wrongConfirmedQty} on phiếu it
-     * confirmed, {@code wrongReturnedQty} handed back to the source (GVHD 24/11), {@code latePendingQty} to come later and not arrived,
+     * confirmed, {@code wrongReturnedQty} handed back to the source and confirmed by it (GVHD 24/11; one awaiting it
+     * counts in {@code wrongAwaitingSourceQty}, review 25/11), {@code latePendingQty} to come later and not arrived,
      * {@code receiverMiscounted} the Owner found the destination counted the line wrong (it then holds what was
      * dispatched and every other figure is 0).
      */
@@ -73,7 +74,7 @@ public record TransferOrderDetailResponse(
     /**
      * PM 23/11: a phiếu nhận hàng giao sai (RECEIVED_AS_OTHER_PRODUCT) carries the part really received, its
      * expiry and {@code status}; {@code recordedBy} made the event. GVHD 24/11: a hand-back (WRONG_ITEM_RETURNED)
-     * carries the part too; a rejected phiếu carries who rejected it, when and why; {@code attachments} are the photos.
+     * carries the part and, review 25/11 (R-14), a status too; a rejected phiếu carries who rejected it, when and why; {@code attachments} are the photos.
      */
     public record Event(long id, ResolutionType resolutionType, int quantity, Long goodsReceiptNoteId,
                         Long adjustmentRequestId, String reason, LocalDateTime occurredAt,

@@ -175,12 +175,16 @@ public class DiscrepancyResolutionEvent {
 
     /**
      * GVHD 24/11: the destination's BM handed {@code quantity} wrong items, really {@code receivedProductId}, back to
-     * the source. Final when recorded; nothing moves, as they never left the source's books.
+     * the source. Nothing moves, as they never left the source's books. Review 25/11 (R-14, PM): it waits for the
+     * source's BM, who confirms the items came back ({@link #confirmWrongItemReceipt}) or rejects it with a reason
+     * ({@link #rejectWrongItemReceipt}), which leaves them undecided again.
      */
     public static DiscrepancyResolutionEvent wrongItemReturned(long caseId, int quantity, long receivedProductId,
                                                                String reason, long by, LocalDateTime now) {
-        DiscrepancyResolutionEvent event = done(caseId, ResolutionType.WRONG_ITEM_RETURNED, quantity, reason, by, now);
+        DiscrepancyResolutionEvent event = pending(caseId, ResolutionType.WRONG_ITEM_RETURNED, quantity, null, reason,
+                by, now);
         event.receivedProductId = receivedProductId;
+        event.status = WrongItemReceiptStatus.AWAITING_SOURCE;
         return event;
     }
 

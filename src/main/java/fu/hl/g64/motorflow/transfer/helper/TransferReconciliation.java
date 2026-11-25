@@ -90,8 +90,9 @@ public class TransferReconciliation {
     }
 
     /**
-     * PM 23/11. {@code wrongItem} recorded on confirmed receipts at the destination; {@code wrongAwaitingSource} and
-     * {@code wrongConfirmed} on phiếu nhận hàng giao sai, {@code wrongReturned} handed back to the source (GVHD 24/11);
+     * PM 23/11. {@code wrongItem} recorded on confirmed receipts at the destination; {@code wrongAwaitingSource} on
+     * phiếu nhận hàng giao sai or hand-backs awaiting the source's BM (review 25/11), {@code wrongConfirmed} on phiếu
+     * it confirmed, {@code wrongReturned} handed back and confirmed by it (GVHD 24/11);
      * {@code noReplacement} decided not to be replaced,
      * {@code noReplacementDone} of which moved back on closing; {@code latePending} decided to come later and not
      * arrived; {@code legacyClaims} losses awaiting their adjustment and return decisions of orders before 23/11;

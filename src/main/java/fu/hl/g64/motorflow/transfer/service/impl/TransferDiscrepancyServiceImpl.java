@@ -189,10 +189,14 @@ public class TransferDiscrepancyServiceImpl implements TransferDiscrepancyServic
                                 .map(GoodsReceiptNote::getId).toList()).stream()
                 .filter(item -> item.getProductId() == productId).toList();
         String blocked = null;
-        if (history.stream().anyMatch(event -> event.getStatus() == WrongItemReceiptStatus.CONFIRMED)) {
+        // Review 25/11 (R-14): a hand-back still awaiting the source is cancelled below like a phiếu; one it confirmed
+        // blocks.
+        if (history.stream().anyMatch(event -> event.getStatus() == WrongItemReceiptStatus.CONFIRMED
+                && event.getResolutionType() == ResolutionType.RECEIVED_AS_OTHER_PRODUCT)) {
             blocked = "phiếu nhận hàng giao sai đã được kho gửi xác nhận";
-        } else if (history.stream().anyMatch(event -> event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED)) {
-            blocked = "đã ghi hoàn trả hàng giao sai";
+        } else if (history.stream().anyMatch(event -> event.getStatus() == WrongItemReceiptStatus.CONFIRMED
+                && event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED)) {
+            blocked = "kho gửi đã xác nhận nhận lại hàng giao sai hoàn trả";
         } else if (received.stream().anyMatch(item -> item.getExcessDecision() == ExcessDecision.ACCEPTED)
                 || line.getExtraDispatchedQty() > 0) {
             blocked = "hàng thừa đã được chấp nhận";

@@ -34,11 +34,12 @@ public interface DiscrepancyResolutionEventRepository extends JpaRepository<Disc
     @Query("select e from DiscrepancyResolutionEvent e where e.id = :id")
     java.util.Optional<DiscrepancyResolutionEvent> findByIdForUpdate(long id);
 
-    /** GVHD 24/11: the transfer phiếu nhận hàng giao sai awaiting the source's BM, newest first. */
+    /** GVHD 24/11: the transfer phiếu nhận hàng giao sai and hand-backs (review 25/11) awaiting the source's BM, newest first. */
     @Query("""
             select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
             where c.transferOrderId is not null
-              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+              and e.resolutionType in (fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT,
+                                       fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.WRONG_ITEM_RETURNED)
               and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_SOURCE
             order by e.occurredAt desc, e.id desc""")
     List<DiscrepancyResolutionEvent> findPendingTransferSwaps(org.springframework.data.domain.Pageable page);
@@ -48,7 +49,8 @@ public interface DiscrepancyResolutionEventRepository extends JpaRepository<Disc
             select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
             join TransferOrder o on o.id = c.transferOrderId
             where o.sourceStoreId = :sourceStoreId
-              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+              and e.resolutionType in (fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT,
+                                       fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.WRONG_ITEM_RETURNED)
               and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_SOURCE
             order by e.occurredAt desc, e.id desc""")
     List<DiscrepancyResolutionEvent> findPendingTransferSwapsFromSource(long sourceStoreId,

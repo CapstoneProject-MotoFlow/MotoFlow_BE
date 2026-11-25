@@ -14,12 +14,14 @@ ALTER TABLE discrepancy_resolution_event
         ELSE rejected_by IS NULL AND rejected_at IS NULL AND rejection_reason IS NULL END);
 
 -- WRONG_ITEM_RETURNED: the destination hands wrong items back to the source. Nothing moves (they never left the
--- source's books); the event carries the part they really are, with no status.
+-- source's books); the event carries the part they really are. Review 25/11 (R-14): like a phiếu it has a status,
+-- as the source's BM confirms it came back or rejects it.
 ALTER TABLE discrepancy_resolution_event DROP CONSTRAINT ck_discrepancy_resolution_event_wrong_item_receipt;
 ALTER TABLE discrepancy_resolution_event ADD CONSTRAINT ck_discrepancy_resolution_event_wrong_item_receipt CHECK (
     (received_product_id IS NULL AND received_expiry_date IS NULL AND status IS NULL)
     OR resolution_type = 'RECEIVED_AS_OTHER_PRODUCT'
-    OR (resolution_type = 'WRONG_ITEM_RETURNED' AND received_product_id IS NOT NULL AND status IS NULL));
+    OR (resolution_type = 'WRONG_ITEM_RETURNED' AND received_product_id IS NOT NULL
+        AND received_expiry_date IS NULL AND status IS NOT NULL));
 
 ALTER TABLE discrepancy_resolution_event DROP CONSTRAINT discrepancy_resolution_event_resolution_type_check;
 ALTER TABLE discrepancy_resolution_event ADD CONSTRAINT discrepancy_resolution_event_resolution_type_check
@@ -37,3 +39,12 @@ ALTER TABLE transfer_order
     ADD COLUMN reconciliation_confirmed_at TIMESTAMP,
     ADD CONSTRAINT ck_transfer_reconciliation_pair
         CHECK ((reconciliation_confirmed_by IS NULL) = (reconciliation_confirmed_at IS NULL));
+
+-- Review 25/11 (R-10): orders closed before this step was added count as confirmed by whoever closed them.
+UPDATE transfer_order
+SET reconciliation_confirmed_by = closed_by,
+    reconciliation_confirmed_at = closed_at
+WHERE status = 'CLOSED'
+  AND discrepancy_acknowledged_at IS NOT NULL
+  AND closed_by IS NOT NULL
+  AND closed_at IS NOT NULL;

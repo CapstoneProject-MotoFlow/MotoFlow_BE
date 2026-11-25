@@ -222,12 +222,23 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Chỉ còn 1")));
         handBack("bmlb", order, 1).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(0))
-                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(1))
-                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(1))
+                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(0))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[1].resolutionType").value("WRONG_ITEM_RETURNED"))
+                .andExpect(jsonPath("$.discrepancies[0].events[1].status").value("AWAITING_SOURCE"))
                 .andExpect(jsonPath("$.discrepancies[0].events[1].receivedSku").value("XICH-XE"));
         assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(sourceManager.getId());
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG363"));
+        // Review 25/11 (R-14): the hand-back waits for the source's BM too, and blocks its confirmation until then.
+        pending().andExpect(jsonPath("$[0].resolutionType").value("WRONG_ITEM_RETURNED"))
+                .andExpect(jsonPath("$[0].lots").isEmpty())
+                .andExpect(jsonPath("$[1].resolutionType").value("RECEIVED_AS_OTHER_PRODUCT"));
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(1))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(1));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(destManager.getId());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG342"));
         confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
         action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
@@ -237,6 +248,39 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE discrepancy_resolution_event_id = "
                 + "(SELECT id FROM discrepancy_resolution_event WHERE resolution_type = 'WRONG_ITEM_RETURNED')",
                 Long.class)).isZero();
+    }
+
+    /**
+     * Review 25/11 (R-14, PM): the source's BM rejects a hand-back with a reason; the items are undecided again. A
+     * hand-back still awaiting the source does not stop the Owner's "receiver miscounted", which cancels it.
+     */
+    @Test
+    void theSourceRejectsAHandBackAndTheOwnerMayStillCorrectTheLine() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 3, 200_000, null, "X1");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, received(order, 4, 1, 0)).andExpect(status().isOk());
+        handBack("bmlb", order, 1).andExpect(status().isOk());
+        long eventId = eventIdOf(pending());
+
+        reject("bmlb", order, eventId, "Đã trả").andExpect(status().isForbidden());
+        reject("bmcg", order, eventId, "Kho chưa nhận lại xích").andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(1))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(0))
+                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(0))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("REJECTED"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].rejectionReason").value("Kho chưa nhận lại xích"));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(destManager.getId());
+        pending().andExpect(jsonPath("$").isEmpty());
+
+        handBack("bmlb", order, 1).andExpect(status().isOk());
+        long caseId = jdbc.queryForObject("SELECT id FROM discrepancy_case WHERE transfer_order_id = ?", Long.class,
+                order);
+        miscount("owner", order, caseId, "Đếm nhầm").andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].receiverMiscounted").value(true));
+        assertThat(jdbc.queryForList("SELECT status FROM discrepancy_resolution_event WHERE resolution_type = "
+                + "'WRONG_ITEM_RETURNED' ORDER BY id", String.class)).containsExactly("REJECTED", "CANCELLED");
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(3);
     }
 
     /** (8) Excess is accepted on closing when the source has it, and blocks closing when it does not. */
