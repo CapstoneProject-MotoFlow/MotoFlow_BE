@@ -45,7 +45,9 @@ class HeldGoodsWriteOffApiTest extends GoodsReceiptTestData {
         confirm(managerToken, grn).andExpect(status().isOk());
         long found = caseOf(grn, pad);
         // Not replaced, not returned: only the two damaged pads wait for a decision.
-        handle(managerToken, grn, List.of(handling(found, 0, 0))).andExpect(status().isOk());
+        // GVHD 24/11: the store keeps them, nothing replaced: the Owner's direction (3).
+        handle(ownerToken, grn, List.of(direction(handling(found, 0, null), "ACCEPT_NO_REPLACEMENT")))
+                .andExpect(status().isOk());
 
         writeOff(managerToken, grn, "AVAILABLE", 1).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG259"));
@@ -84,7 +86,9 @@ class HeldGoodsWriteOffApiTest extends GoodsReceiptTestData {
         writeOff(managerToken, null, "DAMAGED", 1).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG257"));
         // Written off through their delivery instead, so the case records it.
-        handle(managerToken, grn, List.of(handling(found, 0, 0))).andExpect(status().isOk());
+        // GVHD 24/11: the store keeps them, nothing replaced: the Owner's direction (3).
+        handle(ownerToken, grn, List.of(direction(handling(found, 0, null), "ACCEPT_NO_REPLACEMENT")))
+                .andExpect(status().isOk());
         writeOff(managerToken, null, "DAMAGED", 1).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG257"));
         writeOff(managerToken, grn, "DAMAGED", 2).andExpect(status().isCreated());

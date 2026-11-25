@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.discrepancy.entity;
 
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ClosureType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
 import jakarta.persistence.Column;
@@ -91,6 +93,44 @@ public class DiscrepancyCase {
 
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
+
+    /** GVHD 24/11 (V26): the direction agreed with the supplier, decided or proposed; null while undecided. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "decision_type", length = 25)
+    private DecisionType decisionType;
+
+    /** Review 25/11: the direction decided before a proposal, in force again if the Owner rejects the proposal. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "prior_decision_type", length = 25)
+    private DecisionType priorDecisionType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "decision_status", nullable = false, length = 15)
+    private DecisionStatus decisionStatus = DecisionStatus.UNDECIDED;
+
+    /** GVHD 24/11 (V26): a Branch Manager's proposal awaiting the Owner; null otherwise. */
+    @Column(name = "proposed_wrong_return_qty")
+    private Integer proposedWrongReturnQty;
+
+    @Column(name = "proposed_damaged_return_qty")
+    private Integer proposedDamagedReturnQty;
+
+    @Column(name = "proposed_replacement_qty")
+    private Integer proposedReplacementQty;
+
+    /** Who last saved the decision or the proposal, and when. */
+    @Column(name = "decided_by")
+    private Long decidedBy;
+
+    @Column(name = "decided_at")
+    private LocalDateTime decidedAt;
+
+    /** The Owner who approved a Branch Manager's proposal, and when. */
+    @Column(name = "approved_by")
+    private Long approvedBy;
+
+    @Column(name = "approved_at")
+    private LocalDateTime approvedAt;
 
     /**
      * UC-44 step 7: short, wrong-item or damaged goods of one part on a confirmed supplier receipt. The supplier owes
@@ -206,6 +246,68 @@ public class DiscrepancyCase {
         damagedReturnRequiredQty = damagedReturn;
         returnRequiredQty = rejectedExcessQty + wrongReturn + damagedReturn;
         replacementRequiredQty = replacementRequired;
+    }
+
+    /** GVHD 24/11: the direction is decided (by the Owner, or by a Branch Manager within their rights). */
+    public void decide(DecisionType type, long by, LocalDateTime now) {
+        decisionType = type;
+        decisionStatus = DecisionStatus.DECIDED;
+        decidedBy = by;
+        decidedAt = now;
+        clearProposal();
+    }
+
+    /** GVHD 24/11: a Branch Manager proposes a direction only the Owner may decide. */
+    public void propose(DecisionType type, int wrongReturn, int damagedReturn, int replacement, long by,
+                        LocalDateTime now) {
+        requireOpen();
+        if (decisionStatus == DecisionStatus.DECIDED) {
+            priorDecisionType = decisionType;
+        }
+        decisionType = type;
+        decisionStatus = DecisionStatus.AWAITING_OWNER;
+        proposedWrongReturnQty = wrongReturn;
+        proposedDamagedReturnQty = damagedReturn;
+        proposedReplacementQty = replacement;
+        decidedBy = by;
+        decidedAt = now;
+        approvedBy = null;
+        approvedAt = null;
+    }
+
+    /** GVHD 24/11: the Owner approves the proposal; the caller carries it out. */
+    public void approve(long by, LocalDateTime now) {
+        if (decisionStatus != DecisionStatus.AWAITING_OWNER) {
+            throw new IllegalStateException("discrepancy case " + id + " has no proposal");
+        }
+        decisionStatus = DecisionStatus.DECIDED;
+        approvedBy = by;
+        approvedAt = now;
+        clearProposal();
+    }
+
+    /**
+     * GVHD 24/11: the Owner sends the proposal back. What was decided before stays (review 25/11); a case with no
+     * earlier decision is undecided again.
+     */
+    public void rejectProposal() {
+        if (decisionStatus != DecisionStatus.AWAITING_OWNER) {
+            throw new IllegalStateException("discrepancy case " + id + " has no proposal");
+        }
+        decisionStatus = priorDecisionType != null ? DecisionStatus.DECIDED : DecisionStatus.UNDECIDED;
+        decisionType = priorDecisionType;
+        clearProposal();
+    }
+
+    public boolean isDecided() {
+        return decisionStatus == DecisionStatus.DECIDED;
+    }
+
+    private void clearProposal() {
+        priorDecisionType = null;
+        proposedWrongReturnQty = null;
+        proposedDamagedReturnQty = null;
+        proposedReplacementQty = null;
     }
 
     /** UC-46 step 7: every obligation is settled, or the rest was settled by agreement with the supplier. */

@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.discrepancy.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Max;
@@ -33,6 +34,10 @@ public record DiscrepancyHandlingRequest(
      * (MSG134); one left empty keeps what was agreed. {@code returnRequiredQty} is the older single figure (rejected
      * excess included), split as before (wrong items first, then damaged goods); it is used only when both kinds are
      * empty.
+     * <p>
+     * GVHD 24/11 (V26): {@code decisionType} is the direction agreed with the supplier; left empty it is
+     * RETURN_AND_REPLACE, as every handling was before. RETURN_NO_REPLACEMENT and ACCEPT_NO_REPLACEMENT take no
+     * replacement (0 or empty, MSG354); ACCEPT_NO_REPLACEMENT returns nothing and needs wrong or damaged goods.
      */
     public record Line(
             @NotNull(message = "Vui lòng chọn hồ sơ sai lệch.")
@@ -52,17 +57,33 @@ public record DiscrepancyHandlingRequest(
 
             @PositiveOrZero(message = "Số lượng không được âm.")
             @Max(value = 1_000_000, message = "Số lượng tối đa 1.000.000.")
-            Integer replacementRequiredQty) {
+            Integer replacementRequiredQty,
+
+            DecisionType decisionType) {
 
         /** The older form: case, whole return, replacement. */
         public Line(Long caseId, Integer returnRequiredQty, Integer replacementRequiredQty) {
-            this(caseId, null, null, returnRequiredQty, replacementRequiredQty);
+            this(caseId, null, null, returnRequiredQty, replacementRequiredQty, null);
+        }
+
+        /** Before GVHD 24/11: return and replace. */
+        public Line(Long caseId, Integer wrongReturnQty, Integer damagedReturnQty, Integer returnRequiredQty,
+                    Integer replacementRequiredQty) {
+            this(caseId, wrongReturnQty, damagedReturnQty, returnRequiredQty, replacementRequiredQty, null);
+        }
+
+        /** The direction asked for: RETURN_AND_REPLACE when left empty. */
+        @JsonIgnore
+        public DecisionType direction() {
+            return decisionType != null ? decisionType : DecisionType.RETURN_AND_REPLACE;
         }
 
         @JsonIgnore
         @AssertTrue(message = "Vui lòng nhập số lượng sẽ trả lại.")
         public boolean isReturnGiven() {
-            return wrongReturnQty != null || damagedReturnQty != null || returnRequiredQty != null;
+            // Accepting the goods returns nothing, so no figure is needed.
+            return decisionType == DecisionType.ACCEPT_NO_REPLACEMENT || wrongReturnQty != null
+                    || damagedReturnQty != null || returnRequiredQty != null;
         }
     }
 }
