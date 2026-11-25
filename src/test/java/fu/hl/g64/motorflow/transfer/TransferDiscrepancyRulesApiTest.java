@@ -191,6 +191,42 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         assertThat(stock(source, chain, "available_qty")).isEqualTo(2);
     }
 
+    /**
+     * GVHD 24/11: 2 chains came with a full delivery; the receiving store keeps 1 on a phiếu the source confirms and
+     * hands 1 back. Nothing moves for the one handed back, and the order closes.
+     */
+    @Test
+    void aWrongItemIsPartlyKeptAndPartlyHandedBack() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 3, 200_000, null, "X1");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, received(order, 5, 2, 0)).andExpect(status().isOk());
+        action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        record("bmlb", order, chain, 1, null).andExpect(status().isOk());
+
+        handBack("bmcg", order, 1).andExpect(status().isForbidden());
+        handBack("owner", order, 1).andExpect(status().isForbidden());
+        handBack("bmlb", order, 2).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG362"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Chỉ còn 1")));
+        handBack("bmlb", order, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(0))
+                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(1))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(1))
+                .andExpect(jsonPath("$.discrepancies[0].events[1].resolutionType").value("WRONG_ITEM_RETURNED"))
+                .andExpect(jsonPath("$.discrepancies[0].events[1].receivedSku").value("XICH-XE"));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(sourceManager.getId());
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
+        close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
+
+        assertThat(stock(dest, chain, "available_qty")).isEqualTo(1);
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE discrepancy_resolution_event_id = "
+                + "(SELECT id FROM discrepancy_resolution_event WHERE resolution_type = 'WRONG_ITEM_RETURNED')",
+                Long.class)).isZero();
+    }
+
     /** (8) Excess is accepted on closing when the source has it, and blocks closing when it does not. */
     @Test
     void excessIsAcceptedOnClosingOrBlocksItWhenTheSourceIsShort() throws Exception {
@@ -402,6 +438,13 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         }
         return mvc.perform(post(ORDERS + "/" + order + "/wrong-items").header(HttpHeaders.AUTHORIZATION,
                 signIn(username)).contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    private ResultActions handBack(String username, long order, int quantity) throws Exception {
+        return mvc.perform(post(ORDERS + "/" + order + "/wrong-items/returns")
+                .header(HttpHeaders.AUTHORIZATION, signIn(username)).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("productId", brake, "receivedProductId", chain, "quantity", quantity,
+                        "note", "Trả xích cho kho gửi"))));
     }
 
     private ResultActions decide(String username, long order, String decision, int quantity) throws Exception {

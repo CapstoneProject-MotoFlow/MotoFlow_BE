@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.transfer.dto.PendingWrongItemResponse;
 import fu.hl.g64.motorflow.transfer.dto.RejectWrongItemRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.WrongItemRequest;
+import fu.hl.g64.motorflow.transfer.dto.WrongItemReturnRequest;
 import fu.hl.g64.motorflow.transfer.service.TransferWrongItemService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -37,6 +38,16 @@ public class TransferWrongItemController {
     public TransferOrderDetailResponse record(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable long orderId,
                                               @Valid @RequestBody WrongItemRequest request) {
         return wrongItems.record(user, orderId, request);
+    }
+
+    @Operation(summary = "GVHD 24/11: the receiving store's BM hands wrong items back to the source (the part ordered, "
+            + "the part they really are, quantity, note). Nothing moves; MSG362 above the wrong items still undecided")
+    @PostMapping("/{orderId}/wrong-items/returns")
+    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    public TransferOrderDetailResponse handBack(@AuthenticationPrincipal AuthenticatedUser user,
+                                                @PathVariable long orderId,
+                                                @Valid @RequestBody WrongItemReturnRequest request) {
+        return wrongItems.handBack(user, orderId, request);
     }
 
     @Operation(summary = "GVHD 24/11: phiếu nhận hàng giao sai awaiting the source, with the source lots it would take "

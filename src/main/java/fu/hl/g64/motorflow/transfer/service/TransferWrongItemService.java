@@ -34,6 +34,7 @@ import fu.hl.g64.motorflow.transfer.dto.PendingWrongItemResponse;
 import fu.hl.g64.motorflow.transfer.dto.RejectWrongItemRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.WrongItemRequest;
+import fu.hl.g64.motorflow.transfer.dto.WrongItemReturnRequest;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.helper.SourceLots;
@@ -120,6 +121,39 @@ public class TransferWrongItemService {
                 now));
         notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_WRONG_ITEM",
                 ("Phiếu chuyển kho #%d: kho nhận nhận %s x%d giao sai kèm %s, cần kho gửi xác nhận hoặc từ chối")
+                        .formatted(orderId, received.getSku(), body.quantity(), ordered.getSku()), ENTITY, orderId);
+        return transferOrders.detail(user, orderId);
+    }
+
+    /**
+     * GVHD 24/11: the destination's BM hands wrong items back to the source (MSG362 above what is still undecided).
+     * Nothing moves: they never left the source's books. The order may close once every wrong item is on a phiếu the
+     * source confirmed or handed back. The source's BM is told.
+     */
+    @Transactional
+    public TransferOrderDetailResponse handBack(AuthenticatedUser user, long orderId, WrongItemReturnRequest body) {
+        TransferOrder order = reconciling(orderId);
+        if (user.role() != Role.BRANCH_MANAGER || !Objects.equals(user.storeId(), order.getDestStoreId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        Product ordered = part(body.productId());
+        DiscrepancyCase found = lockedCase(order, ordered);
+        Product received = receivedPart(ordered, body.receivedProductId());
+        TransferReconciliation.Part figure = reconciliation.byProduct(order.getId(),
+                lines.findByTransferOrderIdOrderByProductId(order.getId())).get(ordered.getId());
+        int undecided = figure == null ? 0 : figure.wrongPending();
+        if (body.quantity() > undecided) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG362", undecided);
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        String note = text(body.note());
+        DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.wrongItemReturned(found.getId(),
+                body.quantity(), received.getId(), note, user.id(), now));
+        auditLog.save(AuditLog.record(ENTITY, orderId, "TRANSFER_WRONG_ITEM_RETURNED", user.id(), note, null,
+                Map.of("event_id", event.getId(), "product_id", ordered.getId(), "received_product_id",
+                        received.getId(), "quantity", body.quantity()), now));
+        notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_WRONG_ITEM",
+                "Phiếu chuyển kho #%d: kho nhận hoàn trả %s x%d giao sai kèm %s về kho gửi"
                         .formatted(orderId, received.getSku(), body.quantity(), ordered.getSku()), ENTITY, orderId);
         return transferOrders.detail(user, orderId);
     }
