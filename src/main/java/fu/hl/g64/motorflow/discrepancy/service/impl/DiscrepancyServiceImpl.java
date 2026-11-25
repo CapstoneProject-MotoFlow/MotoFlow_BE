@@ -265,7 +265,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
             }
             // GVHD 24/11: once goods went back, came in or were kept, or a replacement was waived, the direction holds.
-            if (actedOn(done)) {
+            if (actedOn(found, done)) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG355", n);
             }
             // Test report 20/11: never below what of that kind went back already.
@@ -334,7 +334,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             Agreed agreed = new Agreed(found.getDecisionType(), found.getProposedWrongReturnQty(),
                     found.getProposedDamagedReturnQty(), found.getProposedReplacementQty(), true, false);
             Progress done = standings.get(found.getId()).progress();
-            if (actedOn(done) || agreed.wrongQty() > found.getWrongItemQty() - done.acceptedWrong()
+            if (actedOn(found, done) || agreed.wrongQty() > found.getWrongItemQty() - done.acceptedWrong()
                     || agreed.damagedQty() > found.getDamagedQty() - done.acceptedDamaged()
                     || agreed.replacementQty() > found.replacementLimit()) {
                 throw changed();
@@ -451,12 +451,13 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
 
     /**
      * GVHD 24/11: something was done on the case that fixes its direction: goods returned (the rejected excess aside),
-     * replaced or on their way, written off or taken into stock, or a replacement waived.
+     * replaced or on their way, written off or taken into stock, or a replacement waived. Review 25/11 (R-09): goods
+     * the Owner took into stock before anything was decided leave the rest to decide, so they do not lock the case.
      */
-    private static boolean actedOn(Progress done) {
+    private static boolean actedOn(DiscrepancyCase found, Progress done) {
+        boolean kept = found.isDecided() && (done.acceptedDamaged() > 0 || done.acceptedWrong() > 0);
         return done.returned() > done.returnedExcess() || done.writtenOff() > 0 || done.replaced() > 0
-                || done.pendingReplacement() > 0 || done.waived() > 0 || done.acceptedDamaged() > 0
-                || done.acceptedWrong() > 0;
+                || done.pendingReplacement() > 0 || done.waived() > 0 || kept;
     }
 
     /** The case's obligations with its direction, as audit_log keeps them. */
@@ -842,14 +843,18 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
     }
 
     /**
-     * GVHD 24/11 (plan B4): the Owner taking goods of an undecided case into stock decides it as (3). A shortage on
-     * the line still owed a replacement needs the direction decided first (review 25/11).
+     * Plan B4: the Owner taking goods of an undecided case into stock decides it as (3), but only once every wrong
+     * or damaged unit held was taken in and no replacement is still owed (review 25/11, R-09). A partial acceptance
+     * leaves the case undecided so the Branch Manager still chooses the direction for the rest.
      */
     private void keptByOwner(DiscrepancyCase found, AuthenticatedUser owner, LocalDateTime now) {
-        if (!found.isDecided() && found.getShortQty() > 0 && settlement.standing(found).openReplacement() > 0) {
-            throw undecided(found, "MSG357");
+        if (found.isDecided()) {
+            return;
         }
-        if (!found.isDecided()) {
+        // Review 25/11 (R-09, PM): only once every wrong or damaged unit held was taken in and no replacement is owed;
+        // otherwise the rest stays undecided for the Branch Manager to choose its direction.
+        Standing standing = settlement.standing(found);
+        if (standing.heldUndecided() == 0 && standing.openReplacement() == 0) {
             found.decide(DecisionType.ACCEPT_NO_REPLACEMENT, owner.id(), now);
         }
     }
@@ -1012,7 +1017,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             boolean manager = user.role() == Role.BRANCH_MANAGER
                     && Objects.equals(user.storeId(), order.getStoreId());
             boolean open = found.isOpen();
-            boolean locked = actedOn(done);
+            boolean locked = actedOn(found, done);
             boolean awaitingOwner = found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER;
             Map<String, AuditLog> asked = pending.getOrDefault(found.getId(), Map.of());
             List<Event> history = eventsByCase.getOrDefault(found.getId(), List.of()).stream()

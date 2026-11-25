@@ -293,6 +293,24 @@ class DiscrepancyClosureApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.status").value("CLOSED"));
     }
 
+    /** Review 25/11 (R-09): the Owner taking only part of the held goods leaves the rest for the Branch Manager. */
+    @Test
+    void s15TakingPartOfTheGoodsInLeavesTheDirectionOpen() throws Exception {
+        long grn = delivered(24, 0, 2);
+        long found = caseOf(grn, oil);
+        acceptAsVariant(found, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.decisionStatus").value("UNDECIDED"))
+                .andExpect(jsonPath("$.decisionLocked").value(false))
+                .andExpect(jsonPath("$.status").value("OPEN"));
+        handle(managerToken, grn, List.of(direction(byKind(found, 0, 1, null), "RETURN_AND_REPLACE")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"))
+                .andExpect(jsonPath("$[0].decisionType").value("RETURN_AND_REPLACE"))
+                .andExpect(jsonPath("$[0].damagedReturnRequiredQty").value(1));
+        returned(found, 1, "DAMAGED").andExpect(status().isOk());
+        assertStockAgrees(giaLam, oil);
+    }
+
     /** A delivery of 10 pads and {@code delivered} oils of the 24 ordered, some wrong or damaged, confirmed. */
     private long delivered(int delivered, int wrong, int damaged) throws Exception {
         long grn = receive("PX-001");
