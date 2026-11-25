@@ -6,6 +6,9 @@ ALTER TABLE discrepancy_case
         CHECK (decision_type IN ('RETURN_AND_REPLACE', 'RETURN_NO_REPLACEMENT', 'ACCEPT_NO_REPLACEMENT')),
     ADD COLUMN decision_status VARCHAR(15) NOT NULL DEFAULT 'UNDECIDED'
         CHECK (decision_status IN ('UNDECIDED', 'AWAITING_OWNER', 'DECIDED')),
+    -- Review 25/11: the direction decided before a proposal, in force again if the Owner rejects it.
+    ADD COLUMN prior_decision_type VARCHAR(25)
+        CHECK (prior_decision_type IN ('RETURN_AND_REPLACE', 'RETURN_NO_REPLACEMENT', 'ACCEPT_NO_REPLACEMENT')),
     ADD COLUMN proposed_wrong_return_qty INTEGER CHECK (proposed_wrong_return_qty >= 0),
     ADD COLUMN proposed_damaged_return_qty INTEGER CHECK (proposed_damaged_return_qty >= 0),
     ADD COLUMN proposed_replacement_qty INTEGER CHECK (proposed_replacement_qty >= 0),

@@ -99,6 +99,11 @@ public class DiscrepancyCase {
     @Column(name = "decision_type", length = 25)
     private DecisionType decisionType;
 
+    /** Review 25/11: the direction decided before a proposal, in force again if the Owner rejects the proposal. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "prior_decision_type", length = 25)
+    private DecisionType priorDecisionType;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "decision_status", nullable = false, length = 15)
     private DecisionStatus decisionStatus = DecisionStatus.UNDECIDED;
@@ -256,6 +261,9 @@ public class DiscrepancyCase {
     public void propose(DecisionType type, int wrongReturn, int damagedReturn, int replacement, long by,
                         LocalDateTime now) {
         requireOpen();
+        if (decisionStatus == DecisionStatus.DECIDED) {
+            priorDecisionType = decisionType;
+        }
         decisionType = type;
         decisionStatus = DecisionStatus.AWAITING_OWNER;
         proposedWrongReturnQty = wrongReturn;
@@ -278,13 +286,16 @@ public class DiscrepancyCase {
         clearProposal();
     }
 
-    /** GVHD 24/11: the Owner sends the proposal back; the case is undecided again. */
+    /**
+     * GVHD 24/11: the Owner sends the proposal back. What was decided before stays (review 25/11); a case with no
+     * earlier decision is undecided again.
+     */
     public void rejectProposal() {
         if (decisionStatus != DecisionStatus.AWAITING_OWNER) {
             throw new IllegalStateException("discrepancy case " + id + " has no proposal");
         }
-        decisionStatus = DecisionStatus.UNDECIDED;
-        decisionType = null;
+        decisionStatus = priorDecisionType != null ? DecisionStatus.DECIDED : DecisionStatus.UNDECIDED;
+        decisionType = priorDecisionType;
         clearProposal();
     }
 
@@ -293,6 +304,7 @@ public class DiscrepancyCase {
     }
 
     private void clearProposal() {
+        priorDecisionType = null;
         proposedWrongReturnQty = null;
         proposedDamagedReturnQty = null;
         proposedReplacementQty = null;

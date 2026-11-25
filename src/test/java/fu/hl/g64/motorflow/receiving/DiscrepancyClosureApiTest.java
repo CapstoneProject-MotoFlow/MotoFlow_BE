@@ -249,6 +249,50 @@ class DiscrepancyClosureApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.status").value("CLOSED"));
     }
 
+    /** Review 25/11: a proposal over a decided case keeps that decision in force; rejected, it stands again. */
+    @Test
+    void s12RejectingAProposalKeepsTheEarlierDecision() throws Exception {
+        long grn = delivered(21, 0, 2);
+        long found = caseOf(grn, oil);
+        handle(managerToken, grn, List.of(direction(byKind(found, 0, 2, null), "RETURN_AND_REPLACE")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"))
+                .andExpect(jsonPath("$[0].replacementRequiredQty").value(5));
+        assertThat(stock(giaLam, oil, "AWAITING_SUPPLIER_RETURN")).isEqualTo(2);
+        // Sending the same line again changes nothing.
+        handle(managerToken, grn, List.of(direction(byKind(found, 0, 2, 5), "RETURN_AND_REPLACE")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"));
+
+        handle(managerToken, grn, List.of(direction(byKind(found, 0, 2, null), "RETURN_NO_REPLACEMENT")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].decisionStatus").value("AWAITING_OWNER"));
+        assertThat(stock(giaLam, oil, "AWAITING_SUPPLIER_RETURN")).isEqualTo(2);
+        rejectDecisions(grn, "Vẫn yêu cầu NCC giao bù").andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"))
+                .andExpect(jsonPath("$[0].decisionType").value("RETURN_AND_REPLACE"))
+                .andExpect(jsonPath("$[0].damagedReturnRequiredQty").value(2))
+                .andExpect(jsonPath("$[0].replacementRequiredQty").value(5));
+        assertThat(stock(giaLam, oil, "AWAITING_SUPPLIER_RETURN")).isEqualTo(2);
+        returned(found, 2, "DAMAGED").andExpect(status().isOk());
+        assertStockAgrees(giaLam, oil);
+    }
+
+    /** Review 25/11: the Owner waives on an undecided case only when no wrong or damaged goods await a direction. */
+    @Test
+    void s13WaivingNeedsTheDirectionWhenGoodsAreHeld() throws Exception {
+        long grn = delivered(21, 0, 2);
+        long found = caseOf(grn, oil);
+        waive(ownerToken, found, null, "NCC hết hàng").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG357"));
+    }
+
+    /** GVHD 24/11: the Owner waiving an undecided shortage decides it as (1). */
+    @Test
+    void s14WaivingAShortageDecidesIt() throws Exception {
+        long shortOnly = caseOf(delivered(21, 0, 0), oil);
+        waive(ownerToken, shortOnly, null, "NCC hết hàng").andExpect(status().isOk())
+                .andExpect(jsonPath("$.decisionType").value("RETURN_NO_REPLACEMENT"))
+                .andExpect(jsonPath("$.status").value("CLOSED"));
+    }
+
     /** A delivery of 10 pads and {@code delivered} oils of the 24 ordered, some wrong or damaged, confirmed. */
     private long delivered(int delivered, int wrong, int damaged) throws Exception {
         long grn = receive("PX-001");

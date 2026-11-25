@@ -8,6 +8,7 @@ import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
@@ -525,6 +526,10 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 DiscrepancyCase found = caseByProduct.computeIfAbsent(line.getProductId(), productId ->
                         discrepancies.save(DiscrepancyCase.supplier(id, productId, 0, 0, 0, 0, now)));
                 found.addRejectedExcess(line.getExcessQty());
+                // GVHD 24/11, review 25/11: rejected excess alone leaves nothing to decide; it just goes back.
+                if (!found.isDecided() && found.getShortQty() + found.getWrongItemQty() + found.getDamagedQty() == 0) {
+                    found.decide(DecisionType.RETURN_NO_REPLACEMENT, owner.id(), now);
+                }
             }
         }
         receipt.recordExcessDecision(owner.id(), now);

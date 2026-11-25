@@ -35,6 +35,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
@@ -365,6 +366,10 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         Map<String, Long> pending = heldWriteOffs(List.of(receipt.getId()), byPart.keySet(), exceptRequestId);
         for (Map.Entry<Long, Integer> e : byPart.entrySet()) {
             DiscrepancyCase found = caseByPart.get(e.getKey());
+            // GVHD 24/11, review 25/11: not while the Owner has a proposed direction for the case to answer.
+            if (found != null && found.isOpen() && found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG359", "#" + found.getId());
+            }
             long free = found == null || !found.isOpen() ? 0
                     : standings.get(found.getId()).heldUndecided()
                     - pending.getOrDefault(receipt.getId() + ":" + e.getKey(), 0L);

@@ -227,56 +227,61 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 damaged = line.damagedReturnQty() != null ? line.damagedReturnQty()
                         : found.getDamagedReturnRequiredQty();
             }
+            // GVHD 24/11: (2) returns what is agreed and the supplier replaces; (1) and (3) take no replacement.
+            Integer asked = line.replacementRequiredQty();
+            int standard = standardReplacement(found, wrong, damaged);
+            int replacement;
+            if (type == DecisionType.RETURN_AND_REPLACE) {
+                replacement = asked != null ? asked : standard;
+            } else {
+                if (asked != null && asked != 0) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
+                }
+                replacement = 0;
+            }
+            // A line sent back as the case holds it changes nothing and is not checked again (review 25/11).
+            if (unchanged(found, type, wrong, damaged, replacement, owner)) {
+                wanted.put(found.getId(), new Agreed(type, wrong, damaged, replacement, false, true));
+                continue;
+            }
             // UC-46 Step 5_Invalid or stale quantities. GVHD 20/11: goods Owner took into stock as another part are no
             // longer held; góp ý UI 21/11: each kind on its own.
             if (wrong > found.getWrongItemQty() - done.acceptedWrong()
                     || damaged > found.getDamagedQty() - done.acceptedDamaged()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
             }
-            // GVHD 24/11: (2) returns what is agreed and the supplier replaces; (1) and (3) take no replacement.
-            Integer asked = line.replacementRequiredQty();
-            int standard = standardReplacement(found, wrong, damaged);
-            int replacement;
             if (type == DecisionType.RETURN_AND_REPLACE) {
                 // UC-46 step 3, BR-27: never above the case's limit (BR-67).
-                if (asked != null && asked > found.replacementLimit()) {
+                if (replacement > found.replacementLimit()) {
                     throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
                 }
-                replacement = asked != null ? asked : standard;
                 // Nothing to return or replace (a shortage keeps its replacement: MSG193 below).
                 if (wrong + damaged + replacement == 0 && found.getShortQty() == 0) {
                     throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
                 }
-            } else {
-                boolean nothing = type == DecisionType.ACCEPT_NO_REPLACEMENT
-                        ? found.getWrongItemQty() + found.getDamagedQty() == 0
-                        : wrong + damaged + found.getShortQty() == 0;
-                if (asked != null && asked != 0 || nothing) {
-                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
-                }
-                replacement = 0;
+            } else if (type == DecisionType.ACCEPT_NO_REPLACEMENT
+                    ? found.getWrongItemQty() + found.getDamagedQty() == 0
+                    : wrong + damaged + found.getShortQty() == 0) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
             }
-            boolean unchanged = unchanged(found, type, wrong, damaged, replacement, owner);
             // GVHD 24/11: once goods went back, came in or were kept, or a replacement was waived, the direction holds.
-            if (!unchanged && actedOn(done)) {
+            if (actedOn(done)) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG355", n);
             }
-            if (!unchanged) {
-                // Test report 20/11: never below what of that kind went back already.
-                int wrongFloor = standing.returnedOf(GoodsKind.WRONG_ITEM);
-                int damagedFloor = standing.returnedOf(GoodsKind.DAMAGED);
-                if (wrong < wrongFloor || damaged < damagedFloor) {
-                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n,
-                            wrong < wrongFloor ? wrongFloor : damagedFloor);
-                }
-                int floor = replacementFloor(found, done);
-                if (type == DecisionType.RETURN_AND_REPLACE && replacement < floor) {
-                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG193", n, floor);
-                }
+            // Test report 20/11: never below what of that kind went back already.
+            int wrongFloor = standing.returnedOf(GoodsKind.WRONG_ITEM);
+            int damagedFloor = standing.returnedOf(GoodsKind.DAMAGED);
+            if (wrong < wrongFloor || damaged < damagedFloor) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n,
+                        wrong < wrongFloor ? wrongFloor : damagedFloor);
+            }
+            int floor = replacementFloor(found, done);
+            if (type == DecisionType.RETURN_AND_REPLACE && replacement < floor) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG193", n, floor);
             }
             // PM Q2: a Branch Manager decides alone only (2) with the full replacement; the rest waits for the Owner.
             boolean decides = owner || type == DecisionType.RETURN_AND_REPLACE && replacement == standard;
-            wanted.put(found.getId(), new Agreed(type, wrong, damaged, replacement, decides, unchanged));
+            wanted.put(found.getId(), new Agreed(type, wrong, damaged, replacement, decides, false));
         }
 
         String note = text(request.note());
@@ -294,10 +299,8 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 carryOut(found, agreed, receiptId, order.getStoreId(), handler.id(), note, now);
                 found.decide(agreed.type(), handler.id(), now);
             } else {
-                // Nothing is held for return on a direction the Owner has not approved yet.
-                carryOut(found, new Agreed(DecisionType.RETURN_AND_REPLACE, 0, 0,
-                                replacementFloor(found, standings.get(found.getId()).progress()), true, false),
-                        receiptId, order.getStoreId(), handler.id(), note, now);
+                // Review 25/11: what was decided before stays in force (goods held as agreed) until the Owner answers;
+                // an undecided case holds nothing for return until then.
                 found.propose(agreed.type(), agreed.wrongQty(), agreed.damagedQty(), agreed.replacementQty(),
                         handler.id(), now);
                 proposed++;
@@ -331,7 +334,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             Agreed agreed = new Agreed(found.getDecisionType(), found.getProposedWrongReturnQty(),
                     found.getProposedDamagedReturnQty(), found.getProposedReplacementQty(), true, false);
             Progress done = standings.get(found.getId()).progress();
-            if (agreed.wrongQty() > found.getWrongItemQty() - done.acceptedWrong()
+            if (actedOn(done) || agreed.wrongQty() > found.getWrongItemQty() - done.acceptedWrong()
                     || agreed.damagedQty() > found.getDamagedQty() - done.acceptedDamaged()
                     || agreed.replacementQty() > found.replacementLimit()) {
                 throw changed();
@@ -561,7 +564,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG144", open);
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        // GVHD 24/11: the Owner waiving on an undecided case decides it: return, no replacement.
+        // GVHD 24/11: the Owner waiving on an undecided shortage decides it: return, no replacement. With wrong or
+        // damaged goods the direction must be decided first, as what goes back is not agreed yet (review 25/11).
+        if (!found.isDecided() && found.getWrongItemQty() + found.getDamagedQty() > 0) {
+            throw undecided(found, "MSG357");
+        }
         if (!found.isDecided()) {
             found.decide(DecisionType.RETURN_NO_REPLACEMENT, owner.id(), now);
         }
@@ -581,6 +588,9 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         DiscrepancyCase found = discrepancies.findAllByIdForUpdate(List.of(id)).getFirst();
         if (!found.isOpen()) {
             throw changed();
+        }
+        if (found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER) {
+            throw undecided(found, "MSG357");
         }
         Standing standing = settlement.standing(found);
         boolean damaged = request.type() == AcceptanceRequest.Type.DAMAGED;
@@ -828,8 +838,14 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 now));
     }
 
-    /** GVHD 24/11 (plan B4): the Owner taking goods of an undecided case into stock decides it as (3). */
-    private static void keptByOwner(DiscrepancyCase found, AuthenticatedUser owner, LocalDateTime now) {
+    /**
+     * GVHD 24/11 (plan B4): the Owner taking goods of an undecided case into stock decides it as (3). A shortage on
+     * the line still owed a replacement needs the direction decided first (review 25/11).
+     */
+    private void keptByOwner(DiscrepancyCase found, AuthenticatedUser owner, LocalDateTime now) {
+        if (!found.isDecided() && found.getShortQty() > 0 && settlement.standing(found).openReplacement() > 0) {
+            throw undecided(found, "MSG357");
+        }
         if (!found.isDecided()) {
             found.decide(DecisionType.ACCEPT_NO_REPLACEMENT, owner.id(), now);
         }
