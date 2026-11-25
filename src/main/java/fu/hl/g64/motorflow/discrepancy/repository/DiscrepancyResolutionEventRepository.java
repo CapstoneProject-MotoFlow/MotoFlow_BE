@@ -43,6 +43,17 @@ public interface DiscrepancyResolutionEventRepository extends JpaRepository<Disc
             order by e.occurredAt desc, e.id desc""")
     List<DiscrepancyResolutionEvent> findPendingTransferSwaps(org.springframework.data.domain.Pageable page);
 
+    /** GVHD 24/11: the same, of the transfer orders sent from {@code sourceStoreId}. */
+    @Query("""
+            select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
+            join TransferOrder o on o.id = c.transferOrderId
+            where o.sourceStoreId = :sourceStoreId
+              and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+              and e.status = fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus.AWAITING_SOURCE
+            order by e.occurredAt desc, e.id desc""")
+    List<DiscrepancyResolutionEvent> findPendingTransferSwapsFromSource(long sourceStoreId,
+                                                                        org.springframework.data.domain.Pageable page);
+
     /** PM 23/11: the events of one transfer case still pending (decisions, phiếu nhận hàng giao sai), locked. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

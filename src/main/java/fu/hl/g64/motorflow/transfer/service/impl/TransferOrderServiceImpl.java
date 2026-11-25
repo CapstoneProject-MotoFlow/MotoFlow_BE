@@ -25,6 +25,7 @@ import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.inventory.service.InventoryService;
+import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
 import fu.hl.g64.motorflow.operation.entity.WarehouseTask;
 import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
@@ -694,9 +695,12 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         Map<Long, Product> received = products.findAllById(all.stream()
                         .map(DiscrepancyResolutionEvent::getReceivedProductId).filter(Objects::nonNull).distinct().toList())
                 .stream().collect(Collectors.toMap(Product::getId, Function.identity()));
-        Map<Long, String> names = users.findAllById(all.stream().map(DiscrepancyResolutionEvent::getRecordedBy)
+        Map<Long, String> names = users.findAllById(all.stream().flatMap(event -> Stream.of(event.getRecordedBy(),
+                        event.getConfirmedBy(), event.getRejectedBy()))
                         .filter(Objects::nonNull).distinct().toList()).stream()
                 .collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
+        Map<Long, List<AttachmentResponse>> photos = attachments.list(OwnerType.DISCREPANCY_RESOLUTION_EVENT,
+                all.stream().map(DiscrepancyResolutionEvent::getId).toList());
         return found.stream().map(shortage -> new TransferOrderDetailResponse.Discrepancy(shortage.getId(),
                 shortage.getProductId(), shortage.getShortQty(), shortage.getWrongItemQty(), shortage.getDamagedQty(),
                 shortage.getStatus(), shortage.getOpenedAt(), shortage.getClosedAt(),
@@ -707,7 +711,9 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                             event.getReason(), event.getOccurredAt(), event.getConfirmedAt(),
                             event.getReceivedProductId(), part == null ? null : part.getSku(),
                             part == null ? null : part.getPartName(), event.getReceivedExpiryDate(), event.getStatus(),
-                            person(event.getRecordedBy(), names));
+                            person(event.getRecordedBy(), names), person(event.getConfirmedBy(), names),
+                            person(event.getRejectedBy(), names), event.getRejectedAt(), event.getRejectionReason(),
+                            photos.getOrDefault(event.getId(), List.of()));
                 }).toList()))
                 .toList();
     }

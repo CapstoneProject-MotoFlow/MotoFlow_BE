@@ -43,33 +43,43 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.blockedBy", contains("MSG336", "MSG342")));
     }
 
-    /** (2), (3) The receiving BM records the wrong items; only the Owner's confirmation moves Y, X is untouched. */
+    /**
+     * (2), (3) The receiving BM records the wrong items with photos; GVHD 24/11: only the source BM's confirmation
+     * moves Y, X is untouched. The Owner sees the phiếu but may not confirm it.
+     */
     @Test
-    void theOwnerConfirmsAWrongItemReceiptAndOnlyThePartReceivedMoves() throws Exception {
+    void theSourceConfirmsAWrongItemReceiptAndOnlyThePartReceivedMoves() throws Exception {
         long brakes = lot(source, brake, 10, 100_000, null, "A");
         long older = lot(source, chain, 2, 200_000, today.plusDays(30), "X1");
         long matching = lot(source, chain, 5, 210_000, today.plusDays(90), "X2");
         long order = dispatchedOrder(brake, 5);
         confirm("bmlb", order, received(order, 3, 2, 0)).andExpect(status().isOk());
 
-        record("bmlb", order, chain, 2, today.plusDays(90)).andExpect(status().isOk())
+        record("bmlb", order, chain, 2, today.plusDays(90), uploaded("xich.jpg")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(0))
                 .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].resolutionType").value("RECEIVED_AS_OTHER_PRODUCT"))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].receivedSku").value("XICH-XE"))
-                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("AWAITING_SOURCE"));
+                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("AWAITING_SOURCE"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].attachments[0].fileName").value("xich.jpg"));
         assertThat(stock(dest, chain, "available_qty")).isZero();
         assertThat(stock(source, chain, "available_qty")).isEqualTo(7);
-        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(owner.getId());
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(sourceManager.getId()).doesNotContain(owner.getId());
 
+        pending("owner").andExpect(status().isOk()).andExpect(jsonPath("$[0].transferOrderId").value(order));
+        pending("bmlb").andExpect(status().isOk()).andExpect(jsonPath("$").isEmpty());
+        pending("nvcg").andExpect(status().isForbidden());
         long eventId = eventIdOf(pending().andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].transferOrderId").value(order))
                 .andExpect(jsonPath("$[0].receivedSku").value("XICH-XE"))
                 .andExpect(jsonPath("$[0].quantity").value(2))
                 .andExpect(jsonPath("$[0].lots[0].lotId").value(matching))
-                .andExpect(jsonPath("$[0].blockedCode").doesNotExist()));
+                .andExpect(jsonPath("$[0].blockedCode").doesNotExist())
+                .andExpect(jsonPath("$[0].attachments[0].fileName").value("xich.jpg")));
         confirmWrongItem("bmlb", order, eventId).andExpect(status().isForbidden());
-        confirmWrongItem("owner", order, eventId).andExpect(status().isOk())
+        confirmWrongItem("owner", order, eventId).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(0))
                 .andExpect(jsonPath("$.lines[0].shortageQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("CONFIRMED"));
@@ -83,7 +93,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE movement_type = 'TRANSFER_WRONG_ITEM'",
                 Long.class)).isEqualTo(2);
         pending().andExpect(jsonPath("$").isEmpty());
-        confirmWrongItem("owner", order, eventId).andExpect(status().isConflict())
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG29"));
     }
 
@@ -102,7 +112,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
 
         long eventId = eventIdOf(pending().andExpect(jsonPath("$[0].blockedCode").value("MSG339"))
                 .andExpect(jsonPath("$[0].sourceSellableQty").value(1)));
-        confirmWrongItem("owner", order, eventId).andExpect(status().isConflict())
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG339"))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("còn 1, cần 2")));
         assertThat(stock(source, chain, "available_qty")).isEqualTo(5);
@@ -173,7 +183,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
-        confirmWrongItem("owner", order, eventIdOf(pending())).andExpect(status().isOk());
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
         close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
 
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
@@ -298,13 +308,49 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         long order = dispatchedOrder(brake, 5);
         confirm("bmlb", order, received(order, 4, 1, 0)).andExpect(status().isOk());
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
-        confirmWrongItem("owner", order, eventIdOf(pending())).andExpect(status().isOk());
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
         long caseId = jdbc.queryForObject("SELECT id FROM discrepancy_case WHERE transfer_order_id = ?", Long.class,
                 order);
 
         miscount("owner", order, caseId, "Đếm nhầm").andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG344"));
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
+    }
+
+    /**
+     * GVHD 24/11: the source BM rejects a phiếu with a reason; nothing moves, the items are undecided again and the
+     * receiving BM is told. They record them again, and that phiếu can be confirmed.
+     */
+    @Test
+    void theSourceRejectsAWrongItemReceiptWithAReason() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 5, 200_000, null, "X1");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, received(order, 3, 2, 0)).andExpect(status().isOk());
+        record("bmlb", order, chain, 2, null).andExpect(status().isOk());
+        long eventId = eventIdOf(pending());
+
+        reject("bmcg", order, eventId, "  ").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG361"));
+        reject("owner", order, eventId, "Không phải hàng của kho").andExpect(status().isForbidden());
+        reject("bmlb", order, eventId, "Không phải hàng của kho").andExpect(status().isForbidden());
+        reject("bmcg", order, eventId, "Kho không xuất xích").andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(2))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(0))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("REJECTED"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].rejectionReason").value("Kho không xuất xích"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].rejectedBy.id").value(sourceManager.getId()));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(destManager.getId());
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(5);
+        pending().andExpect(jsonPath("$").isEmpty());
+        reject("bmcg", order, eventId, "Lần nữa").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG29"));
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isConflict());
+
+        record("bmlb", order, chain, 2, null).andExpect(status().isOk());
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongConfirmedQty").value(2));
+        assertThat(stock(dest, chain, "available_qty")).isEqualTo(2);
     }
 
     /** (10), (11) Returns and losses are no longer decided; only the receiving store's BM or the Owner records. */
@@ -325,8 +371,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.code").value("MSG310"));
         record("bmlb", order, chain, 3, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG309"));
-        mvc.perform(get(ORDERS + "/wrong-items/pending").header(HttpHeaders.AUTHORIZATION, signIn("bmlb")))
-                .andExpect(status().isForbidden());
+        pending("nvlb").andExpect(status().isForbidden());
     }
 
     /** Arrives and is inspected: {@code passed} X good, {@code damaged} X damaged, {@code wrong} wrong items. */
@@ -342,9 +387,13 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         return receipt;
     }
 
-    private ResultActions record(String username, long order, long received, int quantity, LocalDate expiry)
-            throws Exception {
+    @SafeVarargs
+    private ResultActions record(String username, long order, long received, int quantity, LocalDate expiry,
+                                 Map<String, Object>... files) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
+        if (files.length > 0) {
+            body.put("files", List.of(files));
+        }
         body.put("productId", brake);
         body.put("receivedProductId", received);
         body.put("quantity", quantity);
@@ -367,8 +416,19 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .content(json(Map.of("reason", reason))));
     }
 
+    /** What the source's BM has to confirm or reject. */
     private ResultActions pending() throws Exception {
-        return mvc.perform(get(ORDERS + "/wrong-items/pending").header(HttpHeaders.AUTHORIZATION, signIn("owner")));
+        return pending("bmcg");
+    }
+
+    private ResultActions pending(String username) throws Exception {
+        return mvc.perform(get(ORDERS + "/wrong-items/pending").header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
+    private ResultActions reject(String username, long order, long eventId, String reason) throws Exception {
+        return mvc.perform(post(ORDERS + "/" + order + "/wrong-items/" + eventId + "/reject")
+                .header(HttpHeaders.AUTHORIZATION, signIn(username)).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("reason", reason))));
     }
 
     private ResultActions confirmWrongItem(String username, long order, long eventId) throws Exception {

@@ -69,12 +69,14 @@ public record TransferOrderDetailResponse(
 
     /**
      * PM 23/11: a phiếu nhận hàng giao sai (RECEIVED_AS_OTHER_PRODUCT) carries the part really received, its
-     * expiry and {@code status}; {@code recordedBy} made the event.
+     * expiry and {@code status}; {@code recordedBy} made the event. GVHD 24/11: a hand-back (WRONG_ITEM_RETURNED)
+     * carries the part too; a rejected phiếu carries who rejected it, when and why; {@code attachments} are the photos.
      */
     public record Event(long id, ResolutionType resolutionType, int quantity, Long goodsReceiptNoteId,
                         Long adjustmentRequestId, String reason, LocalDateTime occurredAt,
                         LocalDateTime confirmedAt, Long receivedProductId, String receivedSku,
                         String receivedPartName, LocalDate receivedExpiryDate, WrongItemReceiptStatus status,
-                        Person recordedBy) {
+                        Person recordedBy, Person confirmedBy, Person rejectedBy, LocalDateTime rejectedAt,
+                        String rejectionReason, List<AttachmentResponse> attachments) {
     }
 }
