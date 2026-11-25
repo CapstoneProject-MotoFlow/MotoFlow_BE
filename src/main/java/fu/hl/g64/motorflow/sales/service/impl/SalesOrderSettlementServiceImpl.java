@@ -49,6 +49,7 @@ import fu.hl.g64.motorflow.sales.helper.OrderPricing.Priced;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
+import fu.hl.g64.motorflow.sales.helper.WaitingOrderReadiness;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -105,6 +106,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     private final SalesOrderService salesOrders;
     private final TransactionTemplate transactions;
     private final MessageSource messages;
+    private final WaitingOrderReadiness readiness;
     private final Clock clock;
 
     // UC-60 steps 3-9
@@ -381,6 +383,8 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         }
         List<WarehouseTask> picking = tasks.findOpenPickings(List.of(orderId));
         String reason = request.reason().strip();
+        // GVHD 24/11: what the order held may now make a waiting order ready.
+        readiness.storeChanged(order.getStoreId());
         order.cancel(seller.id(), reason, now);
         warehouseTasks.cancelForDocument(TaskType.PICKING, orderId);
         Map<String, Object> data = new LinkedHashMap<>();

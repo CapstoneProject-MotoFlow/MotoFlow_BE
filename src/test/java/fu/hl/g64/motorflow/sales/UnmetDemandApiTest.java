@@ -177,6 +177,39 @@ class UnmetDemandApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void theStoreIsToldOnceWhenAWaitingOrderBecomesReady() throws Exception {
+        long hold = createOrder(pad, 8);
+        // Owner sells: the store's Branch Manager and Owner, the creator, are both told.
+        String body = create(ownerToken, order(store, customer, "RETAIL", null, lines(pad, 4)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andReturn().getResponse().getContentAsString();
+        long waiting = ((Number) JsonPath.read(body, "$.id")).longValue();
+        assertThat(notifications(manager, "WAITING_ORDER_READY")).isZero();
+
+        // 4 pads come free.
+        update(managerToken, hold, 1, order(null, customer, "RETAIL", null, lines(pad, 4))).andExpect(status().isOk());
+        assertThat(notifications(manager, "WAITING_ORDER_READY")).isEqualTo(1);
+        assertThat(notifications(owner, "WAITING_ORDER_READY")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE recipient_id = ? "
+                + "AND notification_type = 'WAITING_ORDER_READY'", String.class, manager.getId()))
+                .isEqualTo("Đơn chờ #" + waiting + " của khách Anh Tuấn đã đủ hàng. Vui lòng gọi khách và chuyển "
+                        + "đơn sang soạn.");
+
+        // More goods arrive (a stock movement into AVAILABLE): still ready, not told again.
+        lot(pad, 2, 60_000, null);
+        assertThat(notifications(manager, "WAITING_ORDER_READY")).isEqualTo(1);
+
+        // Another order takes the goods: no longer ready. When they are free again, the store is told again.
+        long other = createOrder(pad, 6);
+        assertThat(jdbc.queryForObject("SELECT ready_notified_at FROM sales_order WHERE id = ?", Object.class,
+                waiting)).isNull();
+        cancel(other, "Khách đổi ý").andExpect(status().isOk());
+        assertThat(notifications(manager, "WAITING_ORDER_READY")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT ready_notified_at FROM sales_order WHERE id = ?", Object.class,
+                waiting)).isNotNull();
+    }
+
+    @Test
     void showsReleasedAndCancelledOrdersOfTheLastThirtyDaysByDefault() throws Exception {
         createOrder(pad, 8);
         long waiting = waitingOrder(lines(pad, 2));

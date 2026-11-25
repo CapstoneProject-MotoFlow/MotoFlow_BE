@@ -61,6 +61,7 @@ import fu.hl.g64.motorflow.sales.helper.OrderPricing.Priced;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
+import fu.hl.g64.motorflow.sales.helper.WaitingOrderReadiness;
 import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
@@ -134,6 +135,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final OrderDeposits deposits;
     private final SalesDepositApplicationRepository depositApplications;
     private final TransactionReferences references;
+    private final WaitingOrderReadiness readiness;
     private final Clock clock;
 
     // UC-52
@@ -450,6 +452,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
      */
     private SalesOrderDetail openSplit(AuthenticatedUser seller, SalesOrder order, List<Share> shares,
                                        Content content, LocalDateTime now, LocalDate expected) {
+        // GVHD 24/11: what this order holds is no longer there for the waiting orders.
+        readiness.storeChanged(order.getStoreId());
         List<Share> sold = shares.stream().filter(share -> share.sellNow() > 0).toList();
         List<Share> waiting = shares.stream().filter(share -> share.waitQty() > 0).toList();
         BigDecimal rate = content.rate();
@@ -628,6 +632,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Override
     public SalesOrderDetail update(AuthenticatedUser seller, long id, SalesOrderUpdateRequest request) {
         SalesOrder order = lockForSeller(seller, id);
+        readiness.storeChanged(order.getStoreId());
         int version = currentVersion(id);
         requireVersion(request.version(), version);
 
@@ -785,6 +790,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Override
     public SalesOrderDetail confirm(AuthenticatedUser seller, long id, ConfirmSalesOrderRequest request) {
         SalesOrder order = lockForSeller(seller, id);
+        readiness.storeChanged(order.getStoreId());
         if (order.isWaitingForStock()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG308");
         }
@@ -872,6 +878,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Override
     public SalesOrderDetail release(AuthenticatedUser seller, long id, ReleaseWaitingOrderRequest request) {
         SalesOrder order = lockForSeller(seller, id);
+        readiness.storeChanged(order.getStoreId());
         if (!order.isWaitingForStock()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG307", id);
         }
