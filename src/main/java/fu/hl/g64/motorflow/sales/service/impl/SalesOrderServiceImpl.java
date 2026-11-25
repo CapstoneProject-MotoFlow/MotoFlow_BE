@@ -819,6 +819,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             // BR-14: the reference total of the delivered goods must be greater than zero.
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG170");
         }
+        Map<Long, Integer> shortWaits = shortWaits(order, request, byProduct, delivered);
         boolean confirmed = order.getStatus() == SalesOrderStatus.CONFIRMED;
         if (confirmed && lines.stream().allMatch(line -> Objects.equals(line.getDeliveredQty(),
                 delivered.get(line.getProductId())))) {
@@ -868,9 +869,61 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             row.put("delivered_qty", line.getDeliveredQty());
             return row;
         }).toList());
+        Long waitingId = null;
+        if (!shortWaits.isEmpty()) {
+            SalesOrder rest = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order),
+                    order.getPriceType(), rate, order.getNote(), seller.id(), now));
+            rest.waitForStock();
+            List<SalesOrderLine> restLines = new ArrayList<>();
+            for (SalesOrderLine line : lines) {
+                Integer quantity = shortWaits.get(line.getProductId());
+                if (quantity != null) {
+                    long reference = prices.get(line.getProductId());
+                    restLines.add(SalesOrderLine.create(rest.getId(), restLines.size() + 1, line.getProductId(),
+                            quantity, reference, OrderPricing.actualUnitPrice(reference, rate)));
+                }
+            }
+            opened(seller, rest, orderLines.saveAll(restLines), now, id);
+            waitingId = rest.getId();
+            data.put(SalesOrderHistory.SHORT_WAITING_ORDER, waitingId);
+        }
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.CONFIRMED, seller.id(), null,
                 null, data, now));
-        return detail(seller, order);
+        SalesOrderDetail detail = detail(seller, order);
+        return waitingId == null ? detail
+                : detail.withSplit(new SalesOrderDetail.Split(id, waitingId, null, List.of()));
+    }
+
+    /**
+     * GVHD 24/11 (A6): [productId → quantity] the customer waits for of what the warehouse could not pick, from the
+     * lines marked {@code waitForShort} that deliver less than requested. Only for a customer with a profile (MSG351);
+     * a retail order cannot wait for a whole line (MSG335); once per order (MSG353).
+     */
+    private Map<Long, Integer> shortWaits(SalesOrder order, ConfirmSalesOrderRequest request,
+                                          Map<Long, SalesOrderLine> byProduct, Map<Long, Integer> delivered) {
+        Map<Long, Integer> waits = new LinkedHashMap<>();
+        for (ConfirmSalesOrderRequest.Line line : request.lines()) {
+            int missing = byProduct.get(line.productId()).getRequestedQty() - delivered.get(line.productId());
+            if (line.waits() && missing > 0) {
+                if (order.getPriceType() == PriceType.RETAIL && delivered.get(line.productId()) == 0) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG335");
+                }
+                waits.put(line.productId(), missing);
+            }
+        }
+        if (waits.isEmpty()) {
+            return waits;
+        }
+        if (order.getCustomerId() == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG351");
+        }
+        auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(SalesOrderHistory.ENTITY,
+                        order.getId(), List.of(SalesOrderHistory.CONFIRMED)).stream()
+                .map(step -> step.getNewData().get(SalesOrderHistory.SHORT_WAITING_ORDER))
+                .filter(Objects::nonNull).findFirst().ifPresent(waiting -> {
+                    throw new BusinessException(HttpStatus.CONFLICT, "MSG353", String.valueOf(waiting));
+                });
+        return waits;
     }
 
     // GVHD 20/11

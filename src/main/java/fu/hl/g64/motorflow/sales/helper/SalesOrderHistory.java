@@ -42,6 +42,8 @@ public final class SalesOrderHistory {
      * (Confirmations made before góp ý UI 21/11 may also carry waiting_order_id and requested_before.)
      */
     public static final String SPLIT_FROM = "split_from_order_id";
+    /** GVHD 24/11: on a confirmation, the waiting order that took what the warehouse could not pick. */
+    public static final String SHORT_WAITING_ORDER = "short_waiting_order_id";
 
     private SalesOrderHistory() {
     }
