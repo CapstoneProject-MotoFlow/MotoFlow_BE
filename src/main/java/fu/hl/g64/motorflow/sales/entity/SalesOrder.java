@@ -124,6 +124,21 @@ public class SalesOrder {
     private Long depositForfeitedAmount;
 
     /**
+     * GVHD 24/11: the order waited for stock at some point (or is the part a release sold out of a waiting order). It
+     * stays true after the order is released or cancelled, so "Đơn chưa đáp ứng đủ" (UC-59) can list it.
+     */
+    @Column(name = "waited_for_stock", nullable = false)
+    private boolean waitedForStock;
+
+    /** GVHD 24/11: the day the store expects the goods of this waiting order; optional. */
+    @Column(name = "expected_ready_date")
+    private LocalDate expectedReadyDate;
+
+    /** GVHD 24/11: when the store was told this waiting order can be released; cleared when it no longer can. */
+    @Column(name = "ready_notified_at")
+    private LocalDateTime readyNotifiedAt;
+
+    /**
      * UC-53: a new order of the store, waiting for picking (version 1). {@code customerId} is null for a walk-in sale;
      * the snapshot keeps what the customer was called when the order was taken.
      */
@@ -186,6 +201,34 @@ public class SalesOrder {
             throw new IllegalStateException("order " + id + " is " + status + ", not just opened");
         }
         status = SalesOrderStatus.AWAITING_STOCK;
+        waitedForStock = true;
+    }
+
+    /** GVHD 24/11: this new order sells what a partial release took out of a waiting order. */
+    public void soldFromWaitingOrder() {
+        if (status != SalesOrderStatus.AWAITING_PICKING) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not just opened");
+        }
+        waitedForStock = true;
+    }
+
+    /** GVHD 24/11: the store expects the goods on {@code date}, or does not say ({@code null}). */
+    public void setExpectedReadyDate(LocalDate date, LocalDateTime now) {
+        if (status != SalesOrderStatus.AWAITING_STOCK) {
+            throw new IllegalStateException("order " + id + " is " + status + ", not waiting for stock");
+        }
+        expectedReadyDate = date;
+        updatedAt = now;
+    }
+
+    /** GVHD 24/11: the store was told the order can be released; it is told again only after {@link #notReady}. */
+    public void readyNotified(LocalDateTime now) {
+        readyNotifiedAt = now;
+    }
+
+    /** GVHD 24/11: the stock that made the order ready went elsewhere. */
+    public void notReady() {
+        readyNotifiedAt = null;
     }
 
     /** GVHD 20/11: the whole waiting order is released to picking, keeping its number. */

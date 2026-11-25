@@ -2,6 +2,7 @@ package fu.hl.g64.motorflow.sales.service;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
+import fu.hl.g64.motorflow.sales.dto.ExpectedReadyDateRequest;
 import fu.hl.g64.motorflow.sales.dto.ReleaseWaitingOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.PickingRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
@@ -80,6 +81,12 @@ public interface SalesOrderService {
      * sold now.
      */
     SalesOrderDetail release(AuthenticatedUser seller, long id, ReleaseWaitingOrderRequest request);
+
+    /**
+     * GVHD 24/11: sets or clears the day the store expects the goods of a waiting order, today or later (MSG349);
+     * MSG352 if the order does not wait for stock. Each change is kept in audit_log.
+     */
+    SalesOrderDetail changeExpectedReadyDate(AuthenticatedUser seller, long id, ExpectedReadyDateRequest request);
 
     /**
      * PM 13/11: the caller's own drafts, newest first ({@code q} as in {@link #list}; {@code storeId} filters for

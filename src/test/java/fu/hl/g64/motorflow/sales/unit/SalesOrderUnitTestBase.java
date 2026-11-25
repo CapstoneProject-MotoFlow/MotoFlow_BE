@@ -1,5 +1,6 @@
 package fu.hl.g64.motorflow.sales.unit;
 
+import fu.hl.g64.motorflow.sales.helper.WaitingOrderReadiness;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
@@ -98,6 +99,7 @@ abstract class SalesOrderUnitTestBase {
     @Mock PlatformTransactionManager transactionManager;
     @Mock SalesDepositApplicationRepository depositApplications;
     @Mock SalesDepositExpiryChangeRepository depositExpiry;
+    @Mock WaitingOrderReadiness readiness;
 
     SalesOrderServiceImpl service;
     final AuthenticatedUser manager = auth(5, Role.BRANCH_MANAGER, 2L);
@@ -121,7 +123,7 @@ abstract class SalesOrderUnitTestBase {
         OrderDeposits deposits = new OrderDeposits(depositApplications, depositExpiry, CLOCK);
         service = new SalesOrderServiceImpl(orders, orderLines, products, customers, stores, users, auditLog, tasks,
                 warehouseTasks, notifications, pricing, guide, balances, collections, receivables, attachments,
-                deposits, depositApplications, new TransactionReferences(payments, transactionManager), CLOCK);
+                deposits, depositApplications, new TransactionReferences(payments, transactionManager), readiness, CLOCK);
         gialam = with(store(2, StoreStatus.ACTIVE, false), "storeName", "Kho Gia Lâm");
         part(OIL, "NHOT-01", ProductStatus.ACTIVE, 110_000L);
         part(FILTER, "LOC-01", ProductStatus.ACTIVE, 50_000L);
