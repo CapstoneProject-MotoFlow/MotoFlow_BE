@@ -26,8 +26,10 @@ ALTER TABLE discrepancy_case
 UPDATE discrepancy_case c
 SET decision_status = 'DECIDED',
     decision_type = CASE
-        -- Only a waiver of all the replacement still owed (a part waived leaves a replacement to come).
-        WHEN c.wrong_return_required_qty + c.damaged_return_required_qty > 0
+        -- Only a waiver of all the replacement still owed (a part waived leaves a replacement to come). A shortage
+        -- alone, its replacement waived in full, is (1) too, as the runtime waiver decides it.
+        WHEN (c.wrong_return_required_qty + c.damaged_return_required_qty > 0
+              OR c.wrong_item_qty + c.damaged_qty = 0)
              AND EXISTS (SELECT 1 FROM discrepancy_resolution_event e
                          WHERE e.discrepancy_case_id = c.id AND e.resolution_type = 'CLOSED_BY_AGREEMENT')
              AND (SELECT COALESCE(SUM(e.quantity), 0) FROM discrepancy_resolution_event e

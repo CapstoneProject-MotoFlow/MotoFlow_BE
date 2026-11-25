@@ -275,6 +275,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n,
                         wrong < wrongFloor ? wrongFloor : damagedFloor);
             }
+            // A return recorded without a kind before V21 is read by the agreed wrong items: the new figures must not
+            // move it to another kind (the damaged goods already returned stay damaged goods).
+            if (standing.returnedOf(GoodsKind.DAMAGED, wrong) != damagedFloor) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, damagedFloor);
+            }
             int floor = replacementFloor(found, done);
             if (type == DecisionType.RETURN_AND_REPLACE && replacement < floor) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG193", n, floor);
