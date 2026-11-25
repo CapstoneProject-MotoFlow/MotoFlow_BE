@@ -947,6 +947,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         DepositUse use = depositUse(deposit, releaseTotals.total(), false, request);
         SalesOrder sold = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
                 rate, order.getNote(), seller.id(), now));
+        sold.soldFromWaitingOrder();
         List<SalesOrderLine> soldLines = new ArrayList<>();
         for (int i = 0; i < taken.size(); i++) {
             SalesOrderLine line = taken.get(i);
