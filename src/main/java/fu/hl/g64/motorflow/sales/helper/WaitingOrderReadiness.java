@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.inventory.event.AvailableStockChanged;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
+import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.MessageSource;
@@ -44,6 +45,7 @@ public class WaitingOrderReadiness {
     private static final Object STORES_KEY = WaitingOrderReadiness.class.getName() + ".stores";
 
     private final WaitingOrders waitingOrders;
+    private final SalesOrderRepository salesOrders;
     private final NotificationService notifications;
     private final UserAccountRepository users;
     private final MessageSource messages;
@@ -103,8 +105,11 @@ public class WaitingOrderReadiness {
         for (SalesOrder order : orders.values()) {
             boolean ready = snapshot.ready(order.getId());
             if (ready && order.getReadyNotifiedAt() == null) {
-                order.readyNotified(now);
-                tell(order);
+                // Review 25/11 (R-07): a conditional update, so two checks at once tell the store only once.
+                if (salesOrders.markReadyNotified(order.getId(), now) == 1) {
+                    order.readyNotified(now);
+                    tell(order);
+                }
             } else if (!ready && order.getReadyNotifiedAt() != null) {
                 order.notReady();
             }
