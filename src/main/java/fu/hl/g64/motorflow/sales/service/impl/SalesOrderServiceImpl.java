@@ -902,8 +902,13 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private Map<Long, Integer> shortWaits(SalesOrder order, ConfirmSalesOrderRequest request,
                                           Map<Long, SalesOrderLine> byProduct, Map<Long, Integer> delivered) {
         Map<Long, Integer> waits = new LinkedHashMap<>();
+        boolean asked = false;
         for (ConfirmSalesOrderRequest.Line line : request.lines()) {
-            int missing = byProduct.get(line.productId()).getRequestedQty() - delivered.get(line.productId());
+            SalesOrderLine target = byProduct.get(line.productId());
+            // Only what the warehouse could not pick; what was picked but not taken is given up (review 25/11).
+            int picked = Math.min(target.getPickedQty(), target.getRequestedQty());
+            int missing = target.getRequestedQty() - picked;
+            asked |= line.waits();
             if (line.waits() && missing > 0) {
                 if (order.getPriceType() == PriceType.RETAIL && delivered.get(line.productId()) == 0) {
                     throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG335");
@@ -911,10 +916,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 waits.put(line.productId(), missing);
             }
         }
-        if (waits.isEmpty()) {
+        if (!asked) {
             return waits;
         }
-        if (order.getCustomerId() == null) {
+        if (!waits.isEmpty() && order.getCustomerId() == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG351");
         }
         auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(SalesOrderHistory.ENTITY,

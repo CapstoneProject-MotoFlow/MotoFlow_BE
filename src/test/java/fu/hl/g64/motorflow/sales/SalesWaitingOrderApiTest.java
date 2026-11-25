@@ -283,6 +283,18 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void onlyWhatWasNotPickedWaits() throws Exception {
+        // Review 25/11: 5 asked for, 3 picked, the customer takes 2; the 1 picked but not taken is given up.
+        long order = createOrder(pad, 5);
+        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
+        pick(staffToken, order, 1, pad, 3, "Hàng hỏng").andExpect(status().isOk());
+        String body = confirmShort(order, 1, pad, 2, true).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long waiting = ((Number) JsonPath.read(body, "$.split.waitingOrderId")).longValue();
+        detail(managerToken, waiting).andExpect(jsonPath("$.lines[0].requestedQty").value(2));
+    }
+
+    @Test
     void aWalkInCustomerCannotWaitForTheShortPart() throws Exception {
         String body = create(managerToken, order(null, null, "RETAIL", null, lines(pad, 2)))
                 .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
