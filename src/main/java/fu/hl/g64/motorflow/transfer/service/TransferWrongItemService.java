@@ -42,6 +42,7 @@ import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.MessageSource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
@@ -91,6 +93,7 @@ public class TransferWrongItemService {
     private final NotificationService notifications;
     private final AttachmentService attachments;
     private final TransferOrderService transferOrders;
+    private final MessageSource messages;
     private final Clock clock;
 
     /**
@@ -258,8 +261,12 @@ public class TransferWrongItemService {
         auditLog.save(AuditLog.record(ENTITY, orderId, "TRANSFER_WRONG_ITEM_CONFIRMED", user.id(), null, null,
                 Map.of("event_id", event.getId(), "product_id", ordered.getId(), "received_product_id",
                         received.getId(), "quantity", quantity), now));
-        String message = "Phiếu chuyển kho #%d: kho gửi đã xác nhận nhận %s x%d giao sai, kho gửi đã trừ, kho nhận đã cộng"
-                .formatted(orderId, received.getSku(), quantity);
+        // GVHD 24/11 (C5): two facts only, what is added where and what is taken where (MSG364).
+        Map<Long, String> storeNames = stores.findAllById(List.of(source, destination)).stream()
+                .collect(Collectors.toMap(Store::getId, Store::getStoreName));
+        String message = messages.getMessage("MSG364", new Object[]{String.valueOf(orderId), String.valueOf(quantity),
+                received.getSku(), storeNames.get(destination), storeNames.get(source)}, "MSG364",
+                Locale.forLanguageTag("vi"));
         notifications.notifyStoreManagers(source, "TRANSFER_WRONG_ITEM", message, ENTITY, orderId);
         notifications.notifyStoreManagers(destination, "TRANSFER_WRONG_ITEM", message, ENTITY, orderId);
         return transferOrders.detail(user, orderId);

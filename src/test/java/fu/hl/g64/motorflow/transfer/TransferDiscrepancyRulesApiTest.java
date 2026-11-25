@@ -84,6 +84,10 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].shortageQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("CONFIRMED"));
 
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
+                + "'TRANSFER_WRONG_ITEM' AND recipient_id = ? ORDER BY id DESC LIMIT 1", String.class,
+                destManager.getId())).isEqualTo("Phiếu chuyển kho #" + order
+                + ": cộng 2 XICH-XE vào kho Long Biên, trừ 2 ở kho Cầu Giấy.");
         assertThat(lotStock(matching, source, "AVAILABLE")).isEqualTo(3);
         assertThat(lotStock(older, source, "AVAILABLE")).isEqualTo(2);
         assertThat(lotStock(matching, dest, "AVAILABLE")).isEqualTo(2);
