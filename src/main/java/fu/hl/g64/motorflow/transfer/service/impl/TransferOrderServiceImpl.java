@@ -410,6 +410,15 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         if (order.getDiscrepancyAcknowledgedAt() == null) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG366");
         }
+        // Review 25/11: the source confirms only a summary where every wrong item is settled; otherwise a phiếu decided
+        // after the confirmation (or a rejected one recorded again) would close the order unseen by the source.
+        String wrong = closingLines(order).stream()
+                .filter(row -> row.wrongPendingQty() + row.wrongAwaitingSourceQty() > 0)
+                .map(row -> row.sku() + " x" + (row.wrongPendingQty() + row.wrongAwaitingSourceQty()))
+                .collect(Collectors.joining(", "));
+        if (order.getReconciliationConfirmedAt() == null && !wrong.isEmpty()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG342", wrong);
+        }
         if (order.getReconciliationConfirmedAt() == null) {
             LocalDateTime now = LocalDateTime.now(clock);
             order.confirmReconciliation(user.id(), now);

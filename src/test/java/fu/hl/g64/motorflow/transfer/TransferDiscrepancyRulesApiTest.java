@@ -185,11 +185,16 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].wrongItemQty").value(1));
 
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
-        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
-        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
+        // Review 25/11: the source confirms only once every wrong item is settled.
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG342"));
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG363"));
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
-        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG342"));
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG363"));
         confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
 
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
@@ -208,7 +213,6 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         long order = dispatchedOrder(brake, 5);
         confirm("bmlb", order, received(order, 5, 2, 0)).andExpect(status().isOk());
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
-        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
 
         handBack("bmcg", order, 1).andExpect(status().isForbidden());
@@ -223,8 +227,9 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.discrepancies[0].events[1].resolutionType").value("WRONG_ITEM_RETURNED"))
                 .andExpect(jsonPath("$.discrepancies[0].events[1].receivedSku").value("XICH-XE"));
         assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(sourceManager.getId());
-        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG363"));
         confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
 
         assertThat(stock(dest, chain, "available_qty")).isEqualTo(1);
