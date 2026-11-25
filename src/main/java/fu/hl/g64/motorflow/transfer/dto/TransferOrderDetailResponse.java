@@ -16,7 +16,9 @@ import java.util.List;
 /**
  * UC-73. For Staff the reconciliation figures are null and {@code discrepancies} is empty: they see only what to
  * prepare or receive. {@code unitCost} of a lot is for the Owner only (BR-72). {@code attachments}: evidence of the
- * dispatch (UC-74) and extra dispatch (UC-75), empty for Staff.
+ * dispatch (UC-74) and extra dispatch (UC-75), empty for Staff. GVHD 24/11: {@code discrepancyAcknowledgedBy/At}
+ * is who sent the reconciliation request and when, with {@code reconciliationNote}; its photos are the attachments of
+ * purpose RECONCILIATION. {@code reconciliationConfirmedBy/At}: the source's BM who confirmed it.
  */
 public record TransferOrderDetailResponse(
         long id, TransferOrderStatus status, Long replenishmentRequestId,
@@ -26,7 +28,8 @@ public record TransferOrderDetailResponse(
         String delivererName, String vehiclePlateNo,
         Person extraDispatchConfirmedBy, LocalDateTime extraDispatchConfirmedAt,
         Person closedBy, LocalDateTime closedAt,
-        Person discrepancyAcknowledgedBy, LocalDateTime discrepancyAcknowledgedAt,
+        Person discrepancyAcknowledgedBy, LocalDateTime discrepancyAcknowledgedAt, String reconciliationNote,
+        Person reconciliationConfirmedBy, LocalDateTime reconciliationConfirmedAt,
         List<Line> lines, List<Lot> lots, List<Receipt> receipts, List<Discrepancy> discrepancies,
         List<AttachmentResponse> attachments) {
 

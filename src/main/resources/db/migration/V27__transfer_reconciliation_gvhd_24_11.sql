@@ -32,6 +32,7 @@ ALTER TABLE discrepancy_resolution_event ADD CONSTRAINT discrepancy_resolution_e
 -- Yêu cầu đối soát: discrepancy_acknowledged_by/_at (V22) now mean "the destination's BM sent the reconciliation
 -- request"; the source's BM confirms it here. Closing an order with discrepancies needs both.
 ALTER TABLE transfer_order
+    ADD COLUMN reconciliation_note VARCHAR(255),
     ADD COLUMN reconciliation_confirmed_by BIGINT REFERENCES user_account(id),
     ADD COLUMN reconciliation_confirmed_at TIMESTAMP,
     ADD CONSTRAINT ck_transfer_reconciliation_pair

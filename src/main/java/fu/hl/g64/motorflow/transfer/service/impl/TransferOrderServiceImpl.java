@@ -43,6 +43,7 @@ import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.dto.ClosingPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
+import fu.hl.g64.motorflow.transfer.dto.ReconciliationRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
@@ -78,6 +79,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.WrongItemReceiptStatus;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -346,7 +349,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
 
     @Transactional
     @Override
-    public TransferOrderDetailResponse acknowledgeDiscrepancy(AuthenticatedUser user, long id) {
+    public TransferOrderDetailResponse acknowledgeDiscrepancy(AuthenticatedUser user, long id,
+                                                              ReconciliationRequest request) {
         TransferOrder order = orders.findByIdForUpdate(id)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
         if (!isManagerOf(user, order.getDestStoreId())) {
@@ -360,19 +364,105 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         if (order.getDiscrepancyAcknowledgedAt() == null && !hasDiscrepancy(closingLines(order))) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
-        if (order.getDiscrepancyAcknowledgedAt() == null) {
-            LocalDateTime now = LocalDateTime.now(clock);
-            order.acknowledgeDiscrepancy(user.id(), now);
-            auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_DISCREPANCY_ACKNOWLEDGED", user.id(), null,
-                    null, Map.of("destination_store_id", order.getDestStoreId()), now));
+        if (order.getReconciliationConfirmedAt() != null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG365");
+        }
+        boolean first = order.getDiscrepancyAcknowledgedAt() == null;
+        LocalDateTime now = LocalDateTime.now(clock);
+        String note = request == null || request.note() == null || request.note().isBlank()
+                ? null : request.note().strip();
+        order.acknowledgeDiscrepancy(user.id(), now, note);
+        attachments.attach(OwnerType.TRANSFER_ORDER, id,
+                request == null || request.files() == null ? List.of() : request.files(), user.id(), "RECONCILIATION");
+        List<ClosingPreviewResponse.Line> rows = closingLines(order);
+        String summary = reconciliationSummary(order, rows);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("destination_store_id", order.getDestStoreId());
+        data.put("summary", summary);
+        auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_RECONCILIATION_REQUESTED", user.id(), note, null, data,
+                now));
+        // GVHD 24/11: the source's BM checks what the destination found, part by part, and confirms it.
+        notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_RECONCILIATION_REQUESTED",
+                "Phiếu chuyển kho #%d: kho nhận gửi yêu cầu đối soát. %s%s".formatted(id, summary,
+                        note == null ? "" : ". Ghi chú: " + note), ENTITY, id);
+        if (first) {
             // PM 23/11 case 10: the Owner learns now what closing will write off as lost.
-            String toLoss = closingLines(order).stream().filter(row -> row.toLossQty() > 0)
+            String toLoss = rows.stream().filter(row -> row.toLossQty() > 0)
                     .map(row -> row.sku() + " x" + row.toLossQty()).collect(Collectors.joining(", "));
             notifications.notifyOwners("TRANSFER_DISCREPANCY_ACKNOWLEDGED",
-                    "Kho nhận đã xác nhận xử lý sai lệch phiếu chuyển kho #%d".formatted(id)
+                    "Kho nhận đã gửi yêu cầu đối soát phiếu chuyển kho #%d".formatted(id)
                             + (toLoss.isEmpty() ? "" : ". Sẽ tính là mất khi đóng: " + toLoss), ENTITY, id);
         }
         return detail(user, order);
+    }
+
+    @Transactional
+    @Override
+    public TransferOrderDetailResponse confirmReconciliation(AuthenticatedUser user, long id) {
+        TransferOrder order = orders.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG175"));
+        if (!isManagerOf(user, order.getSourceStoreId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        if (order.getStatus() != TransferOrderStatus.RECONCILING) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
+        }
+        if (order.getDiscrepancyAcknowledgedAt() == null) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG366");
+        }
+        if (order.getReconciliationConfirmedAt() == null) {
+            LocalDateTime now = LocalDateTime.now(clock);
+            order.confirmReconciliation(user.id(), now);
+            auditLog.save(AuditLog.record(ENTITY, id, "TRANSFER_RECONCILIATION_CONFIRMED", user.id(), null, null,
+                    Map.of("source_store_id", order.getSourceStoreId()), now));
+            String message = "Phiếu chuyển kho #%d: kho gửi đã xác nhận đối soát, Owner có thể đóng phiếu".formatted(id);
+            notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_RECONCILIATION_CONFIRMED", message,
+                    ENTITY, id);
+            notifications.notifyOwners("TRANSFER_RECONCILIATION_CONFIRMED", message, ENTITY, id);
+        }
+        return detail(user, order);
+    }
+
+    /**
+     * GVHD 24/11: per part with a discrepancy, what the destination found: short, damaged, and what the wrong items
+     * really are, kept on a phiếu (awaiting or confirmed) or handed back.
+     */
+    private String reconciliationSummary(TransferOrder order, List<ClosingPreviewResponse.Line> rows) {
+        List<DiscrepancyCase> found = orders.findCases(order.getId());
+        Map<Long, Long> partOfCase = found.stream()
+                .collect(Collectors.toMap(DiscrepancyCase::getId, DiscrepancyCase::getProductId));
+        List<DiscrepancyResolutionEvent> all = found.isEmpty() ? List.of()
+                : orders.findEvents(partOfCase.keySet()).stream()
+                .filter(event -> event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED
+                        || (event.getResolutionType() == ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+                        && (event.getStatus() == WrongItemReceiptStatus.AWAITING_SOURCE
+                        || event.getStatus() == WrongItemReceiptStatus.CONFIRMED)))
+                .toList();
+        Map<Long, String> skus = products.findAllById(all.stream().map(DiscrepancyResolutionEvent::getReceivedProductId)
+                .distinct().toList()).stream().collect(Collectors.toMap(Product::getId, Product::getSku));
+        Map<Long, List<String>> wrongByPart = new HashMap<>();
+        for (DiscrepancyResolutionEvent event : all) {
+            String what = (event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED ? "hoàn trả " : "nhận ")
+                    + skus.get(event.getReceivedProductId()) + " x" + event.getQuantity();
+            wrongByPart.computeIfAbsent(partOfCase.get(event.getDiscrepancyCaseId()), key -> new ArrayList<>())
+                    .add(what);
+        }
+        return rows.stream().filter(row -> row.shortageQty() > 0 || row.damagedQty() > 0 || row.wrongItemQty() > 0)
+                .map(row -> {
+                    List<String> parts = new ArrayList<>();
+                    if (row.shortageQty() > 0) {
+                        parts.add("thiếu " + row.shortageQty());
+                    }
+                    if (row.damagedQty() > 0) {
+                        parts.add("hỏng " + row.damagedQty());
+                    }
+                    if (row.wrongItemQty() > 0) {
+                        List<String> wrong = wrongByPart.getOrDefault(row.productId(), List.of());
+                        parts.add("giao sai " + row.wrongItemQty()
+                                + (wrong.isEmpty() ? "" : " (" + String.join(", ", wrong) + ")"));
+                    }
+                    return row.sku() + ": " + String.join(", ", parts);
+                }).collect(Collectors.joining("; "));
     }
 
     // UC-77
@@ -477,7 +567,7 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         orders.findCases(id).stream().filter(DiscrepancyCase::isOpen)
                 .forEach(item -> item.close(ClosureType.CLOSED_BY_AGREEMENT,
                         order.getDiscrepancyAcknowledgedAt() != null
-                                ? "Kho nhận đã xác nhận xử lý, Owner đã đóng phiếu."
+                                ? "Hai kho đã đối soát, Owner đã đóng phiếu."
                                 : "Đã đóng phiếu chuyển kho.", user.id(), now));
         order.close(user.id(), now);
         warehouseTasks.cancelForDocument(TaskType.TRANSFER_RECEIVING, id);
@@ -551,8 +641,11 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 .map(row -> row.sku() + " x" + row.shortageQty()).collect(Collectors.joining(", "));
         if (order.getDiscrepancyAcknowledgedAt() == null && hasDiscrepancy(rows)) {
             blocked.put("MSG336", new Object[]{shortage});
+        } else if (order.getReconciliationConfirmedAt() == null && hasDiscrepancy(rows)) {
+            // GVHD 24/11: the source's BM must confirm the destination's reconciliation request.
+            blocked.put("MSG363", new Object[0]);
         }
-        // PM 23/11 B-7(d): every wrong item needs a phiếu nhận hàng giao sai the Owner confirmed.
+        // PM 23/11 B-7(d), GVHD 24/11: every wrong item is on a phiếu the source confirmed or handed back.
         String wrong = rows.stream().filter(row -> row.wrongPendingQty() + row.wrongAwaitingSourceQty() > 0)
                 .map(row -> row.sku() + " x" + (row.wrongPendingQty() + row.wrongAwaitingSourceQty()))
                 .collect(Collectors.joining(", "));
@@ -640,7 +733,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
         Map<Long, String> storeNames = stores.findAllById(List.of(order.getSourceStoreId(), order.getDestStoreId()))
                 .stream().collect(Collectors.toMap(Store::getId, Store::getStoreName));
         Map<Long, String> names = users.findAllById(Stream.of(order.getCreatedBy(), order.getDispatchedBy(),
-                        order.getExtraDispatchConfirmedBy(), order.getClosedBy(), order.getDiscrepancyAcknowledgedBy()).filter(Objects::nonNull).toList())
+                        order.getExtraDispatchConfirmedBy(), order.getClosedBy(), order.getDiscrepancyAcknowledgedBy(),
+                        order.getReconciliationConfirmedBy()).filter(Objects::nonNull).toList())
                 .stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
         List<TransferOrderDetailResponse.Discrepancy> discrepancies = staff ? List.of() : discrepancies(id);
         return new TransferOrderDetailResponse(id, order.getStatus(), order.getReplenishmentRequestId(),
@@ -652,6 +746,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 order.getExtraDispatchConfirmedAt(),
                 person(order.getClosedBy(), names), order.getClosedAt(),
                 person(order.getDiscrepancyAcknowledgedBy(), names), order.getDiscrepancyAcknowledgedAt(),
+                order.getReconciliationNote(), person(order.getReconciliationConfirmedBy(), names),
+                order.getReconciliationConfirmedAt(),
                 orderLines.stream().map(line -> {
                     Product part = parts.get(line.getProductId());
                     TransferReconciliation.Part figure = figures.get(line.getProductId());

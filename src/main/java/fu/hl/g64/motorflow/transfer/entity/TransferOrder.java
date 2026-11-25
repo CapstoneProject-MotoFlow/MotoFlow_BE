@@ -63,14 +63,41 @@ public class TransferOrder {
     @Column(name = "discrepancy_acknowledged_at")
     private LocalDateTime discrepancyAcknowledgedAt;
 
-    public void acknowledgeDiscrepancy(long who, LocalDateTime when) {
-        discrepancyAcknowledgedBy = who;
-        discrepancyAcknowledgedAt = when;
+    /** GVHD 24/11 (V27): the note of the reconciliation request the destination's BM sent. */
+    @Column(name = "reconciliation_note")
+    private String reconciliationNote;
+
+    /** GVHD 24/11 (V27): the source's BM who confirmed the reconciliation request, and when. */
+    @Column(name = "reconciliation_confirmed_by")
+    private Long reconciliationConfirmedBy;
+
+    @Column(name = "reconciliation_confirmed_at")
+    private LocalDateTime reconciliationConfirmedAt;
+
+    /**
+     * GVHD 24/11: the destination's BM sends the reconciliation request (discrepancy_acknowledged_* keep their V22
+     * names). Sent again before the source confirms, it keeps the first time and replaces the note.
+     */
+    public void acknowledgeDiscrepancy(long who, LocalDateTime when, String note) {
+        if (discrepancyAcknowledgedAt == null) {
+            discrepancyAcknowledgedBy = who;
+            discrepancyAcknowledgedAt = when;
+        }
+        reconciliationNote = note;
     }
 
+    public void confirmReconciliation(long who, LocalDateTime when) {
+        reconciliationConfirmedBy = who;
+        reconciliationConfirmedAt = when;
+    }
+
+    /** A new receipt changes the figures, so the request and its confirmation are made again. */
     public void invalidateDiscrepancyAcknowledgement() {
         discrepancyAcknowledgedBy = null;
         discrepancyAcknowledgedAt = null;
+        reconciliationNote = null;
+        reconciliationConfirmedBy = null;
+        reconciliationConfirmedAt = null;
     }
 
     @Column(name = "closed_by")

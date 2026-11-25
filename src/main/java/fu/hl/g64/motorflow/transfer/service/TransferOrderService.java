@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.dto.ClosingPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
+import fu.hl.g64.motorflow.transfer.dto.ReconciliationRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
@@ -42,11 +43,19 @@ public interface TransferOrderService {
     TransferOrderDetailResponse confirmExtraDispatch(AuthenticatedUser user, long id, ExtraDispatchRequest request);
 
     /**
-     * Q4 (PM 22/11): the destination's Branch Manager acknowledges the short, damaged and wrong item parts of a
-     * reconciling order; the status stays and the Owner is notified. After it only the Owner closes the order, and the
-     * closing writes off what is still in transit (MSG29 when nothing is to be acknowledged or something is still open).
+     * Q4 (PM 22/11), GVHD 24/11: the destination's Branch Manager sends the reconciliation request of the short,
+     * damaged and wrong item parts of a reconciling order, with a note and photos; the status stays, the source's BM
+     * gets a summary per part and the Owner what closing will write off. After it only the Owner closes the order,
+     * once the source confirmed (MSG29 when nothing is to be reconciled or something is still open; MSG365 once the
+     * source confirmed).
      */
-    TransferOrderDetailResponse acknowledgeDiscrepancy(AuthenticatedUser user, long id);
+    TransferOrderDetailResponse acknowledgeDiscrepancy(AuthenticatedUser user, long id, ReconciliationRequest request);
+
+    /**
+     * GVHD 24/11: the source's Branch Manager confirms the reconciliation request (MSG366 before it is sent). The
+     * destination's BM and the Owner are told.
+     */
+    TransferOrderDetailResponse confirmReconciliation(AuthenticatedUser user, long id);
 
     /** UC-77: the Owner and the central warehouse Branch Manager. Changes nothing. */
     ClosingPreviewResponse closingPreview(AuthenticatedUser user, long id);

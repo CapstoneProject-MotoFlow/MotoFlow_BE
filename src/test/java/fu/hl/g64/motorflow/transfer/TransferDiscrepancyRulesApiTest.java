@@ -156,6 +156,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
 
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG336"));
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
                 + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED' AND recipient_id = ?", String.class, owner.getId()))
                 .contains("Sẽ tính là mất khi đóng: MA-PHANH x2");
@@ -180,6 +181,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].wrongItemQty").value(1));
 
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
@@ -202,6 +204,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         long order = dispatchedOrder(brake, 5);
         confirm("bmlb", order, received(order, 5, 2, 0)).andExpect(status().isOk());
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
 
         handBack("bmcg", order, 1).andExpect(status().isForbidden());
@@ -295,6 +298,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         decide("bmlb", order, "LATE_DELIVERY", 2).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].latePendingQty").value(2));
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
                 + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED' AND recipient_id = ?", String.class, owner.getId()))
                 .doesNotContain("Sẽ tính là mất");
