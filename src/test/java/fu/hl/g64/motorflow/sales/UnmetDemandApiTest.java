@@ -11,11 +11,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -130,6 +132,51 @@ class UnmetDemandApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void aWaitingOrderCarriesTheDateTheStoreExpectsItsGoods() throws Exception {
+        long hold = createOrder(pad, 8);
+        Map<String, Object> early = order(null, customer, "RETAIL", null, lines(pad, 2));
+        early.put("expectedReadyDate", TODAY.minusDays(1).toString());
+        create(managerToken, early).andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG349"));
+
+        Map<String, Object> body = order(null, customer, "RETAIL", null, lines(pad, 2));
+        body.put("expectedReadyDate", TODAY.plusDays(1).toString());
+        long waiting = ((Number) JsonPath.read(create(managerToken, body).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andExpect(jsonPath("$.waitedForStock").value(true))
+                .andExpect(jsonPath("$.expectedReadyDate").value(TODAY.plusDays(1).toString()))
+                .andReturn().getResponse().getContentAsString(), "$.id")).longValue();
+        unmetDemand(managerToken)
+                .andExpect(jsonPath("$.items[0].expectedReadyDate").value(TODAY.plusDays(1).toString()))
+                .andExpect(jsonPath("$.items[0].overdue").value(false));
+
+        expectedDate(waiting, TODAY.minusDays(1).toString())
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG349"));
+        expectedDate(waiting, TODAY.toString()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.expectedReadyDate").value(TODAY.toString()));
+        expectedDate(hold, TODAY.toString())
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG352"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM audit_log "
+                + "WHERE entity_id = ? AND action = 'SALES_ORDER_EXPECTED_DATE_CHANGED'", Long.class, waiting))
+                .isEqualTo(1);
+
+        // The day passed and the goods did not come: overdue.
+        clock.advance(Duration.ofDays(1));
+        signInAll();
+        unmetDemand(managerToken).andExpect(jsonPath("$.items[0].overdue").value(true));
+        expectedDate(waiting, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.expectedReadyDate").doesNotExist());
+        unmetDemand(managerToken).andExpect(jsonPath("$.items[0].overdue").value(false));
+
+        // Nothing waits: the date is ignored.
+        Map<String, Object> inStock = order(null, customer, "RETAIL", null, lines(oil, 1));
+        inStock.put("expectedReadyDate", TODAY.plusDays(5).toString());
+        create(managerToken, inStock).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
+                .andExpect(jsonPath("$.waitedForStock").value(false))
+                .andExpect(jsonPath("$.expectedReadyDate").doesNotExist());
+    }
+
+    @Test
     void showsReleasedAndCancelledOrdersOfTheLastThirtyDaysByDefault() throws Exception {
         createOrder(pad, 8);
         long waiting = waitingOrder(lines(pad, 2));
@@ -186,6 +233,14 @@ class UnmetDemandApiTest extends SalesOrderTestData {
             request.param(parameters[i], parameters[i + 1]);
         }
         return mvc.perform(request);
+    }
+
+    private ResultActions expectedDate(long order, String date) throws Exception {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("expectedReadyDate", date);
+        return mvc.perform(put("/api/v1/sales-orders/" + order + "/expected-ready-date")
+                .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
+                .content(json(body)));
     }
 
     private long lineOf(long order) {

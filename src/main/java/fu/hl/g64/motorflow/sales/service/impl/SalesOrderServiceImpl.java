@@ -31,6 +31,7 @@ import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.ReceivableRepository;
 import fu.hl.g64.motorflow.receivable.helper.TransactionReferences;
 import fu.hl.g64.motorflow.sales.dto.ConfirmSalesOrderRequest;
+import fu.hl.g64.motorflow.sales.dto.ExpectedReadyDateRequest;
 import fu.hl.g64.motorflow.sales.dto.ReleaseWaitingOrderRequest;
 import fu.hl.g64.motorflow.sales.dto.NextAction;
 import fu.hl.g64.motorflow.sales.dto.PickingRequest;
@@ -320,11 +321,12 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     public SalesOrderDetail create(AuthenticatedUser seller, SalesOrderRequest request) {
         LocalDateTime now = LocalDateTime.now(clock);
         Content content = content(seller, request, now);
+        LocalDate expected = expectedReadyDate(request.expectedReadyDate(), now.toLocalDate());
         List<Share> shares = shares(content.store().getId(), content.customer().id() == null, request.lines(),
                 now.toLocalDate());
         SalesOrder order = orders.save(SalesOrder.create(content.store().getId(), content.customer(),
                 request.priceType(), content.rate(), text(request.note()), seller.id(), now));
-        return openSplit(seller, order, shares, content, now);
+        return openSplit(seller, order, shares, content, now, expected);
     }
 
     // PM 13/11: sales drafts
@@ -376,13 +378,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         // UC-53 as for a new order: the prices in effect now (BR-18) and the discount threshold (BR-16). A refusal
         // rolls the whole transaction back, so the draft keeps what it had.
         Content content = rewriteDraft(seller, order, request, now);
+        LocalDate expected = expectedReadyDate(request.expectedReadyDate(), now.toLocalDate());
         List<Share> shares = shares(content.store().getId(), content.customer().id() == null, request.lines(),
                 now.toLocalDate());
         order.submit(now);
         // GVHD 20/11: the draft becomes the order sold now (or the waiting order if nothing can be sold now).
         orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
         orderLines.flush();
-        return openSplit(seller, order, shares, content, now);
+        return openSplit(seller, order, shares, content, now, expected);
     }
 
     /**
@@ -446,7 +449,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
      * order is checked when released), or on the waiting order when it is all there is.
      */
     private SalesOrderDetail openSplit(AuthenticatedUser seller, SalesOrder order, List<Share> shares,
-                                       Content content, LocalDateTime now) {
+                                       Content content, LocalDateTime now, LocalDate expected) {
         List<Share> sold = shares.stream().filter(share -> share.sellNow() > 0).toList();
         List<Share> waiting = shares.stream().filter(share -> share.waitQty() > 0).toList();
         BigDecimal rate = content.rate();
@@ -469,6 +472,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         List<Share> refused = shares.stream().filter(share -> share.declinedQty() > 0).toList();
         if (sold.isEmpty()) {
             order.waitForStock();
+            order.setExpectedReadyDate(expected, now);
             List<SalesOrderLine> lines = saveShares(order, waiting, Share::waitQty, content);
             SalesOrderDetail detail = opened(seller, order, lines, now);
             Long declinedId = declineRest(seller, order, refused, content, now);
@@ -481,6 +485,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             SalesOrder rest = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order),
                     order.getPriceType(), rate, order.getNote(), seller.id(), now));
             rest.waitForStock();
+            rest.setExpectedReadyDate(expected, now);
             opened(seller, rest, saveShares(rest, waiting, Share::waitQty, content), now, order.getId());
             waitingId = rest.getId();
         }
@@ -968,6 +973,38 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                         orderLines.findBySalesOrderIdOrderByLineNoAsc(id)), now));
         return opened(seller, sold, soldLines, now, id)
                 .withSplit(new SalesOrderDetail.Split(sold.getId(), id, null, List.of()));
+    }
+
+    // GVHD 24/11
+    @Transactional
+    @Override
+    public SalesOrderDetail changeExpectedReadyDate(AuthenticatedUser seller, long id,
+                                                    ExpectedReadyDateRequest request) {
+        SalesOrder order = lockForSeller(seller, id);
+        if (!order.isWaitingForStock()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG352", id);
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        LocalDate next = expectedReadyDate(request.expectedReadyDate(), now.toLocalDate());
+        LocalDate old = order.getExpectedReadyDate();
+        if (!Objects.equals(old, next)) {
+            order.setExpectedReadyDate(next, now);
+            Map<String, Object> before = new LinkedHashMap<>();
+            before.put("expected_ready_date", old == null ? null : old.toString());
+            Map<String, Object> after = new LinkedHashMap<>();
+            after.put("expected_ready_date", next == null ? null : next.toString());
+            auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.EXPECTED_READY_DATE_CHANGED,
+                    seller.id(), null, before, after, now));
+        }
+        return detail(seller, order);
+    }
+
+    /** GVHD 24/11: the expected ready date of a waiting order is today or later (MSG349); null when not given. */
+    private static LocalDate expectedReadyDate(LocalDate date, LocalDate today) {
+        if (date != null && date.isBefore(today)) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG349");
+        }
+        return date;
     }
 
     /** What a release puts of the deposit into the order it opens, and what it gives back of it. */
@@ -1481,7 +1518,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 delivered ? "DELIVERED" : "REQUESTED", staff ? null : totals.referenceTotal(),
                 staff ? null : totals.discountAmount(), staff ? null : totals.total(),
                 staff ? null : totals.invoiceDiscountRate(), staff ? null : pricing.discountThreshold(now), money,
-                closing, rows, actions, history, splitFrom(steps), null, deposit(order, deposit, names));
+                closing, rows, actions, history, splitFrom(steps), null, deposit(order, deposit, names),
+                order.isWaitedForStock(), order.getExpectedReadyDate());
     }
 
     /** PM 21/11: the deposit block of the detail, null for Staff and for a draft. */
