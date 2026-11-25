@@ -1,11 +1,16 @@
 package fu.hl.g64.motorflow.sales.dto;
 
+import fu.hl.g64.motorflow.sales.entity.enums.WaitingOrderState;
+
 import java.time.LocalDate;
+import java.util.Set;
 
 /**
- * UC-59 filters, all optional. The days are the completion or cancellation days, the last 30 days up to today by
- * default. {@code q} matches the SKU, part name, customer name or phone. A Branch Manager sees their own store only.
+ * UC-59 filters, all optional. {@code states} default to WAITING and READY (GVHD 24/11). The days are when the order
+ * was taken (cancelled, for a cancelled order); with no days given, waiting orders are all listed and released or
+ * cancelled ones over the last 30 days. {@code q} matches the SKU, part name, customer name or phone. A Branch Manager
+ * sees their own store only.
  */
 public record UnmetDemandSearch(Long storeId, Long productId, Long customerId, String q, LocalDate from,
-                                LocalDate to) {
+                                LocalDate to, Set<WaitingOrderState> states) {
 }
