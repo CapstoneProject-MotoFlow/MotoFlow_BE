@@ -15,6 +15,9 @@ import java.util.List;
  * less than requested saves a new version, priced again (BR-36). {@code version} is the version the seller opened
  * (MSG165 if another was saved since). Góp ý UI 21/11: what the customer does not take is given up (unmet demand);
  * a confirmation no longer moves it to a waiting order.
+ * <p>GVHD 24/11: except what the warehouse could not pick ({@code waitForShort} on a line delivering less than
+ * requested): the customer waits for it on a new waiting order, split from this one. Only for a customer with a
+ * profile (MSG351), and once per order (MSG353).</p>
  */
 public record ConfirmSalesOrderRequest(
         @NotNull(message = "Vui lòng tải lại đơn bán.")
@@ -35,6 +38,16 @@ public record ConfirmSalesOrderRequest(
             @NotNull(message = "Vui lòng nhập số giao.")
             @PositiveOrZero(message = "Số giao không được âm.")
             @Max(value = 100_000, message = "Số giao tối đa 100.000.")
-            Integer deliveredQty) {
+            Integer deliveredQty,
+
+            Boolean waitForShort) {
+
+        public Line(Long productId, Integer deliveredQty) {
+            this(productId, deliveredQty, null);
+        }
+
+        public boolean waits() {
+            return Boolean.TRUE.equals(waitForShort);
+        }
     }
 }

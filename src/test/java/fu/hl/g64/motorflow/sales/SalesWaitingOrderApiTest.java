@@ -14,6 +14,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -140,7 +141,7 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
-    void whatTheCustomerDeclinedIsKeptAsACancelledOrderAndIsUnmetOnce() throws Exception {
+    void whatTheCustomerDeclinedIsKeptAsACancelledOrderButIsNotAWaitingOrder() throws Exception {
         createOrder(pad, 3);
         // 7 wanted, 3 taken now, no waiting, 5 sellable: 3 sold, 4 declined and kept on a cancelled order.
         String body = create(managerToken, order(null, customer, "RETAIL", null, List.of(line(pad, 7, 3, false))))
@@ -163,11 +164,9 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
                 + "AND entity_id = ? AND action = 'SALES_ORDER_CANCELLED'", Long.class, declined)).isEqualTo(1);
         // It holds nothing and nobody is told to pick it: 8 - 3 - 3 = 2.
         preview(lines(pad, 1)).andExpect(jsonPath("$.lines[0].sellableQty").value(2));
-        unmetDemand()
-                .andExpect(jsonPath("$.items", hasSize(1)))
-                .andExpect(jsonPath("$.items[0].orderId").value((int) declined))
-                .andExpect(jsonPath("$.items[0].orderStatus").value("CANCELLED"))
-                .andExpect(jsonPath("$.items[0].missingQty").value(4));
+        // GVHD 24/11 (Q1): the customer did not wait, so it is not in "Đơn chưa đáp ứng đủ", whatever the state.
+        unmetDemand().andExpect(jsonPath("$.items", hasSize(0)));
+        unmetDemand("state", "CANCELLED").andExpect(jsonPath("$.items", hasSize(0)));
     }
 
     @Test
@@ -197,24 +196,30 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.items[0].orderId").value((int) waiting))
                 .andExpect(jsonPath("$.items[0].orderStatus").value("AWAITING_STOCK"))
+                .andExpect(jsonPath("$.items[0].state").value("WAITING"))
                 .andExpect(jsonPath("$.items[0].occurredAt").exists())
                 .andExpect(jsonPath("$.items[0].deliveredQty").value(0))
                 .andExpect(jsonPath("$.items[0].missingQty").value(3));
 
         // 2 of the 3 are released on their own order: only the 1 still waiting is unmet, counted once.
         update(managerToken, first, 1, order(null, customer, "RETAIL", null, lines(pad, 6))).andExpect(status().isOk());
-        release(waiting, lineOf(waiting), 3).andExpect(status().isOk());
+        long sold = id(release(waiting, lineOf(waiting), 3).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString());
         unmetDemand()
                 .andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.items[0].orderId").value((int) waiting))
                 .andExpect(jsonPath("$.items[0].missingQty").value(1));
 
-        // Released in full, it goes to picking and leaves the list; only the cancelled first order is left.
+        // Released in full, it goes to picking and leaves the waiting list. GVHD 24/11: the cancelled first order was
+        // never a waiting order, so it is not listed; the two released parts are under RELEASED.
         cancel(first).andExpect(status().isOk());
         release(waiting, lineOf(waiting), 1).andExpect(status().isOk());
-        unmetDemand()
-                .andExpect(jsonPath("$.items", hasSize(1)))
-                .andExpect(jsonPath("$.items[0].orderId").value((int) first));
+        unmetDemand().andExpect(jsonPath("$.items", hasSize(0)));
+        unmetDemand("state", "RELEASED", "state", "CANCELLED")
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[*].orderId", containsInAnyOrder((int) waiting, (int) sold)))
+                .andExpect(jsonPath("$.items[*].state", contains("RELEASED", "RELEASED")))
+                .andExpect(jsonPath("$.items[*].missingQty", contains(0, 0)));
     }
 
     @Test
@@ -242,16 +247,75 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
     }
 
     @Test
-    void aShortDeliveryWithoutWaitingStaysUnmet() throws Exception {
+    void theCustomerWaitsForWhatTheWarehouseCouldNotPick() throws Exception {
+        // GVHD 24/11 (A6): 5 asked for, only 3 picked (2 damaged on the shelf); the customer waits for the 2.
+        long order = createOrder(pad, 5);
+        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
+        pick(staffToken, order, 1, pad, 3, "Hàng hỏng").andExpect(status().isOk());
+        String body = confirmShort(order, 1, pad, 3, true).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.lines[0].deliveredQty").value(3))
+                .andExpect(jsonPath("$.split.salesOrderId").value((int) order))
+                .andReturn().getResponse().getContentAsString();
+        long waiting = ((Number) JsonPath.read(body, "$.split.waitingOrderId")).longValue();
+        detail(managerToken, waiting)
+                .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andExpect(jsonPath("$.waitedForStock").value(true))
+                .andExpect(jsonPath("$.splitFromOrderId").value((int) order))
+                .andExpect(jsonPath("$.customerId").value((int) customer))
+                .andExpect(jsonPath("$.lines[0].requestedQty").value(2));
+        unmetDemand()
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].orderId").value((int) waiting))
+                .andExpect(jsonPath("$.items[0].missingQty").value(2));
+        // Nobody is told to pick a waiting order.
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM warehouse_task WHERE sales_order_id = ?", Long.class,
+                waiting)).isZero();
+
+        // Confirmed again: the short part already waits.
+        confirmShort(order, 2, pad, 2, true)
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG353"))
+                .andExpect(jsonPath("$.message").value("Phần thiếu của đơn này đã chuyển sang đơn chờ #" + waiting
+                        + ". Vui lòng xử lý trên đơn chờ đó."));
+        // Without the box, as before: nothing waits.
+        confirmShort(order, 2, pad, 2, false).andExpect(status().isOk())
+                .andExpect(jsonPath("$.split").value(nullValue()));
+    }
+
+    @Test
+    void onlyWhatWasNotPickedWaits() throws Exception {
+        // Review 25/11: 5 asked for, 3 picked, the customer takes 2; the 1 picked but not taken is given up.
+        long order = createOrder(pad, 5);
+        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
+        pick(staffToken, order, 1, pad, 3, "Hàng hỏng").andExpect(status().isOk());
+        String body = confirmShort(order, 1, pad, 2, true).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        long waiting = ((Number) JsonPath.read(body, "$.split.waitingOrderId")).longValue();
+        detail(managerToken, waiting).andExpect(jsonPath("$.lines[0].requestedQty").value(2));
+    }
+
+    @Test
+    void aWalkInCustomerCannotWaitForTheShortPart() throws Exception {
+        String body = create(managerToken, order(null, null, "RETAIL", null, lines(pad, 2)))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        long order = id(body);
+        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
+        pick(staffToken, order, 1, pad, 1, "Hàng hỏng").andExpect(status().isOk());
+        confirmShort(order, 1, pad, 1, true)
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG351"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_order WHERE status = 'AWAITING_STOCK'",
+                Long.class)).isZero();
+    }
+
+    @Test
+    void aShortDeliveryWithoutWaitingIsNotAWaitingOrder() throws Exception {
         long order = pickedOrder(pad, 5);
         confirm(managerToken, order, 1, pad, 3).andExpect(status().isOk());
         detail(managerToken, order).andExpect(jsonPath("$.lines[0].requestedQty").value(5));
         pay(order, 300_000).andExpect(status().isOk()).andExpect(jsonPath("$.completed").value(true));
-        unmetDemand()
-                .andExpect(jsonPath("$.items", hasSize(1)))
-                .andExpect(jsonPath("$.items[0].orderId").value((int) order))
-                .andExpect(jsonPath("$.items[0].orderStatus").value("COMPLETED"))
-                .andExpect(jsonPath("$.items[0].missingQty").value(2));
+        // GVHD 24/11: a completed order that delivered less is no longer listed.
+        unmetDemand().andExpect(jsonPath("$.items", hasSize(0)));
+        unmetDemand("state", "RELEASED", "state", "CANCELLED").andExpect(jsonPath("$.items", hasSize(0)));
     }
 
     @Test
@@ -311,8 +375,21 @@ class SalesWaitingOrderApiTest extends SalesOrderTestData {
                         "productId", product, "deliveredQty", delivered, "waitForRest", true))))));
     }
 
-    private ResultActions unmetDemand() throws Exception {
-        return mvc.perform(get("/api/v1/unmet-demand").header(HttpHeaders.AUTHORIZATION, managerToken));
+    /** Confirms one line, delivering {@code delivered}; {@code waitForShort} for the part not picked (GVHD 24/11). */
+    private ResultActions confirmShort(long order, int version, long product, int delivered, boolean waitForShort)
+            throws Exception {
+        return mvc.perform(post("/api/v1/sales-orders/" + order + "/confirm")
+                .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("version", version, "customerAgreed", true, "lines", List.of(Map.of(
+                        "productId", product, "deliveredQty", delivered, "waitForShort", waitForShort))))));
+    }
+
+    private ResultActions unmetDemand(String... parameters) throws Exception {
+        var request = get("/api/v1/unmet-demand").header(HttpHeaders.AUTHORIZATION, managerToken);
+        for (int i = 0; i < parameters.length; i += 2) {
+            request.param(parameters[i], parameters[i + 1]);
+        }
+        return mvc.perform(request);
     }
 
     private static Map<String, Object> line(long product, int quantity, Integer nowQty, Boolean waitForRest) {

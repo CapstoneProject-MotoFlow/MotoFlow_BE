@@ -1096,7 +1096,7 @@
           ]
         },
         {
-          "name": "Owner xem đơn chưa đáp ứng đủ (có cả đơn chờ hàng)",
+          "name": "Owner xem đơn chưa đáp ứng đủ (chỉ còn đơn chờ hàng, GVHD 24/11)",
           "request": {
             "method": "GET",
             "header": [],
@@ -1120,7 +1120,196 @@
                 "exec": [
                   "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
-                  "pm.test('Trạng thái đơn hợp lệ', () => b.items.forEach(i => pm.expect(['COMPLETED', 'CANCELLED', 'AWAITING_STOCK']).to.include(i.orderStatus)));"
+                  "pm.test('Mặc định chỉ đơn đang chờ', () => b.items.forEach(i => pm.expect(i.orderStatus).to.eql('AWAITING_STOCK')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GVHD 24-11 / Đơn chờ",
+      "description": "GVHD 24/11 phần A: \"Đơn chưa đáp ứng đủ\" chỉ còn đơn từng chờ hàng, 4 trạng thái WAITING, READY, RELEASED, CANCELLED; ngày dự kiến có hàng; khách chờ phần soạn thiếu. Chỉ đọc hoặc ca bị từ chối, không tạo dữ liệu.",
+      "item": [
+        {
+          "name": "Owner xem đơn chờ mặc định (WAITING + READY)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/unmet-demand",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Chỉ WAITING hoặc READY', () => b.items.forEach(i => pm.expect(['WAITING', 'READY']).to.include(i.state)));",
+                  "pm.test('Có SĐT, số còn lấy được và ngày dự kiến', () => b.items.forEach(i => { pm.expect(i).to.have.property('customerPhone'); pm.expect(i).to.have.property('readyQty'); pm.expect(i).to.have.property('expectedReadyDate'); pm.expect(i).to.have.property('overdue'); pm.expect(i.lineId).to.be.a('number'); }));",
+                  "pm.test('READY đứng trước WAITING', () => { const s = b.items.map(i => i.state); pm.expect(s.lastIndexOf('READY') < (s.indexOf('WAITING') === -1 ? Infinity : s.indexOf('WAITING')) || s.indexOf('READY') === -1).to.be.true; });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Owner xem đơn chờ đã lấy hàng và đã hủy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/unmet-demand?state=RELEASED&state=CANCELLED",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{ownerToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Chỉ RELEASED hoặc CANCELLED', () => b.items.forEach(i => pm.expect(['RELEASED', 'CANCELLED']).to.include(i.state)));",
+                  "pm.test('Đơn hủy vì khách không chờ không có trong danh sách', () => b.items.forEach(i => pm.expect(i.orderStatus).to.not.eql('AWAITING_STOCK')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xem đơn chờ đủ hàng của kho mình",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/unmet-demand?state=READY",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('Chỉ kho của BM', () => b.items.forEach(i => pm.expect(i.storeId).to.eql(pm.collectionVariables.get('bmStoreId'))));",
+                  "pm.test('Đơn đủ hàng: mọi dòng lấy được hết', () => b.items.forEach(i => { pm.expect(i.orderReady).to.be.true; pm.expect(i.readyQty).to.eql(i.requestedQty); }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM sửa ngày dự kiến của đơn không tồn tại bị 404",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/sales-orders/999999/expected-ready-date",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedReadyDate\": \"2099-12-31\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BM xác nhận đơn không tồn tại, chờ phần soạn thiếu, bị 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/sales-orders/999999/confirm",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{bmToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": 1,\n  \"customerAgreed\": true,\n  \"lines\": [\n    {\n      \"productId\": 1,\n      \"deliveredQty\": 1,\n      \"waitForShort\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
                 ]
               }
             }
