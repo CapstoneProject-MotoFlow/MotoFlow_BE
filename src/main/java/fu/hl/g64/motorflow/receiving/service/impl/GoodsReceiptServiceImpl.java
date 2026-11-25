@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
@@ -238,6 +239,12 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             Set<Long> parts = new LinkedHashSet<>();
             for (Long caseId : caseIds) {
                 DiscrepancyCase found = caseById.get(caseId);
+                // GVHD 24/11: a replacement comes only once the direction is decided (MSG359 while the Owner has it).
+                if (found.isOpen() && !found.isDecided()) {
+                    throw new BusinessException(HttpStatus.CONFLICT,
+                            found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER ? "MSG359" : "MSG358",
+                            "#" + caseId);
+                }
                 int open = new Standing(found, progress.get(caseId)).openReplacement();
                 if (!found.isOpen() || open == 0) {
                     throw new BusinessException(HttpStatus.CONFLICT, "MSG141", "#" + caseId);

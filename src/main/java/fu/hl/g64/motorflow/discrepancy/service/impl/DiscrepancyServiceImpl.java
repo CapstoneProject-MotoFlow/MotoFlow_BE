@@ -17,6 +17,8 @@ import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.discrepancy.dto.AcceptAsVariantRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.AcceptanceRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.DecisionApprovalRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.DecisionRejectionRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse.Event;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
@@ -27,6 +29,8 @@ import fu.hl.g64.motorflow.discrepancy.dto.SupplierReturnRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.WaiveReplacementRequest;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.GoodsKind;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.SourceType;
@@ -115,6 +119,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
     private static final List<String> ACCEPTANCE_ACTIONS = List.of(ACCEPTANCE_REQUESTED, ACCEPTANCE_REJECTED,
             ACCEPTANCE_APPROVED);
     private static final String REF_TYPE = "DISCREPANCY_CASE";
+    private static final String GRN_REF_TYPE = "GOODS_RECEIPT_NOTE";
+    /** GVHD 24/11: audit_log actions of a direction proposed to, approved or sent back by the Owner. */
+    private static final String DECISION_PROPOSED = "DISCREPANCY_DECISION_PROPOSED";
+    private static final String DECISION_APPROVED = "DISCREPANCY_DECISION_APPROVED";
+    private static final String DECISION_REJECTED = "DISCREPANCY_DECISION_REJECTED";
 
     private final DiscrepancyCaseRepository discrepancies;
     private final DiscrepancyResolutionEventRepository events;
@@ -166,16 +175,15 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         return responses(user, List.of(found), true).getFirst();
     }
 
-    // UC-46 steps 3-7
+    // UC-46 steps 3-7, GVHD 24/11: the direction agreed with the supplier for each case, decided or proposed
     @Transactional
     @Override
     public List<DiscrepancyCaseResponse> saveHandling(AuthenticatedUser handler, long receiptId,
                                                       DiscrepancyHandlingRequest request) {
-        GoodsReceiptNote receipt = receipts.findById(receiptId)
-                .filter(r -> r.getReceiptType() == ReceiptType.SUPPLIER_DELIVERY)
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG132"));
+        GoodsReceiptNote receipt = supplierReceipt(receiptId);
         PurchaseOrder order = orders.findById(receipt.getPurchaseOrderId()).orElseThrow();
         requireHandler(handler, order);
+        boolean owner = handler.role() == Role.OWNER;
         // Lock order: cases, then stock.
         List<DiscrepancyCase> cases = discrepancies.findByReceiptForUpdate(receiptId);
         Map<Long, DiscrepancyCase> caseById = byId(cases, DiscrepancyCase::getId);
@@ -193,14 +201,23 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
             Standing standing = standings.get(found.getId());
             Progress done = standing.progress();
+            DecisionType type = line.direction();
             int wrong;
             int damaged;
-            if (line.wrongReturnQty() == null && line.damagedReturnQty() == null) {
+            if (type == DecisionType.ACCEPT_NO_REPLACEMENT) {
+                // (3) The goods are kept: nothing of them goes back (the rejected excess always does).
+                wrong = line.wrongReturnQty() == null ? 0 : line.wrongReturnQty();
+                damaged = line.damagedReturnQty() == null ? 0 : line.damagedReturnQty();
+                if (wrong + damaged > 0 || line.returnRequiredQty() != null
+                        && line.returnRequiredQty() > found.getRejectedExcessQty()) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
+                }
+            } else if (line.wrongReturnQty() == null && line.damagedReturnQty() == null) {
                 // The older single figure: rejected excess first, then the wrong items, then the damaged goods.
                 int whole = line.returnRequiredQty();
-                int floor = returnFloor(found, done);
-                if (whole < floor) {
-                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, floor);
+                // The rejected excess always goes back; what went back already is checked by kind below (after MSG355).
+                if (whole < found.getRejectedExcessQty()) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, returnFloor(found, done));
                 }
                 int moved = whole - found.getRejectedExcessQty();
                 wrong = Math.min(moved, found.getWrongItemQty());
@@ -216,59 +233,238 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                     || damaged > found.getDamagedQty() - done.acceptedDamaged()) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
             }
-            // Test report 20/11: the return may come down again (the store keeps the goods) but never below what of
-            // that kind went back already.
-            int wrongFloor = standing.returnedOf(GoodsKind.WRONG_ITEM);
-            int damagedFloor = standing.returnedOf(GoodsKind.DAMAGED);
-            if (wrong < wrongFloor || damaged < damagedFloor) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n,
-                        wrong < wrongFloor ? wrongFloor : damagedFloor);
-            }
-            // A return recorded without a kind before V21 is read by the agreed wrong items: the new figures must not
-            // move it to another kind (the damaged goods already returned stay damaged goods).
-            if (standing.returnedOf(GoodsKind.DAMAGED, wrong) != damagedFloor) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n, damagedFloor);
-            }
-            // UC-46 step 3, BR-27: the replacement is agreed apart from the return, never above the case's limit
-            // (BR-67); left empty, it grows by the wrong or damaged units newly agreed to go back.
+            // GVHD 24/11: (2) returns what is agreed and the supplier replaces; (1) and (3) take no replacement.
             Integer asked = line.replacementRequiredQty();
-            if (asked != null && asked > found.replacementLimit()) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
+            int standard = standardReplacement(found, wrong, damaged);
+            int replacement;
+            if (type == DecisionType.RETURN_AND_REPLACE) {
+                // UC-46 step 3, BR-27: never above the case's limit (BR-67).
+                if (asked != null && asked > found.replacementLimit()) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG35", n);
+                }
+                replacement = asked != null ? asked : standard;
+                // Nothing to return or replace (a shortage keeps its replacement: MSG193 below).
+                if (wrong + damaged + replacement == 0 && found.getShortQty() == 0) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
+                }
+            } else {
+                boolean nothing = type == DecisionType.ACCEPT_NO_REPLACEMENT
+                        ? found.getWrongItemQty() + found.getDamagedQty() == 0
+                        : wrong + damaged + found.getShortQty() == 0;
+                if (asked != null && asked != 0 || nothing) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG354", n);
+                }
+                replacement = 0;
             }
-            int replacement = asked != null ? asked : found.defaultReplacement(wrong, damaged);
-            int floor = replacementFloor(found, done);
-            if (replacement < floor) {
-                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG193", n, floor);
+            boolean unchanged = unchanged(found, type, wrong, damaged, replacement, owner);
+            // GVHD 24/11: once goods went back, came in or were kept, or a replacement was waived, the direction holds.
+            if (!unchanged && actedOn(done)) {
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG355", n);
             }
-            wanted.put(found.getId(), new Agreed(wrong, damaged, replacement));
+            if (!unchanged) {
+                // Test report 20/11: never below what of that kind went back already.
+                int wrongFloor = standing.returnedOf(GoodsKind.WRONG_ITEM);
+                int damagedFloor = standing.returnedOf(GoodsKind.DAMAGED);
+                if (wrong < wrongFloor || damaged < damagedFloor) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG134", n,
+                            wrong < wrongFloor ? wrongFloor : damagedFloor);
+                }
+                int floor = replacementFloor(found, done);
+                if (type == DecisionType.RETURN_AND_REPLACE && replacement < floor) {
+                    throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG193", n, floor);
+                }
+            }
+            // PM Q2: a Branch Manager decides alone only (2) with the full replacement; the rest waits for the Owner.
+            boolean decides = owner || type == DecisionType.RETURN_AND_REPLACE && replacement == standard;
+            wanted.put(found.getId(), new Agreed(type, wrong, damaged, replacement, decides, unchanged));
         }
 
         String note = text(request.note());
         LocalDateTime now = LocalDateTime.now(clock);
         List<DiscrepancyCase> handled = cases.stream().filter(found -> wanted.containsKey(found.getId()))
                 .sorted(Comparator.comparing(DiscrepancyCase::getProductId)).toList();
+        int proposed = 0;
         for (DiscrepancyCase found : handled) {
             Agreed agreed = wanted.get(found.getId());
-            int wrongBefore = found.getWrongReturnRequiredQty();
-            int damagedBefore = found.getDamagedReturnRequiredQty();
-            if (agreed.wrongQty() == wrongBefore && agreed.damagedQty() == damagedBefore
-                    && agreed.replacementQty() == found.getReplacementRequiredQty()) {
+            if (agreed.unchanged()) {
                 continue;
             }
-            // Rejected excess is already awaiting return (UC-45); góp ý UI 21/11: the wrong items and the damaged goods
-            // move as agreed for each.
-            long lotId = lotOf(receiptId, found.getProductId());
-            hold(found, StockStatus.WRONG_ITEM, agreed.wrongQty() - wrongBefore, lotId, order.getStoreId(),
-                    handler.id(), note, now);
-            hold(found, StockStatus.DAMAGED, agreed.damagedQty() - damagedBefore, lotId, order.getStoreId(),
-                    handler.id(), note, now);
             Map<String, Object> old = obligations(found);
-            found.agree(agreed.wrongQty(), agreed.damagedQty(), agreed.replacementQty());
-            auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), HANDLING_SAVED, handler.id(), note, old,
-                    obligations(found), now));
+            if (agreed.decides()) {
+                carryOut(found, agreed, receiptId, order.getStoreId(), handler.id(), note, now);
+                found.decide(agreed.type(), handler.id(), now);
+            } else {
+                // Nothing is held for return on a direction the Owner has not approved yet.
+                carryOut(found, new Agreed(DecisionType.RETURN_AND_REPLACE, 0, 0,
+                                replacementFloor(found, standings.get(found.getId()).progress()), true, false),
+                        receiptId, order.getStoreId(), handler.id(), note, now);
+                found.propose(agreed.type(), agreed.wrongQty(), agreed.damagedQty(), agreed.replacementQty(),
+                        handler.id(), now);
+                proposed++;
+            }
+            auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), agreed.decides() ? HANDLING_SAVED
+                    : DECISION_PROPOSED, handler.id(), note, old, decision(found), now));
+        }
+        if (proposed > 0) {
+            notifications.notifyOwners("DISCREPANCY_DECISION_REQUESTED",
+                    "Phiếu nhập #%d (đơn nhập hàng %s): %d dòng sai lệch chờ Owner duyệt hướng xử lý với NCC."
+                            .formatted(receiptId, PurchaseOrderCode.of(order.getId()), proposed),
+                    GRN_REF_TYPE, receiptId);
         }
         handled.forEach(found -> settlement.closeIfSettled(found, handler.id(), now));
         return responses(handler, cases, true);
+    }
+
+    // GVHD 24/11: the Owner approves what Branch Managers proposed
+    @Transactional
+    @Override
+    public List<DiscrepancyCaseResponse> approveDecisions(AuthenticatedUser owner, long receiptId,
+                                                          DecisionApprovalRequest request) {
+        requireOwner(owner);
+        GoodsReceiptNote receipt = supplierReceipt(receiptId);
+        PurchaseOrder order = orders.findById(receipt.getPurchaseOrderId()).orElseThrow();
+        List<DiscrepancyCase> cases = discrepancies.findByReceiptForUpdate(receiptId);
+        List<DiscrepancyCase> chosen = awaitingOwner(cases, request.caseIds());
+        Map<Long, Standing> standings = settlement.standings(chosen);
+        LocalDateTime now = LocalDateTime.now(clock);
+        for (DiscrepancyCase found : chosen) {
+            Agreed agreed = new Agreed(found.getDecisionType(), found.getProposedWrongReturnQty(),
+                    found.getProposedDamagedReturnQty(), found.getProposedReplacementQty(), true, false);
+            Progress done = standings.get(found.getId()).progress();
+            if (agreed.wrongQty() > found.getWrongItemQty() - done.acceptedWrong()
+                    || agreed.damagedQty() > found.getDamagedQty() - done.acceptedDamaged()
+                    || agreed.replacementQty() > found.replacementLimit()) {
+                throw changed();
+            }
+            Map<String, Object> old = obligations(found);
+            found.approve(owner.id(), now);
+            carryOut(found, agreed, receiptId, order.getStoreId(), owner.id(), null, now);
+            auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), DECISION_APPROVED, owner.id(), null, old,
+                    decision(found), now));
+        }
+        notifications.notifyStoreManagers(order.getStoreId(), "DISCREPANCY_DECISION_APPROVED",
+                "Owner đã duyệt hướng xử lý %d dòng sai lệch của phiếu nhập #%d (đơn nhập hàng %s)."
+                        .formatted(chosen.size(), receiptId, PurchaseOrderCode.of(order.getId())),
+                GRN_REF_TYPE, receiptId);
+        chosen.forEach(found -> settlement.closeIfSettled(found, owner.id(), now));
+        return responses(owner, cases, true);
+    }
+
+    // GVHD 24/11: the Owner sends proposals back
+    @Transactional
+    @Override
+    public List<DiscrepancyCaseResponse> rejectDecisions(AuthenticatedUser owner, long receiptId,
+                                                         DecisionRejectionRequest request) {
+        requireOwner(owner);
+        if (!StringUtils.hasText(request.reason())) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG356");
+        }
+        GoodsReceiptNote receipt = supplierReceipt(receiptId);
+        PurchaseOrder order = orders.findById(receipt.getPurchaseOrderId()).orElseThrow();
+        List<DiscrepancyCase> cases = discrepancies.findByReceiptForUpdate(receiptId);
+        List<DiscrepancyCase> chosen = awaitingOwner(cases, request.caseIds());
+        String reason = request.reason().strip();
+        LocalDateTime now = LocalDateTime.now(clock);
+        for (DiscrepancyCase found : chosen) {
+            Map<String, Object> old = decision(found);
+            found.rejectProposal();
+            auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), DECISION_REJECTED, owner.id(), reason, old,
+                    decision(found), now));
+        }
+        notifications.notifyStoreManagers(order.getStoreId(), "DISCREPANCY_DECISION_REJECTED",
+                "Owner không duyệt hướng xử lý %d dòng sai lệch của phiếu nhập #%d: %s. Vui lòng chọn lại hướng xử lý."
+                        .formatted(chosen.size(), receiptId, reason), GRN_REF_TYPE, receiptId);
+        return responses(owner, cases, true);
+    }
+
+    /** A confirmed supplier delivery (MSG132 otherwise). */
+    private GoodsReceiptNote supplierReceipt(long receiptId) {
+        return receipts.findById(receiptId).filter(r -> r.getReceiptType() == ReceiptType.SUPPLIER_DELIVERY)
+                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG132"));
+    }
+
+    /** The cases awaiting the Owner among {@code caseIds} (all of them when empty), by part; MSG360 if none. */
+    private static List<DiscrepancyCase> awaitingOwner(List<DiscrepancyCase> cases, List<Long> caseIds) {
+        boolean all = caseIds == null || caseIds.isEmpty();
+        List<DiscrepancyCase> chosen = cases.stream()
+                .filter(found -> found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER)
+                .filter(found -> all || caseIds.contains(found.getId()))
+                .sorted(Comparator.comparing(DiscrepancyCase::getProductId)).toList();
+        if (chosen.isEmpty() || !all && chosen.size() != new HashSet<>(caseIds).size()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG360");
+        }
+        return chosen;
+    }
+
+    /**
+     * Carries a decided direction out: the wrong items and damaged goods to return move to awaiting return to
+     * supplier (or back from it), and the case agrees them. (1) and (3) keep the least replacement the case allows
+     * and waive what of it no delivery is bringing, as the Owner's waiver does (UC-46 Step 3).
+     */
+    private void carryOut(DiscrepancyCase found, Agreed agreed, long receiptId, long storeId, long by, String note,
+                          LocalDateTime now) {
+        int wrongMove = agreed.wrongQty() - found.getWrongReturnRequiredQty();
+        int damagedMove = agreed.damagedQty() - found.getDamagedReturnRequiredQty();
+        if (wrongMove != 0 || damagedMove != 0) {
+            // Rejected excess is already awaiting return (UC-45); góp ý UI 21/11: each kind moves as agreed for it.
+            long lotId = lotOf(receiptId, found.getProductId());
+            hold(found, StockStatus.WRONG_ITEM, wrongMove, lotId, storeId, by, note, now);
+            hold(found, StockStatus.DAMAGED, damagedMove, lotId, storeId, by, note, now);
+        }
+        boolean replaced = agreed.type() == DecisionType.RETURN_AND_REPLACE;
+        found.agree(agreed.wrongQty(), agreed.damagedQty(), replaced ? agreed.replacementQty()
+                : replacementFloor(found, settlement.standing(found).progress()));
+        if (!replaced) {
+            int open = settlement.standing(found).openReplacement();
+            if (open > 0) {
+                events.save(DiscrepancyResolutionEvent.done(found.getId(), ResolutionType.CLOSED_BY_AGREEMENT, open,
+                        note != null ? note : agreed.type() == DecisionType.ACCEPT_NO_REPLACEMENT
+                                ? "Nhận hàng lỗi, không cần giao bù" : "Trả hàng, không cần giao bù", by, now));
+            }
+        }
+    }
+
+    /** PM Q2: the replacement a Branch Manager may agree alone: everything short and sent back, within the limit. */
+    private static int standardReplacement(DiscrepancyCase found, int wrong, int damaged) {
+        return Math.min(found.getShortQty() + wrong + damaged, found.replacementLimit());
+    }
+
+    /** Whether a line repeats what the case holds already, so that saving the whole table again changes nothing. */
+    private static boolean unchanged(DiscrepancyCase found, DecisionType type, int wrong, int damaged,
+                                     int replacement, boolean owner) {
+        if (found.getDecisionType() != type) {
+            return false;
+        }
+        return switch (found.getDecisionStatus()) {
+            case DECIDED -> wrong == found.getWrongReturnRequiredQty() && damaged == found.getDamagedReturnRequiredQty()
+                    && (type != DecisionType.RETURN_AND_REPLACE || replacement == found.getReplacementRequiredQty());
+            // The Owner saving a proposal as it is decides it.
+            case AWAITING_OWNER -> !owner && wrong == found.getProposedWrongReturnQty()
+                    && damaged == found.getProposedDamagedReturnQty()
+                    && replacement == found.getProposedReplacementQty();
+            case UNDECIDED -> false;
+        };
+    }
+
+    /**
+     * GVHD 24/11: something was done on the case that fixes its direction: goods returned (the rejected excess aside),
+     * replaced or on their way, written off or taken into stock, or a replacement waived.
+     */
+    private static boolean actedOn(Progress done) {
+        return done.returned() > done.returnedExcess() || done.writtenOff() > 0 || done.replaced() > 0
+                || done.pendingReplacement() > 0 || done.waived() > 0 || done.acceptedDamaged() > 0
+                || done.acceptedWrong() > 0;
+    }
+
+    /** The case's obligations with its direction, as audit_log keeps them. */
+    private static Map<String, Object> decision(DiscrepancyCase found) {
+        Map<String, Object> values = obligations(found);
+        values.put("decision_type", found.getDecisionType() == null ? null : found.getDecisionType().name());
+        values.put("decision_status", found.getDecisionStatus().name());
+        values.put("proposed_wrong_return_qty", found.getProposedWrongReturnQty());
+        values.put("proposed_damaged_return_qty", found.getProposedDamagedReturnQty());
+        values.put("proposed_replacement_qty", found.getProposedReplacementQty());
+        return values;
     }
 
     // UC-46 Step 1_Actual supplier return
@@ -287,13 +483,19 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             throw changed();
         }
         Standing standing = settlement.standing(found);
+        GoodsKind kind = request.goodsKind();
+        // GVHD 24/11: wrong items and damaged goods go back once the direction is decided; the excess Owner rejected
+        // always goes back.
+        if (!found.isDecided() && (kind != null && kind != GoodsKind.REJECTED_EXCESS
+                || standing.outstandingReturn(GoodsKind.REJECTED_EXCESS) == 0)) {
+            throw undecided(found, "MSG357");
+        }
         if (standing.outstandingReturn() == 0) {
             throw changed();
         }
         // Góp ý UI 21/11: a return of one kind. Without a kind it is taken as the rejected excess first, then the wrong
         // items, then the damaged goods, and that reading is stored with the return, so a later change of the agreed
         // return per kind does not move what already went back to another kind.
-        GoodsKind kind = request.goodsKind();
         int left = kind != null ? standing.outstandingReturn(kind) : standing.outstandingReturn();
         if (request.quantity() > left) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG135", left);
@@ -346,6 +548,9 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         if (!found.isOpen()) {
             throw changed();
         }
+        if (found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER) {
+            throw undecided(found, "MSG357");
+        }
         // Replacement a replacement delivery is already bringing is settled by that delivery's confirmation.
         int open = settlement.standing(found).openReplacement();
         if (open == 0) {
@@ -356,6 +561,10 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG144", open);
         }
         LocalDateTime now = LocalDateTime.now(clock);
+        // GVHD 24/11: the Owner waiving on an undecided case decides it: return, no replacement.
+        if (!found.isDecided()) {
+            found.decide(DecisionType.RETURN_NO_REPLACEMENT, owner.id(), now);
+        }
         events.save(DiscrepancyResolutionEvent.done(id, ResolutionType.CLOSED_BY_AGREEMENT, quantity,
                 request.reason().strip(), owner.id(), now));
         settlement.closeIfSettled(found, owner.id(), now);
@@ -446,6 +655,10 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         if (!found.isOpen()) {
             throw changed();
         }
+        // GVHD 24/11: not over a proposal the Owner has not answered.
+        if (found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER) {
+            throw undecided(found, "MSG357");
+        }
         int undecided = settlement.standing(found).damagedUndecided();
         if (request.quantity() > undecided) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG309", undecided);
@@ -479,6 +692,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
         });
         approved(owner, found, "DAMAGED", variant.getId(), request.quantity(), now);
+        keptByOwner(found, owner, now);
         settlement.closeIfSettled(found, owner.id(), now);
         return responses(owner, List.of(found), true).getFirst();
     }
@@ -494,6 +708,10 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         DiscrepancyCase found = discrepancies.findAllByIdForUpdate(List.of(id)).getFirst();
         if (!found.isOpen()) {
             throw changed();
+        }
+        // GVHD 24/11: not over a proposal the Owner has not answered.
+        if (found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER) {
+            throw undecided(found, "MSG357");
         }
         int undecided = settlement.standing(found).wrongUndecided();
         if (request.quantity() > undecided) {
@@ -531,6 +749,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
         }
         approved(owner, found, "WRONG_ITEM", received.getId(), request.quantity(), now);
+        keptByOwner(found, owner, now);
         settlement.closeIfSettled(found, owner.id(), now);
         return responses(owner, List.of(found), true).getFirst();
     }
@@ -607,6 +826,20 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         data.put("quantity", quantity);
         auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), ACCEPTANCE_APPROVED, owner.id(), null, null, data,
                 now));
+    }
+
+    /** GVHD 24/11 (plan B4): the Owner taking goods of an undecided case into stock decides it as (3). */
+    private static void keptByOwner(DiscrepancyCase found, AuthenticatedUser owner, LocalDateTime now) {
+        if (!found.isDecided()) {
+            found.decide(DecisionType.ACCEPT_NO_REPLACEMENT, owner.id(), now);
+        }
+    }
+
+    /** MSG359 while the Owner has a proposal to answer, {@code code} while nothing is decided. */
+    private static BusinessException undecided(DiscrepancyCase found, String code) {
+        return found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER
+                ? new BusinessException(HttpStatus.CONFLICT, "MSG359", "#" + found.getId())
+                : new BusinessException(HttpStatus.CONFLICT, code, "#" + found.getId());
     }
 
     /** What a kind of acceptance request is called in MSG314 and MSG315. */
@@ -734,7 +967,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 .map(step -> step.getNewData().get("product_id")).filter(Objects::nonNull)
                 .map(value -> ((Number) value).longValue()).collect(Collectors.toSet())), Product::getId);
         Set<Long> people = new HashSet<>();
-        cases.forEach(found -> people.add(found.getClosedBy()));
+        cases.forEach(found -> {
+            people.add(found.getClosedBy());
+            people.add(found.getDecidedBy());
+            people.add(found.getApprovedBy());
+        });
         pendingSteps.forEach(step -> people.add(step.getActorId()));
         eventsByCase.values().forEach(list -> list.forEach(event -> people.add(event.getRecordedBy())));
         people.remove(null);
@@ -756,6 +993,8 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             boolean manager = user.role() == Role.BRANCH_MANAGER
                     && Objects.equals(user.storeId(), order.getStoreId());
             boolean open = found.isOpen();
+            boolean locked = actedOn(done);
+            boolean awaitingOwner = found.getDecisionStatus() == DecisionStatus.AWAITING_OWNER;
             Map<String, AuditLog> asked = pending.getOrDefault(found.getId(), Map.of());
             List<Event> history = eventsByCase.getOrDefault(found.getId(), List.of()).stream()
                     .map(event -> new Event(event.getId(), event.getResolutionType(), event.getQuantity(),
@@ -775,22 +1014,26 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                     standing.heldUndecided(), excessAwaiting.contains(receipt.getId() + ":" + found.getProductId()),
                     found.getStatus(), found.getOpenedAt(), found.getClosureType(), found.getClosureReason(),
                     found.getClosedBy(), names.get(found.getClosedBy()), found.getClosedAt(),
-                    open && (owner || manager) && (found.heldQty() > found.getReturnRequiredQty()
-                            || found.getReturnRequiredQty() > returnFloor(found, done)
-                            || found.replacementLimit() > replacementFloor(found, done)),
+                    // GVHD 24/11: the direction may change until something was done on the case.
+                    open && (owner || manager) && !locked,
                     open && manager && standing.outstandingReturn() > 0,
-                    open && owner && standing.openReplacement() > 0,
-                    open && manager && standing.openReplacement() > 0, history,
+                    open && owner && !awaitingOwner && standing.openReplacement() > 0,
+                    open && manager && found.isDecided() && standing.openReplacement() > 0, history,
                     standing.damagedUndecided(), standing.wrongUndecided(),
                     open && (owner || manager)
                             && (standing.damagedUndecided() > 0 && !asked.containsKey("DAMAGED")
                             || standing.wrongUndecided() > 0 && !asked.containsKey("WRONG_ITEM")),
-                    open && owner && standing.damagedUndecided() + standing.wrongUndecided() > 0,
+                    open && owner && !awaitingOwner && standing.damagedUndecided() + standing.wrongUndecided() > 0,
                     open ? asked.values().stream().map(step -> pendingRequest(step, requestedParts, names)).toList()
                             : List.of(),
                     found.getWrongReturnRequiredQty(), found.getDamagedReturnRequiredQty(),
                     standing.outstandingReturn(GoodsKind.REJECTED_EXCESS),
-                    standing.outstandingReturn(GoodsKind.WRONG_ITEM), standing.outstandingReturn(GoodsKind.DAMAGED)));
+                    standing.outstandingReturn(GoodsKind.WRONG_ITEM), standing.outstandingReturn(GoodsKind.DAMAGED),
+                    found.getDecisionType(), found.getDecisionStatus(), found.getProposedWrongReturnQty(),
+                    found.getProposedDamagedReturnQty(), found.getProposedReplacementQty(), awaitingOwner,
+                    found.getDecidedBy(), names.get(found.getDecidedBy()), found.getDecidedAt(),
+                    found.getApprovedBy(), names.get(found.getApprovedBy()), found.getApprovedAt(),
+                    locked, open && owner && awaitingOwner));
         }
         return rows;
     }
@@ -804,7 +1047,8 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
     }
 
     /** The wrong items and damaged goods to return and the replacement one line of a handling asks for. */
-    private record Agreed(int wrongQty, int damagedQty, int replacementQty) {
+    private record Agreed(DecisionType type, int wrongQty, int damagedQty, int replacementQty, boolean decides,
+                          boolean unchanged) {
     }
 
     private static Map<String, Object> obligations(DiscrepancyCase found) {
@@ -822,6 +1066,9 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             where.add(cb.equal(root.get("sourceType"), SourceType.SUPPLIER));
             if (search.status() != null) {
                 where.add(cb.equal(root.get("status"), search.status()));
+            }
+            if (search.decisionStatus() != null) {
+                where.add(cb.equal(root.get("decisionStatus"), search.decisionStatus()));
             }
             if (search.goodsReceiptNoteId() != null) {
                 where.add(cb.equal(root.get("goodsReceiptNoteId"), search.goodsReceiptNoteId()));

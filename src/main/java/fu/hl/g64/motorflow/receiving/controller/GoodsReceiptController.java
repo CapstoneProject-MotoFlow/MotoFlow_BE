@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.receiving.controller;
 
 import fu.hl.g64.motorflow.common.dto.PageResponse;
+import fu.hl.g64.motorflow.discrepancy.dto.DecisionApprovalRequest;
+import fu.hl.g64.motorflow.discrepancy.dto.DecisionRejectionRequest;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
 import fu.hl.g64.motorflow.discrepancy.service.DiscrepancyService;
@@ -107,15 +109,42 @@ public class GoodsReceiptController {
         return goodsReceipts.decideExcess(owner, id, request);
     }
 
-    @Operation(summary = "Save the handling agreed with the supplier for the delivery's discrepancies (UC-46)",
-            description = "Sets the quantity to return and, optionally, the quantity to replace for each case; the "
-                    + "goods to return move to awaiting return to supplier. Left empty, the replacement grows by the "
-                    + "units newly sent back, within replacementLimitQty. Returns every case of the delivery.")
+    @Operation(summary = "Save the direction agreed with the supplier for the delivery's discrepancies (UC-46)",
+            description = "GVHD 24/11: each line has decisionType RETURN_AND_REPLACE (default), RETURN_NO_REPLACEMENT "
+                    + "or ACCEPT_NO_REPLACEMENT with its quantities (MSG354). The Owner decides any direction; a "
+                    + "Branch Manager decides alone only RETURN_AND_REPLACE with replacement = short + returned, "
+                    + "within replacementLimitQty, and proposes the rest to the Owner (decisionStatus AWAITING_OWNER, "
+                    + "nothing moves). A decided direction moves the goods to return to awaiting return to supplier. "
+                    + "MSG355 once something was done on the line. Returns every case of the delivery.")
     @PutMapping("/{id}/discrepancies")
     @PreAuthorize("hasAnyRole('OWNER', 'BRANCH_MANAGER')")
     public List<DiscrepancyCaseResponse> saveHandling(@AuthenticationPrincipal AuthenticatedUser handler,
                                                       @PathVariable long id,
                                                       @Valid @RequestBody DiscrepancyHandlingRequest request) {
         return discrepancies.saveHandling(handler, id, request);
+    }
+
+    @Operation(summary = "Approve the directions Branch Managers proposed (GVHD 24/11)",
+            description = "Owner only. caseIds left empty approves every case awaiting the Owner; MSG360 when none "
+                    + "of them awaits. The directions are carried out as a decided save would.")
+    @PostMapping("/{id}/discrepancies/approve")
+    @PreAuthorize("hasRole('OWNER')")
+    public List<DiscrepancyCaseResponse> approveDecisions(@AuthenticationPrincipal AuthenticatedUser owner,
+                                                          @PathVariable long id,
+                                                          @Valid @RequestBody(required = false)
+                                                          DecisionApprovalRequest request) {
+        return discrepancies.approveDecisions(owner, id, request == null ? new DecisionApprovalRequest(null)
+                : request);
+    }
+
+    @Operation(summary = "Send proposed directions back (GVHD 24/11)",
+            description = "Owner only, with a reason (MSG356). The cases are undecided again; the store's managers "
+                    + "are told. MSG360 when none of them awaits the Owner.")
+    @PostMapping("/{id}/discrepancies/reject")
+    @PreAuthorize("hasRole('OWNER')")
+    public List<DiscrepancyCaseResponse> rejectDecisions(@AuthenticationPrincipal AuthenticatedUser owner,
+                                                         @PathVariable long id,
+                                                         @Valid @RequestBody DecisionRejectionRequest request) {
+        return discrepancies.rejectDecisions(owner, id, request);
     }
 }

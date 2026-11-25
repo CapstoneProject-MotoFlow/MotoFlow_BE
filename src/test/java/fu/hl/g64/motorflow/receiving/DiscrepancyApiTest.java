@@ -224,8 +224,9 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
         handle(managerToken, grn, List.of(handling(found, 2, 2))).andExpect(status().isOk());
         assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isEqualTo(2);
 
-        // Nothing went back yet, so both pads return to the damaged stock and both are still replaced.
-        handle(managerToken, grn, List.of(handling(found, 0, 2)))
+        // Nothing went back yet, so both pads return to the damaged stock and both are still replaced. GVHD 24/11: a
+        // replacement beyond short + returned is the Owner's to decide.
+        handle(ownerToken, grn, List.of(handling(found, 0, 2)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].returnRequiredQty").value(0))
                 .andExpect(jsonPath("$[0].replacementRequiredQty").value(2))
@@ -240,21 +241,26 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
         assertThat(movementsOf(pad)).endsWith(List.of("RETURN_RELEASE", "AWAITING_SUPPLIER_RETURN", -2),
                 List.of("RETURN_RELEASE", "DAMAGED", 2));
 
-        // Once one pad went back, the return cannot come below it.
-        handle(managerToken, grn, List.of(handling(found, 2, 2))).andExpect(status().isOk());
+        // Back to returning both (short + returned = 2, the manager decides alone). GVHD 24/11: once one pad went
+        // back, the direction holds (MSG355).
+        handle(managerToken, grn, List.of(handling(found, 2, 2))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"));
         supplierReturn(managerToken, found, Map.of("quantity", 1, "evidence", List.of(Map.of("storageKey",
                 "motoflow/attachments/bien-ban", "fileName", "bien-ban.pdf", "contentType", "application/pdf",
                 "fileSize", 50_000)))).andExpect(status().isOk());
         handle(managerToken, grn, List.of(handling(found, 0, 2)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG134"))
-                .andExpect(jsonPath("$.message").value("Số lượng sẽ trả lại của dòng 1 không được nhỏ hơn 1, là số đã "
-                        + "trả nhà cung cấp hoặc hàng thừa đã từ chối nhận."));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG355"))
+                .andExpect(jsonPath("$.message").value("Dòng 1: đã có thao tác trả hàng, giao bù, nhận hàng vào kho "
+                        + "hoặc bỏ giao bù nên không sửa hướng xử lý được."));
         handle(managerToken, grn, List.of(handling(found, 1, 2)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].outstandingReturnQty").value(0));
-        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isZero();
-        assertThat(stock(giaLam, pad, "DAMAGED")).isEqualTo(1);
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG355"));
+        // The same direction again changes nothing.
+        handle(managerToken, grn, List.of(handling(found, 2, 2))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].outstandingReturnQty").value(1));
+        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isEqualTo(1);
+        assertThat(stock(giaLam, pad, "DAMAGED")).isZero();
         assertStockAgrees(giaLam, pad);
     }
 
@@ -287,29 +293,39 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.code").value("MSG02"))
                 .andExpect(jsonPath("$.fieldErrors['lines[0].replacementRequiredQty']").value("Số lượng không được âm."));
 
-        // UC-46 step 3, BR-27: the supplier replaces both while the damaged pads stay at the store.
+        // UC-46 step 3, BR-27: the supplier replaces both while the damaged pads stay at the store. GVHD 24/11: the
+        // Branch Manager proposes it (replacement other than short + returned), nothing moves, the Owner approves.
         handle(managerToken, grn, List.of(handling(found, 0, 2)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].returnRequiredQty").value(0))
-                .andExpect(jsonPath("$[0].replacementRequiredQty").value(2))
-                .andExpect(jsonPath("$[0].openReplacementQty").value(2))
-                .andExpect(jsonPath("$[0].heldUndecidedQty").value(2))
-                .andExpect(jsonPath("$[0].canHandle").value(true))
-                .andExpect(jsonPath("$[0].canCreateReplacement").value(true))
-                .andExpect(jsonPath("$[0].events", hasSize(0)));
+                .andExpect(jsonPath("$[0].decisionStatus").value("AWAITING_OWNER"))
+                .andExpect(jsonPath("$[0].needsOwner").value(true))
+                .andExpect(jsonPath("$[0].proposedReplacementQty").value(2))
+                .andExpect(jsonPath("$[0].replacementRequiredQty").value(0))
+                .andExpect(jsonPath("$[0].canCreateReplacement").value(false));
+        approveDecisions(grn).andExpect(status().isOk());
+        discrepancy(managerToken, found)
+                .andExpect(jsonPath("$.decisionStatus").value("DECIDED"))
+                .andExpect(jsonPath("$.decisionType").value("RETURN_AND_REPLACE"))
+                .andExpect(jsonPath("$.approvedByName").isNotEmpty())
+                .andExpect(jsonPath("$.returnRequiredQty").value(0))
+                .andExpect(jsonPath("$.replacementRequiredQty").value(2))
+                .andExpect(jsonPath("$.openReplacementQty").value(2))
+                .andExpect(jsonPath("$.heldUndecidedQty").value(2))
+                .andExpect(jsonPath("$.canHandle").value(true))
+                .andExpect(jsonPath("$.canCreateReplacement").value(true))
+                .andExpect(jsonPath("$.events", hasSize(0)));
         assertThat(stock(giaLam, pad, "DAMAGED")).isEqualTo(2);
         assertThat(movementsOf(pad)).noneMatch(movement -> movement.getFirst().equals("RETURN_HOLD"));
-        assertThat(handlingAudit(found)).containsExactly(manager.getId() + ",0,0,0,2,Đã thống nhất với NCC");
+        assertThat(jdbc.queryForList("SELECT concat_ws(',', action, actor_id) FROM audit_log WHERE entity_type = "
+                + "'DISCREPANCY_CASE' AND entity_id = ? ORDER BY id", String.class, found)).containsExactly(
+                "DISCREPANCY_DECISION_PROPOSED," + manager.getId(), "DISCREPANCY_DECISION_APPROVED," + owner.getId());
 
         long replacement = receive("PX-002", found);
         receipt(managerToken, replacement).andExpect(jsonPath("$.lines[*].expectedQty", contains(2)));
-        // What a replacement delivery is bringing cannot be taken back.
+        // What a replacement delivery is bringing cannot be taken back; GVHD 24/11: the direction holds (MSG355).
         handle(managerToken, grn, List.of(handling(found, 0, 1)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG193"))
-                .andExpect(jsonPath("$.message").value("Số lượng giao bù của dòng 1 không được nhỏ hơn 2: hàng thiếu "
-                        + "chỉ Owner mới miễn giao bù được, còn số đã nhận bù, đã miễn hoặc đang giao bù thì không "
-                        + "giảm được."));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG355"));
         assign(replacement, staff);
         record(staffToken, replacement, findings(counted(lineOf(replacement, pad), 2, 2, 0, 0)))
                 .andExpect(status().isOk());
@@ -321,32 +337,14 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.outstandingReplacementQty").value(0))
                 .andExpect(jsonPath("$.heldUndecidedQty").value(2))
                 .andExpect(jsonPath("$.status").value("OPEN"))
-                .andExpect(jsonPath("$.canHandle").value(true));
-
-        // In the end they go back too, in two handovers.
+                // GVHD 24/11: the replacement came, so the direction holds; the Owner takes them in or they are
+                // written off.
+                .andExpect(jsonPath("$.canHandle").value(false))
+                .andExpect(jsonPath("$.canApproveAcceptance").value(false));
         handle(managerToken, grn, found, 2)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].returnRequiredQty").value(2))
-                .andExpect(jsonPath("$[0].replacementRequiredQty").value(2))
-                // Until they are handed back, the store may still keep them (test report 20/11).
-                .andExpect(jsonPath("$[0].canHandle").value(true));
-        supplierReturn(managerToken, found, Map.of("quantity", 1))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.returnedQty").value(1))
-                .andExpect(jsonPath("$.outstandingReturnQty").value(1))
-                .andExpect(jsonPath("$.status").value("OPEN"));
-        supplierReturn(managerToken, found, Map.of("quantity", 2))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("MSG135"));
-        supplierReturn(managerToken, found, Map.of("quantity", 1))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.returnedQty").value(2))
-                .andExpect(jsonPath("$.status").value("CLOSED"))
-                .andExpect(jsonPath("$.closureType").value("ALL_SETTLED"))
-                .andExpect(jsonPath("$.events[*].type", contains("REPLACEMENT_RECEIVED", "MOVED_TO_AWAITING_RETURN",
-                        "RETURNED_TO_SUPPLIER", "RETURNED_TO_SUPPLIER")));
-        assertThat(stock(giaLam, pad, "DAMAGED")).isZero();
-        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isZero();
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG355"));
+        assertThat(stock(giaLam, pad, "DAMAGED")).isEqualTo(2);
         assertStockAgrees(giaLam, pad);
     }
 
@@ -363,7 +361,9 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.shortQty").value(1))
                 .andExpect(jsonPath("$.replacementRequiredQty").value(1))
                 .andExpect(jsonPath("$.replacementLimitQty").value(1))
-                .andExpect(jsonPath("$.canHandle").value(false));
+                // GVHD 24/11: a shortage too waits for a direction.
+                .andExpect(jsonPath("$.decisionStatus").value("UNDECIDED"))
+                .andExpect(jsonPath("$.canHandle").value(true));
         // A Branch Manager cannot drop the replacement of a shortage through the handling.
         handle(managerToken, grn, List.of(handling(found, 0, 0)))
                 .andExpect(status().isBadRequest())
@@ -477,6 +477,7 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.status").value("FULLY_RECEIVED"))
                 .andExpect(jsonPath("$.lines[*].receivedQty", contains(10, 22)))
                 .andExpect(jsonPath("$.lines[*].outstandingQty", contains(0, 0)));
+        handle(managerToken, grn, shortage, 0).andExpect(status().isOk());
 
         long replacement = receive("PX-002", shortage);
         receipt(managerToken, replacement).andExpect(jsonPath("$.lines[*].expectedQty", contains(2)));
@@ -503,11 +504,22 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.shortQty").value(4))
                 .andExpect(jsonPath("$.replacementRequiredQty").value(4))
                 .andExpect(jsonPath("$.openReplacementQty").value(4))
-                .andExpect(jsonPath("$.canHandle").value(false))
+                .andExpect(jsonPath("$.canHandle").value(true))
                 .andExpect(jsonPath("$.canWaiveReplacement").value(true))
                 .andExpect(jsonPath("$.canCreateReplacement").value(false));
+        // GVHD 24/11: the replacement comes once the direction is decided (MSG358).
         discrepancy(managerToken, shortage)
                 .andExpect(jsonPath("$.canWaiveReplacement").value(false))
+                .andExpect(jsonPath("$.canCreateReplacement").value(false));
+        createReceipt(managerToken, order, deliveryNote("PX-002", shortage))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG358"));
+        handle(managerToken, grn, shortage, 0).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionType").value("RETURN_AND_REPLACE"))
+                .andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"))
+                .andExpect(jsonPath("$[0].decidedByName").isNotEmpty())
+                .andExpect(jsonPath("$[0].replacementRequiredQty").value(4));
+        discrepancy(managerToken, shortage)
                 .andExpect(jsonPath("$.canCreateReplacement").value(true));
 
         // The PO expects nothing more of its own (BR-22): the four oils come as a replacement.
@@ -586,6 +598,7 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 counted(lineOf(grn, oil), 24, 20, 0, 0))).andExpect(status().isOk());
         confirm(managerToken, grn).andExpect(status().isOk());
         long shortage = caseOf(grn, oil);
+        handle(managerToken, grn, shortage, 0).andExpect(status().isOk());
 
         long replacement = receive("PX-002", shortage);
         assign(replacement, staff);
@@ -695,8 +708,25 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
         discrepancies(managerToken)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[*].id", contains(ids(oilCase, padCase))))
-                .andExpect(jsonPath("$.items[*].canHandle", contains(true, false)))
+                .andExpect(jsonPath("$.items[*].canHandle", contains(true, true)))
                 .andExpect(jsonPath("$.items[0].events", hasSize(0)));
+        // GVHD 24/11 (B5): the Owner's "Chờ duyệt" lists what Branch Managers proposed.
+        handle(managerToken, grn, List.of(direction(handling(padCase, 0, null), "RETURN_NO_REPLACEMENT")))
+                .andExpect(status().isOk());
+        discrepancies(ownerToken, "decisionStatus", "AWAITING_OWNER")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(padCase))))
+                .andExpect(jsonPath("$.items[0].canApproveDecision").value(true));
+        discrepancies(managerToken, "decisionStatus", "UNDECIDED")
+                .andExpect(jsonPath("$.items[*].id", contains(ids(oilCase))));
+        // The Owner sends it back with a reason (MSG356 without); the store's managers are told.
+        rejectDecisions(grn, " ").andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("MSG356"));
+        rejectDecisions(grn, "Hỏi lại NCC").andExpect(status().isOk());
+        rejectDecisions(grn, "Lần nữa").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG360"));
+        discrepancy(managerToken, padCase).andExpect(jsonPath("$.decisionStatus").value("UNDECIDED"))
+                .andExpect(jsonPath("$.decisionType").doesNotExist());
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
+                + "'DISCREPANCY_DECISION_REJECTED' AND recipient_id = ?", String.class, manager.getId()))
+                .contains("Hỏi lại NCC");
         discrepancies(managerToken, "storeId", String.valueOf(longBien))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MSG05"));
@@ -717,10 +747,11 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
         discrepancy(managerToken, 999_999)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("MSG133"));
-        // Nothing to return yet, and nothing to replace on goods kept at the store.
+        // Nothing to return yet (GVHD 24/11: no direction decided, MSG357), and nothing to replace on goods kept at
+        // the store.
         supplierReturn(managerToken, oilCase, Map.of("quantity", 1))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("MSG29"));
+                .andExpect(jsonPath("$.code").value("MSG357"));
         waive(ownerToken, oilCase, null, "NCC trừ vào công nợ")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG141"));

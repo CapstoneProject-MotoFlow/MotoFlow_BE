@@ -134,7 +134,11 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
         confirm(managerToken, grn).andExpect(status().isOk());
         long found = caseOf(grn, oil);
         // The supplier is to send 2 oils again; nothing goes back.
-        handle(managerToken, grn, List.of(handling(found, 0, 2))).andExpect(status().isOk());
+        // GVHD 24/11: a replacement other than short + returned waits for the Owner.
+        handle(managerToken, grn, List.of(handling(found, 0, 2))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionStatus").value("AWAITING_OWNER"));
+        approveDecisions(grn).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"));
 
         // Góp ý UI 21/11: goods delivered by mistake need the one part they really are.
         request(managerToken, found, "WRONG_ITEM", null, 2)
@@ -255,7 +259,11 @@ class DiscrepancyAcceptanceApiTest extends GoodsReceiptTestData {
         long found = caseOf(grn, oil);
         discrepancy(managerToken, found).andExpect(jsonPath("$.shortQty").value(2))
                 .andExpect(jsonPath("$.wrongItemQty").value(2));
-        handle(managerToken, grn, List.of(handling(found, 0, 4))).andExpect(status().isOk());
+        // GVHD 24/11: a replacement other than short + returned waits for the Owner.
+        handle(managerToken, grn, List.of(handling(found, 0, 4))).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionStatus").value("AWAITING_OWNER"));
+        approveDecisions(grn).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].decisionStatus").value("DECIDED"));
 
         receiveWrong(ownerToken, found, lamp, 2, false)
                 .andExpect(status().isOk())

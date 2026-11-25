@@ -1,5 +1,9 @@
 package fu.hl.g64.motorflow.discrepancy.unit;
 
+import static org.mockito.ArgumentMatchers.eq;
+
+import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
+
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
@@ -11,6 +15,8 @@ import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionStatus;
+import fu.hl.g64.motorflow.discrepancy.entity.enums.DecisionType;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyResolutionEvent;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
 import fu.hl.g64.motorflow.discrepancy.helper.DiscrepancySettlement;
@@ -197,6 +203,7 @@ class DiscrepancySaveHandlingUnitTest {
     /** Case 50 was agreed before: return 3 (the 3 wrong pads held), replacement 5. */
     private void agreedBefore() {
         pad.agree(3, 0, 5);
+        pad.decide(DecisionType.RETURN_AND_REPLACE, 1, NOW.minusDays(1));
     }
 
     private List<MovePosting> moves() {
@@ -258,9 +265,9 @@ class DiscrepancySaveHandlingUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID03 N: nothing goes back, replacement 4")
+    @DisplayName("UTCID03 N: Owner, nothing goes back, replacement 4")
     void utc03() {
-        DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40, request(line(50, 0, 4))), 50);
+        DiscrepancyCaseResponse found = row(service.saveHandling(owner, 40, request(line(50, 0, 4))), 50);
 
         assertThat(found.returnRequiredQty()).isZero();
         assertThat(found.replacementRequiredQty()).isEqualTo(4);
@@ -288,6 +295,7 @@ class DiscrepancySaveHandlingUnitTest {
     @Test
     @DisplayName("UTCID05 B: return 0 and replacement 2, what case 50 already has -> nothing saved")
     void utc05() {
+        pad.decide(DecisionType.RETURN_AND_REPLACE, 5, NOW.minusDays(1));
         DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40, request(line(50, 0, 2))), 50);
 
         assertThat(found.returnRequiredQty()).isZero();
@@ -341,14 +349,16 @@ class DiscrepancySaveHandlingUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID12 N: agreed 3/5 before, return lowered to 2 -> 1 wrong pad released")
+    @DisplayName("UTCID12 N: agreed 3/5 before, return lowered to 2 -> 1 wrong pad released, replacement 4")
     void utc12() {
         agreedBefore();
 
         DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40, request(line(50, 2, null))), 50);
 
         assertThat(found.returnRequiredQty()).isEqualTo(2);
-        assertThat(found.replacementRequiredQty()).isEqualTo(5);
+        // GVHD 24/11: left empty, the replacement is short + returned (PM Q2), so the manager decides alone.
+        assertThat(found.replacementRequiredQty()).isEqualTo(4);
+        assertThat(found.decisionStatus()).isEqualTo(DecisionStatus.DECIDED);
         assertThat(moves()).singleElement().satisfies(m -> assertMove(m, StockStatus.AWAITING_SUPPLIER_RETURN,
                 StockStatus.WRONG_ITEM, 1, 900, MovementType.RETURN_RELEASE));
     }
@@ -366,20 +376,21 @@ class DiscrepancySaveHandlingUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID15 B: 4 pads already on a replacement delivery, replacement 3 -> MSG193")
+    @DisplayName("UTCID15 B: 4 pads already on a replacement delivery, replacement 3 -> MSG355")
     void utc15() {
         progress.put(50L, new Progress(0, 0, 0, 0, 4, null, 0, 0, 0, 0, 0));
 
-        assertRefused(manager, request(line(50, 0, 3)), HttpStatus.BAD_REQUEST, "MSG193");
+        // GVHD 24/11: a replacement on its way fixes the direction.
+        assertRefused(manager, request(line(50, 0, 3)), HttpStatus.CONFLICT, "MSG355");
     }
 
     @Test
-    @DisplayName("UTCID16 B: agreed 3/5, 2 pads went back, return lowered to 1 -> MSG134")
+    @DisplayName("UTCID16 B: agreed 3/5, 2 pads went back, return lowered to 1 -> MSG355")
     void utc16() {
         agreedBefore();
         progress.put(50L, new Progress(2, 0, 0, 0, 0, null, 0, 0, 0, 2, 0));
 
-        assertRefused(manager, request(line(50, 1, null)), HttpStatus.BAD_REQUEST, "MSG134");
+        assertRefused(manager, request(line(50, 1, null)), HttpStatus.CONFLICT, "MSG355");
     }
 
     @Test
@@ -389,9 +400,9 @@ class DiscrepancySaveHandlingUnitTest {
     }
 
     @Test
-    @DisplayName("UTCID18 B: a blank note -> the agreement is saved with no note")
+    @DisplayName("UTCID18 B: Owner, a blank note -> the agreement is saved with no note")
     void utc18() {
-        DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40, request("   ", line(50, 0, 4))), 50);
+        DiscrepancyCaseResponse found = row(service.saveHandling(owner, 40, request("   ", line(50, 0, 4))), 50);
 
         assertThat(found.returnRequiredQty()).isZero();
         assertThat(found.replacementRequiredQty()).isEqualTo(4);
@@ -408,5 +419,98 @@ class DiscrepancySaveHandlingUnitTest {
         verify(posting, never()).move(any());
         verify(auditLog, never()).save(any());
         verify(settlement, times(0)).closeIfSettled(any(), anyLong(), any());
+    }
+
+    // ---- GVHD 24/11: the rule table of the directions (PM Q2) ------------------------------------------------------
+
+    private static DiscrepancyHandlingRequest.Line decided(long caseId, int wrong, int damaged, Integer replacement,
+                                                           DecisionType type) {
+        return new DiscrepancyHandlingRequest.Line(caseId, wrong, damaged, null, replacement, type);
+    }
+
+    private List<DiscrepancyResolutionEvent> savedEvents() {
+        ArgumentCaptor<DiscrepancyResolutionEvent> saved = ArgumentCaptor.forClass(DiscrepancyResolutionEvent.class);
+        verify(events, atLeast(0)).save(saved.capture());
+        return saved.getAllValues();
+    }
+
+    @Test
+    @DisplayName("UTCID20 N: (2) manager, 3 wrong and 1 damaged back, replacement 2 + 3 + 1 = 6 -> decided")
+    void utc20() {
+        DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40,
+                request(decided(50, 3, 1, 6, DecisionType.RETURN_AND_REPLACE))), 50);
+
+        assertThat(found.decisionStatus()).isEqualTo(DecisionStatus.DECIDED);
+        assertThat(found.decisionType()).isEqualTo(DecisionType.RETURN_AND_REPLACE);
+        assertThat(found.decidedById()).isEqualTo(5L);
+        assertThat(found.returnRequiredQty()).isEqualTo(4);
+        assertThat(found.replacementRequiredQty()).isEqualTo(6);
+        assertThat(moves()).hasSize(2);
+        verify(notifications, never()).notifyOwners(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("UTCID21 N: (2') manager, 3 wrong back, replacement 6 instead of 5 -> awaiting Owner, nothing moves")
+    void utc21() {
+        DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40,
+                request(decided(50, 3, 0, 6, DecisionType.RETURN_AND_REPLACE))), 50);
+
+        assertThat(found.decisionStatus()).isEqualTo(DecisionStatus.AWAITING_OWNER);
+        assertThat(found.needsOwner()).isTrue();
+        assertThat(found.proposedWrongReturnQty()).isEqualTo(3);
+        assertThat(found.proposedDamagedReturnQty()).isZero();
+        assertThat(found.proposedReplacementQty()).isEqualTo(6);
+        assertThat(found.returnRequiredQty()).isZero();
+        assertThat(found.replacementRequiredQty()).isEqualTo(2);
+        verify(posting, never()).move(any());
+        verify(notifications).notifyOwners(eq("DISCREPANCY_DECISION_REQUESTED"), any(), eq("GOODS_RECEIPT_NOTE"),
+                eq(40L));
+        assertThat(logs()).singleElement().satisfies(log ->
+                assertThat(log.getAction()).isEqualTo("DISCREPANCY_DECISION_PROPOSED"));
+    }
+
+    @Test
+    @DisplayName("UTCID22 N: (1) manager, 3 wrong and 1 damaged back, no replacement -> awaiting Owner; replacement 5 -> MSG354")
+    void utc22() {
+        assertRefused(manager, request(decided(50, 3, 1, 5, DecisionType.RETURN_NO_REPLACEMENT)),
+                HttpStatus.BAD_REQUEST, "MSG354");
+
+        DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40,
+                request(decided(50, 3, 1, null, DecisionType.RETURN_NO_REPLACEMENT))), 50);
+
+        assertThat(found.decisionStatus()).isEqualTo(DecisionStatus.AWAITING_OWNER);
+        assertThat(found.decisionType()).isEqualTo(DecisionType.RETURN_NO_REPLACEMENT);
+        assertThat(found.proposedReplacementQty()).isZero();
+        verify(posting, never()).move(any());
+    }
+
+    @Test
+    @DisplayName("UTCID23 N: (3) manager keeps the 2 damaged oils -> awaiting Owner; 1 back -> MSG354")
+    void utc23() {
+        assertRefused(manager, request(decided(51, 0, 1, null, DecisionType.ACCEPT_NO_REPLACEMENT)),
+                HttpStatus.BAD_REQUEST, "MSG354");
+
+        DiscrepancyCaseResponse found = row(service.saveHandling(manager, 40,
+                request(decided(51, 0, 0, null, DecisionType.ACCEPT_NO_REPLACEMENT))), 51);
+
+        assertThat(found.decisionStatus()).isEqualTo(DecisionStatus.AWAITING_OWNER);
+        assertThat(found.decisionType()).isEqualTo(DecisionType.ACCEPT_NO_REPLACEMENT);
+        assertThat(found.proposedWrongReturnQty()).isZero();
+        assertThat(found.proposedDamagedReturnQty()).isZero();
+    }
+
+    @Test
+    @DisplayName("UTCID24 N: Owner, (1) for case 50 -> decided, 4 held, the 2 short pads waived")
+    void utc24() {
+        DiscrepancyCaseResponse found = row(service.saveHandling(owner, 40,
+                request(decided(50, 3, 1, 0, DecisionType.RETURN_NO_REPLACEMENT))), 50);
+
+        assertThat(found.decisionStatus()).isEqualTo(DecisionStatus.DECIDED);
+        assertThat(found.decisionType()).isEqualTo(DecisionType.RETURN_NO_REPLACEMENT);
+        assertThat(found.returnRequiredQty()).isEqualTo(4);
+        assertThat(found.replacementRequiredQty()).isEqualTo(2);
+        assertThat(moves()).hasSize(2);
+        assertThat(savedEvents()).filteredOn(event -> event.getResolutionType() == ResolutionType.CLOSED_BY_AGREEMENT)
+                .singleElement().satisfies(event -> assertThat(event.getQuantity()).isEqualTo(2));
     }
 }

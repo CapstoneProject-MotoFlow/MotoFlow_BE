@@ -217,6 +217,25 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
         return line;
     }
 
+    /** GVHD 24/11: {@code line} with the direction agreed with the supplier. */
+    protected static Map<String, Object> direction(Map<String, Object> line, String decisionType) {
+        line.put("decisionType", decisionType);
+        return line;
+    }
+
+    /** GVHD 24/11: the Owner approves every proposal on the receipt. */
+    protected ResultActions approveDecisions(long receipt) throws Exception {
+        return mvc.perform(post("/api/v1/goods-receipt-notes/" + receipt + "/discrepancies/approve")
+                .header(HttpHeaders.AUTHORIZATION, ownerToken));
+    }
+
+    /** GVHD 24/11: the Owner sends every proposal on the receipt back. */
+    protected ResultActions rejectDecisions(long receipt, String reason) throws Exception {
+        return mvc.perform(post("/api/v1/goods-receipt-notes/" + receipt + "/discrepancies/reject")
+                .header(HttpHeaders.AUTHORIZATION, ownerToken).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("reason", reason))));
+    }
+
     /** UC-46 handling with the given lines. */
     protected ResultActions handle(String token, long receipt, List<Map<String, Object>> lines) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
