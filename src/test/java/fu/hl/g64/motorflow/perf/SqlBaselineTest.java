@@ -85,7 +85,7 @@ class SqlBaselineTest {
 
             queries.reset();
             confirm(managerToken, receiptId).andExpect(status().isOk());
-            assertBudget("grn-confirm-20-lines", queries, 145, 145);
+            assertBudget("grn-confirm-20-lines", queries, 145, 107);
         }
 
         private long createdReceipt(long poId) throws Exception {
@@ -140,7 +140,7 @@ class SqlBaselineTest {
 
             queries.reset();
             postAs(ownerToken, COUNTS + "/" + countId + "/approve", null).andExpect(status().isOk());
-            assertBudget("opening-count-approve-50-lines", queries, 325, 325);
+            assertBudget("opening-count-approve-50-lines", queries, 325, 227);
         }
     }
 
@@ -183,7 +183,7 @@ class SqlBaselineTest {
                                     "expectedPayable", payable))))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.completed").value(true));
-            assertBudget("sales-complete-10-lines", queries, 79, 79);
+            assertBudget("sales-complete-10-lines", queries, 79, 61);
         }
 
         @Test
@@ -333,7 +333,7 @@ class SqlBaselineTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(Map.of("lines", dispatchLines))))
                     .andExpect(status().isOk());
-            assertBudget("transfer-dispatch-10-lines", queries, 111, 111);
+            assertBudget("transfer-dispatch-10-lines", queries, 111, 64);
         }
     }
 }

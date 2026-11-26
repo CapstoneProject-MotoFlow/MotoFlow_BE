@@ -6,6 +6,7 @@ import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.error.DataIntegrityExceptions;
 import fu.hl.g64.motorflow.common.text.SearchText;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
 import fu.hl.g64.motorflow.discrepancy.entity.enums.DiscrepancyCaseStatus;
@@ -203,8 +204,7 @@ public class SupplierServiceImpl implements SupplierService {
      * typed in by hand before codes were generated.
      */
     private static BusinessException conflict(DataIntegrityViolationException e, String name) {
-        String detail = String.valueOf(e.getMostSpecificCause().getMessage());
-        return detail.contains("ux_supplier_name_ci")
+        return DataIntegrityExceptions.mentionsConstraint(e, "ux_supplier_name_ci")
                 ? new BusinessException(HttpStatus.CONFLICT, "MSG78", name)
                 : new BusinessException(HttpStatus.CONFLICT, "MSG72");
     }
