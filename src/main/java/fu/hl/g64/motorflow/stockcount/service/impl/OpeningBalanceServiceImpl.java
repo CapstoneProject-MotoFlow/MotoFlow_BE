@@ -127,9 +127,10 @@ public class OpeningBalanceServiceImpl implements OpeningBalanceService {
         }
         Map<Long, Product> parts = products.findAllById(costs.keySet()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
+        Set<Long> lockedCostIds = openingBalances.costLockedIds(parts.values());
         for (Map.Entry<Long, Long> e : costs.entrySet()) {
             Product part = parts.get(e.getKey());
-            if (openingBalances.costLocked(part) && !part.getInitialUnitCost().equals(e.getValue())) {
+            if (lockedCostIds.contains(part.getId()) && !part.getInitialUnitCost().equals(e.getValue())) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG299", part.getSku());
             }
         }

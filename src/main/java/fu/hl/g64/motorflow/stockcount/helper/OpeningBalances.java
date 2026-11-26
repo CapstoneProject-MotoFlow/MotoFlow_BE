@@ -26,11 +26,13 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -77,6 +79,16 @@ public class OpeningBalances {
                 && lots.existsByProductIdAndSourceType(part.getId(), LotSourceType.OPENING);
     }
 
+    /** Ids of the parts whose initial unit cost is already locked by an approved opening lot (BR-74). */
+    public Set<Long> costLockedIds(Collection<Product> parts) {
+        List<Long> ids = parts.stream()
+                .filter(p -> p.getInitialUnitCost() != null)
+                .map(Product::getId)
+                .distinct()
+                .toList();
+        return ids.isEmpty() ? Set.of() : lots.findProductIdsWithSourceType(ids, LotSourceType.OPENING);
+    }
+
     /** The counted lines with a quantity, by part then expiry date (no expiry first). */
     public List<StockCountLine> countedLines(StockCount count) {
         return lines.findByStockCountIdOrderByProductIdAscExpiryDateAscIdAsc(count.getId()).stream()
@@ -93,6 +105,7 @@ public class OpeningBalances {
                 .collect(Collectors.groupingBy(StockCountLine::getProductId, LinkedHashMap::new, Collectors.toList()));
         Map<Long, Product> parts = products.findAllById(byPart.keySet()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
+        Set<Long> lockedCostIds = costLockedIds(parts.values());
         List<OpeningCostsResponse.Part> rows = byPart.entrySet().stream().map(e -> {
             Product part = parts.get(e.getKey());
             Long cost = part.getInitialUnitCost();
@@ -102,7 +115,8 @@ public class OpeningBalances {
                     .toList();
             int quantity = e.getValue().stream().mapToInt(StockCountLine::getCountedQty).sum();
             return new OpeningCostsResponse.Part(part.getId(), part.getSku(), part.getPartName(), part.getBaseUnit(),
-                    cost, costLocked(part), quantity, cost == null ? null : cost * quantity, lotRows);
+                    cost, lockedCostIds.contains(part.getId()), quantity, cost == null ? null : cost * quantity,
+                    lotRows);
         }).toList();
         List<String> missing = rows.stream().filter(r -> r.initialUnitCost() == null)
                 .map(OpeningCostsResponse.Part::sku).toList();
