@@ -127,7 +127,7 @@ public class SalesDepositServiceImpl implements SalesDepositService {
         if (order.getCustomerId() == null) {
             throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG320");
         }
-        OrderCollections.Money money = collections.of(orderId);
+        OrderCollections.Money money = collections.of(order);
         OrderDeposits.State held = deposits.of(order, money);
         // A rejected deposit leaves the date behind with nothing recorded. That date is not a deposit,
         // so it neither blocks a new one (MSG321) nor freezes the date (MSG323). Money still waiting
@@ -167,7 +167,7 @@ public class SalesDepositServiceImpl implements SalesDepositService {
         requireWaiting(order);
         LocalDate old = order.getDepositExpiresOn();
         // A rejected first deposit still leaves the date behind, with nothing verified to extend (MSG324).
-        if (old == null || deposits.of(order, collections.of(orderId)).total() == 0) {
+        if (old == null || deposits.of(order, collections.of(order)).total() == 0) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG324");
         }
         requireNotExpired(order);
@@ -197,7 +197,7 @@ public class SalesDepositServiceImpl implements SalesDepositService {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
         requireWaiting(order);
-        OrderDeposits.State deposit = deposits.of(order, collections.of(orderId));
+        OrderDeposits.State deposit = deposits.of(order, collections.of(order));
         if (deposit.status() == DepositStatus.ACTIVE) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG329", order.getDepositExpiresOn().format(DAY));
         }
