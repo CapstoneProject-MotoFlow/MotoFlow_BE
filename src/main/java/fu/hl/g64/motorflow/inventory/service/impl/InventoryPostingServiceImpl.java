@@ -111,6 +111,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
 
         BigDecimal unitCost = surplus && product.getMovingAvgCost() != null ? product.getMovingAvgCost()
                 : BigDecimal.valueOf(p.purchaseUnitPrice());
+        Set<Long> checkedStores = new HashSet<>();
         for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
             if (e.getValue() == null || e.getValue() == 0) {
                 continue;
@@ -119,7 +120,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 throw new IllegalArgumentException("received quantity must be positive");
             }
             post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
-                    p.performedBy(), period, now, when.at());
+                    p.performedBy(), period, now, when.at(), checkedStores);
         }
         refreshDepletion(lot);
         return lot;
@@ -145,6 +146,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 .filter(p -> p.lots() == null || p.lots().isEmpty())
                 .map(p -> new PoolKey(p.storeId(), p.fromStatus(), p.productId())).toList(),
                 namedLots(postings.stream().map(OutPosting::lots).toList()), now);
+        Set<Long> checkedStores = new HashSet<>();
         List<List<LotQuantity>> taken = new ArrayList<>();
         for (OutPosting p : postings) {
             Product product = batch.product(p.productId());
@@ -154,7 +156,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             List<LotQuantity> line = new ArrayList<>();
             for (Pick pick : picks) {
                 post(balance, pick.lot, p.fromStatus(), -pick.quantity, costOf(product, pick.lot), p.movementType(),
-                        p.source(), p.reason(), p.performedBy(), period, now, now);
+                        p.source(), p.reason(), p.performedBy(), period, now, now, checkedStores);
                 refreshDepletion(pick.lot);
                 line.add(new LotQuantity(pick.lot.getId(), pick.quantity));
             }
@@ -192,6 +194,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 .filter(p -> p.lots() == null || p.lots().isEmpty())
                 .map(p -> new PoolKey(p.fromStoreId(), p.fromStatus(), p.productId())).toList(),
                 namedLots(postings.stream().map(MovePosting::lots).toList()), now);
+        Set<Long> checkedStores = new HashSet<>();
         List<List<LotQuantity>> moved = new ArrayList<>();
         for (MovePosting p : postings) {
             Product product = batch.product(p.productId());
@@ -203,9 +206,9 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             for (Pick pick : picks) {
                 BigDecimal unitCost = costOf(product, pick.lot);
                 post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
-                        p.reason(), p.performedBy(), period, now, now);
+                        p.reason(), p.performedBy(), period, now, now, checkedStores);
                 post(to, pick.lot, p.toStatus(), pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
-                        p.performedBy(), period, now, now);
+                        p.performedBy(), period, now, now, checkedStores);
                 line.add(new LotQuantity(pick.lot.getId(), pick.quantity));
             }
             moved.add(line);
@@ -243,6 +246,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         Map<StoreProduct, StockBalance> balances = lockBalances(keys, now);
         Batch batch = batch(postings.stream().map(SplitMovePosting::productId).toList(), List.of(),
                 namedLots(postings.stream().map(SplitMovePosting::lots).toList()), now);
+        Set<Long> checkedStores = new HashSet<>();
         for (PreparedSplit row : prepared) {
             SplitMovePosting p = row.posting;
             Product product = batch.product(p.productId());
@@ -257,7 +261,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             for (Pick pick : picks) {
                 BigDecimal unitCost = costOf(product, pick.lot);
                 post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
-                        p.reason(), p.performedBy(), period, now, now);
+                        p.reason(), p.performedBy(), period, now, now, checkedStores);
                 int lotLeft = pick.quantity;
                 while (lotLeft > 0) {
                     if (left == 0) {
@@ -266,7 +270,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                     }
                     int part = Math.min(lotLeft, left);
                     post(to, pick.lot, filling.getKey(), part, unitCost, p.movementType(), p.source(), p.reason(),
-                            p.performedBy(), period, now, now);
+                            p.performedBy(), period, now, now, checkedStores);
                     lotLeft -= part;
                     left -= part;
                 }
@@ -291,8 +295,9 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 throw notEnough(product, -p.quantityChange(), held);
             }
         }
+        Set<Long> checkedStores = new HashSet<>();
         post(balance, lot, p.status(), p.quantityChange(), costOf(product, lot), p.movementType(), p.source(),
-                p.reason(), p.performedBy(), when.period(), now, when.at());
+                p.reason(), p.performedBy(), when.period(), now, when.at(), checkedStores);
         refreshDepletion(lot);
     }
 
@@ -315,6 +320,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 lot.getPurchaseUnitPrice());
 
         BigDecimal unitCost = BigDecimal.valueOf(lot.getPurchaseUnitPrice());
+        Set<Long> checkedStores = new HashSet<>();
         for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
             if (e.getValue() == null || e.getValue() == 0) {
                 continue;
@@ -323,7 +329,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 throw new IllegalArgumentException("received quantity must be positive");
             }
             post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
-                    p.performedBy(), period, now, now);
+                    p.performedBy(), period, now, now, checkedStores);
         }
         refreshDepletion(lot);
     }
@@ -502,8 +508,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
      */
     private void post(StockBalance balance, Lot lot, StockStatus status, int change, BigDecimal unitCost,
                       MovementType type, SourceRef source, String reason, Long by, InventoryPeriod period,
-                      LocalDateTime now, LocalDateTime occurredAt) {
-        if (type != MovementType.OPENING_BALANCE) {
+                      LocalDateTime now, LocalDateTime occurredAt, Set<Long> checkedStores) {
+        if (type != MovementType.OPENING_BALANCE && checkedStores.add(balance.getStoreId())) {
             Store store = stores.findForShareById(balance.getStoreId()).orElseThrow();
             if (counts.existsByStoreIdAndCountTypeAndStatusIn(store.getId(), CountType.OPENING, UNFINISHED_COUNTS)) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG301", store.getStoreName());
