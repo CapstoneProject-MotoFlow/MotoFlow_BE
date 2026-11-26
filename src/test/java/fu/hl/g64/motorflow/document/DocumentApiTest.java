@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.document;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.sales.SalesOrderTestData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,11 +9,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -167,6 +171,38 @@ class DocumentApiTest extends SalesOrderTestData {
                 + "?, ?, '2026-10-17 10:00')", store, pad, adjustment, owner.getId());
         search(ownerToken, "type", "ADJUSTMENT").andExpect(jsonPath("$.items[0].value").value(-60_000));
         search(managerToken, "type", "ADJUSTMENT").andExpect(jsonPath("$.items[0].value").value(nullValue()));
+    }
+
+    @Test
+    void eachPageOfOneRowShowsTheValueOfThatRowInTheFullList() throws Exception {
+        // An applied adjustment, so that a sale, a receipt and an adjustment all have a value to compare.
+        jdbc.update("UPDATE adjustment_request SET status = 'APPLIED', decided_by = ?, decided_at = '2026-10-17 10:00', "
+                + "applied_at = '2026-10-17 10:00' WHERE id = ?", owner.getId(), adjustment);
+        jdbc.update("INSERT INTO stock_movement (store_id, product_id, inventory_period_id, stock_status, "
+                + "quantity_change, unit_cost, value, movement_type, adjustment_request_id, performed_by, occurred_at) "
+                + "VALUES (?, ?, (SELECT max(id) FROM inventory_period), 'AVAILABLE', -1, 60000, -60000, 'ADJUSTMENT', "
+                + "?, ?, '2026-10-17 10:00')", store, pad, adjustment, owner.getId());
+
+        String ownerAll = search(ownerToken, "size", "20").andExpect(status().isOk()).andReturn()
+                .getResponse().getContentAsString();
+        assertPagesMatchTheFullList(ownerToken, ownerAll, 6);
+        // Owner: the sale, the receipt and the applied adjustment each have their value.
+        assertEquals(List.of(285_000), JsonPath.read(ownerAll, "$.items[?(@.type == 'SALES_ORDER')].value"));
+        assertEquals(List.of(300_000), JsonPath.read(ownerAll, "$.items[?(@.type == 'GOODS_RECEIPT')].value"));
+        assertEquals(List.of(-60_000), JsonPath.read(ownerAll, "$.items[?(@.type == 'ADJUSTMENT')].value"));
+
+        // Branch Manager: the sale keeps its value, the purchase and the adjustment have none, on every page too.
+        String managerAll = search(managerToken, "size", "20").andExpect(status().isOk()).andReturn()
+                .getResponse().getContentAsString();
+        assertPagesMatchTheFullList(managerToken, managerAll, 5);
+        assertEquals(List.of(285_000), JsonPath.read(managerAll, "$.items[?(@.type == 'SALES_ORDER')].value"));
+        List<String> managerTypes = JsonPath.read(managerAll, "$.items[*].type");
+        List<Object> managerValues = JsonPath.read(managerAll, "$.items[*].value");
+        for (int i = 0; i < managerTypes.size(); i++) {
+            if (managerTypes.get(i).equals("GOODS_RECEIPT") || managerTypes.get(i).equals("ADJUSTMENT")) {
+                assertNull(managerValues.get(i));
+            }
+        }
     }
 
     @Test
@@ -518,6 +554,22 @@ class DocumentApiTest extends SalesOrderTestData {
     }
 
     // ---- helpers -----------------------------------------------------------------------------------------------------
+
+    /** Each page of one row shows the type, id and value that the same row has in the full list. */
+    private void assertPagesMatchTheFullList(String token, String all, int total) throws Exception {
+        assertEquals(total, (int) JsonPath.read(all, "$.totalItems"));
+        for (int page = 0; page < total; page++) {
+            String one = search(token, "size", "1", "page", String.valueOf(page)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.items.length()").value(1)).andReturn().getResponse().getContentAsString();
+            String row = "$.items[" + page + "].";
+            Object type = JsonPath.read(all, row + "type");
+            Object id = JsonPath.read(all, row + "id");
+            Object value = JsonPath.read(all, row + "value");
+            assertEquals(type, JsonPath.read(one, "$.items[0].type"));
+            assertEquals(id, JsonPath.read(one, "$.items[0].id"));
+            assertEquals(value, JsonPath.read(one, "$.items[0].value"));
+        }
+    }
 
     private ResultActions search(String token, String... parameters) throws Exception {
         var request = get("/api/v1/documents").header(HttpHeaders.AUTHORIZATION, token);

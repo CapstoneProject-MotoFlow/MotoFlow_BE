@@ -42,16 +42,19 @@ public class DocumentQuery {
             SELECT 'SALES_ORDER' AS doc_type, o.id, o.completion_type AS sub_type, o.status,
                    COALESCE(o.completed_at, o.cancelled_at) AS doc_date, o.store_id,
                    CAST(NULL AS BIGINT) AS other_store_id, CAST(NULL AS BIGINT) AS scope_store_id,
-                   o.customer_name_snapshot AS partner_name,
-                   (SELECT CAST(SUM(CAST(COALESCE(l.delivered_qty, l.requested_qty) AS BIGINT) * l.actual_unit_price)
-                           AS BIGINT)
-                      FROM sales_order_line l WHERE l.sales_order_id = o.id) AS value
+                   o.customer_name_snapshot AS partner_name, CAST(NULL AS BIGINT) AS value
               FROM sales_order o
              WHERE o.status IN ('COMPLETED', 'CANCELLED')""";
 
+    /** The value of a sale is the sum of its lines. Computed by {@link #find} for the rows of the page only. */
+    private static final String SALES_VALUE = """
+            (SELECT CAST(SUM(CAST(COALESCE(l.delivered_qty, l.requested_qty) AS BIGINT) * l.actual_unit_price)
+                    AS BIGINT)
+               FROM sales_order_line l WHERE l.sales_order_id = p.id)""";
+
     /**
      * A receipt belongs to the store that receives it (BR-03): the purchase order's store, the transfer's destination,
-     * or its source for goods sent back. What was accepted into stock is valued at purchase prices, for Owner only.
+     * or its source for goods sent back.
      */
     private static final String RECEIPTS = """
             SELECT 'GOODS_RECEIPT', g.id, g.receipt_type, g.status, g.confirmed_at,
@@ -59,17 +62,23 @@ public class DocumentQuery {
                                        WHEN 'TRANSFER_IN' THEN t.dest_store_id ELSE t.source_store_id END,
                    CASE g.receipt_type WHEN 'TRANSFER_IN' THEN t.source_store_id
                                        WHEN 'RETURN_TO_SOURCE' THEN t.dest_store_id END,
-                   NULL, s.supplier_name,
-                   CASE WHEN %s AND g.receipt_type = 'SUPPLIER_DELIVERY' THEN
-                       (SELECT CAST(SUM(CAST(l.passed_qty - CASE WHEN l.excess_decision = 'ACCEPTED' THEN 0
-                                                                  ELSE l.excess_qty END AS BIGINT) * l.unit_price)
-                                    AS BIGINT)
-                          FROM goods_receipt_note_line l WHERE l.goods_receipt_note_id = g.id) END
+                   NULL, s.supplier_name, CAST(NULL AS BIGINT)
               FROM goods_receipt_note g
               LEFT JOIN purchase_order po ON po.id = g.purchase_order_id
               LEFT JOIN supplier s ON s.id = po.supplier_id
               LEFT JOIN transfer_order t ON t.id = g.transfer_order_id
              WHERE g.status = 'CONFIRMED'""";
+
+    /**
+     * What was accepted into stock is valued at purchase prices, for Owner only. Computed by {@link #find} for the rows
+     * of the page only.
+     */
+    private static final String RECEIPT_VALUE = """
+            CASE WHEN %s AND p.sub_type = 'SUPPLIER_DELIVERY' THEN
+                (SELECT CAST(SUM(CAST(l.passed_qty - CASE WHEN l.excess_decision = 'ACCEPTED' THEN 0
+                                                           ELSE l.excess_qty END AS BIGINT) * l.unit_price)
+                             AS BIGINT)
+                   FROM goods_receipt_note_line l WHERE l.goods_receipt_note_id = p.id) END""";
 
     private static final String TRANSFERS = """
             SELECT 'TRANSFER_ORDER', t.id, NULL, t.status, t.dispatched_at, t.source_store_id, t.dest_store_id,
@@ -91,19 +100,23 @@ public class DocumentQuery {
                                   ORDER BY a.id LIMIT 1) debt ON TRUE
              WHERE p.status = 'VERIFIED'""";
 
+    private static final String ADJUSTMENTS = """
+            SELECT 'ADJUSTMENT', a.id, a.adjustment_type, a.status, a.submitted_at, a.store_id, NULL, NULL, NULL,
+                   CAST(NULL AS BIGINT)
+              FROM adjustment_request a
+             WHERE a.status <> 'DRAFT' AND a.submitted_at IS NOT NULL""";
+
     /**
      * The value of an applied request is Owner's (BR-72): the stock value it posted, negative when it wrote stock
      * down, or for a request that moved no stock (a debt correction) the money it changed. Not applied yet: null.
+     * Computed by {@link #find} for the rows of the page only.
      */
-    private static final String ADJUSTMENTS = """
-            SELECT 'ADJUSTMENT', a.id, a.adjustment_type, a.status, a.submitted_at, a.store_id, NULL, NULL, NULL,
-                   CASE WHEN %s AND a.status = 'APPLIED' THEN
-                       COALESCE((SELECT CAST(SUM(m.value) AS BIGINT) FROM stock_movement m
-                                  WHERE m.adjustment_request_id = a.id),
-                                (SELECT CAST(SUM(l.amount_change) AS BIGINT) FROM adjustment_amount_line l
-                                  WHERE l.adjustment_request_id = a.id)) END
-              FROM adjustment_request a
-             WHERE a.status <> 'DRAFT' AND a.submitted_at IS NOT NULL""";
+    private static final String ADJUSTMENT_VALUE = """
+            CASE WHEN %s AND p.status = 'APPLIED' THEN
+                COALESCE((SELECT CAST(SUM(m.value) AS BIGINT) FROM stock_movement m
+                           WHERE m.adjustment_request_id = p.id),
+                         (SELECT CAST(SUM(l.amount_change) AS BIGINT) FROM adjustment_amount_line l
+                           WHERE l.adjustment_request_id = p.id)) END""";
 
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -111,19 +124,30 @@ public class DocumentQuery {
         this.jdbc = jdbc;
     }
 
-    /** Newest first, {@code size} from {@code offset}. */
+    /**
+     * Newest first, {@code size} from {@code offset}. The page is picked first and its values are computed after
+     * LIMIT, so a sum over the lines of each row is read only for the rows returned.
+     */
     public List<Found> find(Filter filter, boolean owner, int offset, int size) {
         MapSqlParameterSource params = new MapSqlParameterSource();
-        String sql = "SELECT d.*, s1.store_name, s2.store_name AS other_store_name FROM (" + union(filter.types(), owner)
+        String page = "SELECT d.*, s1.store_name, s2.store_name AS other_store_name FROM (" + union(filter.types())
                 + ") d JOIN store s1 ON s1.id = d.store_id LEFT JOIN store s2 ON s2.id = d.other_store_id"
                 + where(filter, params) + " ORDER BY d.doc_date DESC, d.doc_type, d.id DESC LIMIT :size OFFSET :offset";
+        String flag = owner ? "TRUE" : "FALSE";
+        String sql = "SELECT p.doc_type, p.id, p.sub_type, p.status, p.doc_date, p.store_id, p.other_store_id,"
+                + " p.scope_store_id, p.partner_name, p.store_name, p.other_store_name,"
+                + " CASE p.doc_type WHEN 'SALES_ORDER' THEN " + SALES_VALUE
+                + " WHEN 'GOODS_RECEIPT' THEN " + RECEIPT_VALUE.formatted(flag)
+                + " WHEN 'ADJUSTMENT' THEN " + ADJUSTMENT_VALUE.formatted(flag)
+                + " ELSE p.value END AS value FROM (" + page + ") p"
+                + " ORDER BY p.doc_date DESC, p.doc_type, p.id DESC";
         params.addValue("size", size).addValue("offset", offset);
         return jdbc.query(sql, params, DocumentQuery::found);
     }
 
     public long count(Filter filter) {
         MapSqlParameterSource params = new MapSqlParameterSource();
-        String sql = "SELECT count(*) FROM (" + union(filter.types(), false) + ") d" + where(filter, params);
+        String sql = "SELECT count(*) FROM (" + union(filter.types()) + ") d" + where(filter, params);
         Long count = jdbc.queryForObject(sql, params, Long.class);
         return count == null ? 0 : count;
     }
@@ -133,15 +157,15 @@ public class DocumentQuery {
         return find(new Filter(EnumSet.of(type), id, null, null, null, null), owner, 0, 1).stream().findFirst();
     }
 
-    private static String union(Set<DocumentType> types, boolean owner) {
+    private static String union(Set<DocumentType> types) {
         List<String> parts = new ArrayList<>();
         for (DocumentType type : types.isEmpty() ? EnumSet.allOf(DocumentType.class) : types) {
             parts.add(switch (type) {
                 case SALES_ORDER -> SALES;
-                case GOODS_RECEIPT -> RECEIPTS.formatted(owner ? "TRUE" : "FALSE");
+                case GOODS_RECEIPT -> RECEIPTS;
                 case TRANSFER_ORDER -> TRANSFERS;
                 case PAYMENT -> PAYMENTS;
-                case ADJUSTMENT -> ADJUSTMENTS.formatted(owner ? "TRUE" : "FALSE");
+                case ADJUSTMENT -> ADJUSTMENTS;
             });
         }
         // The first part names the columns; the others only need the same order.
