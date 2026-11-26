@@ -246,7 +246,7 @@ class SqlBaselineTest {
                     .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
                     .andExpect(jsonPath("$.split.salesOrderId").value((int) draftId))
                     .andExpect(jsonPath("$.split.waitingOrderId").isNumber());
-            assertBudget("sales-draft-submit-10-lines", queries, 63, 63);
+            assertBudget("sales-draft-submit-10-lines", queries, 42, 42);
         }
 
         @Test
