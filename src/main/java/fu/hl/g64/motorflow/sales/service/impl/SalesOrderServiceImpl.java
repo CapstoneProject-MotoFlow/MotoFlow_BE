@@ -48,7 +48,6 @@ import fu.hl.g64.motorflow.sales.dto.SalesOrderSummary;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderUpdateRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderVersion;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderView;
-import fu.hl.g64.motorflow.sales.entity.SalesDepositApplication;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
@@ -62,7 +61,6 @@ import fu.hl.g64.motorflow.sales.helper.OrderPricing.Totals;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
 import fu.hl.g64.motorflow.sales.helper.WaitingOrderReadiness;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -133,7 +131,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     private final ReceivableRepository receivables;
     private final AttachmentService attachments;
     private final OrderDeposits deposits;
-    private final SalesDepositApplicationRepository depositApplications;
     private final TransactionReferences references;
     private final WaitingOrderReadiness readiness;
     private final Clock clock;
@@ -487,10 +484,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Long waitingId = null;
         if (!waiting.isEmpty()) {
             SalesOrder rest = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order),
-                    order.getPriceType(), rate, order.getNote(), seller.id(), now));
+                    order.getPriceType(), rate, order.getNote(), seller.id(), now).splitFrom(order.getId()));
             rest.waitForStock();
             rest.setExpectedReadyDate(expected, now);
-            opened(seller, rest, saveShares(rest, waiting, Share::waitQty, content), now, order.getId());
+            opened(seller, rest, saveShares(rest, waiting, Share::waitQty, content), now);
             waitingId = rest.getId();
         }
         Long declinedId = declineRest(seller, order, refused, content, now);
@@ -511,10 +508,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             return null;
         }
         SalesOrder gone = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
-                content.rate(), order.getNote(), seller.id(), now));
+                content.rate(), order.getNote(), seller.id(), now).splitFrom(order.getId()));
         List<SalesOrderLine> lines = saveShares(gone, refused, Share::declinedQty, content);
         Map<String, Object> first = SalesOrderHistory.snapshot(1, null, gone, lines);
-        first.put(SalesOrderHistory.SPLIT_FROM, order.getId());
+        first.put(SalesOrderHistory.SPLIT_FROM, gone.getSplitFromOrderId());
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, gone.getId(), SalesOrderHistory.CREATED, seller.id(),
                 null, null, first, now));
         gone.cancel(seller.id(), DECLINED_REASON, now);
@@ -608,15 +605,10 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     /** UC-53 steps 9-10: version 1 is recorded and, when Owner sold it, the store's Branch Manager is told. */
     private SalesOrderDetail opened(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
                                     LocalDateTime now) {
-        return opened(seller, order, lines, now, null);
-    }
-
-    /** As above for an order split from {@code splitFrom} (GVHD 20/11): version 1 keeps where it came from. */
-    private SalesOrderDetail opened(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
-                                    LocalDateTime now, Long splitFrom) {
         Map<String, Object> first = SalesOrderHistory.snapshot(1, null, order, lines);
-        if (splitFrom != null) {
-            first.put(SalesOrderHistory.SPLIT_FROM, splitFrom);
+        // GVHD 20/11: version 1 of a split order also keeps where it came from, as the column does.
+        if (order.getSplitFromOrderId() != null) {
+            first.put(SalesOrderHistory.SPLIT_FROM, order.getSplitFromOrderId());
         }
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, order.getId(), SalesOrderHistory.CREATED, seller.id(),
                 null, null, first, now));
@@ -872,7 +864,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Long waitingId = null;
         if (!shortWaits.isEmpty()) {
             SalesOrder rest = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order),
-                    order.getPriceType(), rate, order.getNote(), seller.id(), now));
+                    order.getPriceType(), rate, order.getNote(), seller.id(), now).splitFrom(id));
             rest.waitForStock();
             List<SalesOrderLine> restLines = new ArrayList<>();
             for (SalesOrderLine line : lines) {
@@ -883,7 +875,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                             quantity, reference, OrderPricing.actualUnitPrice(reference, rate)));
                 }
             }
-            opened(seller, rest, orderLines.saveAll(restLines), now, id);
+            opened(seller, rest, orderLines.saveAll(restLines), now);
             waitingId = rest.getId();
             data.put(SalesOrderHistory.SHORT_WAITING_ORDER, waitingId);
         }
@@ -1000,7 +992,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     OrderPricing.actualUnitPrice(prices.get(line.getProductId()), rate)));
             order.release(now);
             orderLines.flush();
-            applyDeposit(seller, id, id, use, request.depositRefund(), now);
+            applyDeposit(seller, id, order, use, request.depositRefund(), now);
             auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(),
                     null, previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
                             lines), now));
@@ -1016,7 +1008,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         checkMargin(seller, parts, releasedByProduct, releaseTotals, now);
         DepositUse use = depositUse(deposit, releaseTotals.total(), false, request);
         SalesOrder sold = orders.save(SalesOrder.create(order.getStoreId(), customerOf(order), order.getPriceType(),
-                rate, order.getNote(), seller.id(), now));
+                rate, order.getNote(), seller.id(), now).splitFrom(id));
         sold.soldFromWaitingOrder();
         List<SalesOrderLine> soldLines = new ArrayList<>();
         for (int i = 0; i < taken.size(); i++) {
@@ -1026,7 +1018,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     reference, OrderPricing.actualUnitPrice(reference, rate)));
         }
         orderLines.saveAll(soldLines);
-        applyDeposit(seller, id, sold.getId(), use, null, now);
+        applyDeposit(seller, id, sold, use, null, now);
         List<SalesOrderLine> gone = taken.stream().filter(line -> released.get(line.getId())
                 == line.getRequestedQty()).toList();
         taken.stream().filter(line -> !gone.contains(line))
@@ -1036,7 +1028,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(), null,
                 previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
                         orderLines.findBySalesOrderIdOrderByLineNoAsc(id)), now));
-        return opened(seller, sold, soldLines, now, id)
+        return opened(seller, sold, soldLines, now)
                 .withSplit(new SalesOrderDetail.Split(sold.getId(), id, null, List.of()));
     }
 
@@ -1104,12 +1096,14 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return new DepositUse(most, surplus);
     }
 
-    /** Records the deposit the release put into {@code salesOrderId} and the part given back on the waiting order. */
-    private void applyDeposit(AuthenticatedUser seller, long waitingId, long salesOrderId, DepositUse use,
+    /**
+     * Records the deposit the release put into {@code target} (the order it opened, or the waiting order itself at
+     * its whole release) and the part given back on the waiting order.
+     */
+    private void applyDeposit(AuthenticatedUser seller, long waitingId, SalesOrder target, DepositUse use,
                               ReleaseWaitingOrderRequest.DepositRefund refund, LocalDateTime now) {
         if (use.applied() > 0) {
-            depositApplications.save(SalesDepositApplication.of(waitingId, salesOrderId, use.applied(), seller.id(),
-                    now));
+            target.takeDeposit(use.applied(), now);
         }
         if (use.refunded() > 0) {
             String reference = TransactionReferences.clean(refund.transactionReference());
@@ -1583,7 +1577,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 delivered ? "DELIVERED" : "REQUESTED", staff ? null : totals.referenceTotal(),
                 staff ? null : totals.discountAmount(), staff ? null : totals.total(),
                 staff ? null : totals.invoiceDiscountRate(), staff ? null : pricing.discountThreshold(now), money,
-                closing, rows, actions, history, splitFrom(steps), null, deposit(order, deposit, names),
+                closing, rows, actions, history, order.getSplitFromOrderId(), null, deposit(order, deposit, names),
                 order.isWaitedForStock(), order.getExpectedReadyDate());
     }
 
@@ -1603,12 +1597,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 order.getDepositForfeitedBy(), names.get(order.getDepositForfeitedBy()), changes);
     }
 
-    /** GVHD 20/11: the order this one was split from ("tách từ BH-xxx"), kept in its version 1 in audit_log. */
-    private static Long splitFrom(List<AuditLog> steps) {
-        return steps.stream().filter(step -> SalesOrderHistory.CREATED.equals(step.getAction()))
-                .map(step -> step.getNewData().get(SalesOrderHistory.SPLIT_FROM)).filter(Objects::nonNull)
-                .map(value -> SalesOrderHistory.number(value).longValue()).findFirst().orElse(null);
-    }
 
     /** Screen 8.2.2: what the order holds of the customer's money, its payments and refunds, credit and receivable. */
     private SalesOrderDetail.Money money(SalesOrder order, long total, OrderCollections.Money held,

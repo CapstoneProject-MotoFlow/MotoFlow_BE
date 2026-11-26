@@ -38,7 +38,7 @@ public final class SalesOrderHistory {
     /** GVHD 20/11: part or all of a waiting order was released to picking, at the prices in effect. */
     public static final String CAUSE_RELEASE = "RELEASE";
     /**
-     * GVHD 20/11, kept in audit_log instead of columns: version 1 of an order split from another names that order.
+     * GVHD 20/11: version 1 of an order split from another names that order, as sales_order.split_from_order_id does.
      * (Confirmations made before góp ý UI 21/11 may also carry waiting_order_id and requested_before.)
      */
     public static final String SPLIT_FROM = "split_from_order_id";

@@ -30,7 +30,6 @@ import fu.hl.g64.motorflow.receivable.entity.enums.PaymentMethod;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.receiving.service.GoodsReceiptService;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -67,7 +66,6 @@ public class DocumentServiceImpl implements DocumentService {
 
     private final DocumentQuery documents;
     private final PaymentRepository payments;
-    private final SalesDepositApplicationRepository depositApplications;
     private final SalesOrderService salesOrders;
     private final GoodsReceiptService goodsReceipts;
     private final TransferReceiptService transferReceipts;
@@ -471,7 +469,7 @@ public class DocumentServiceImpl implements DocumentService {
                     str(found, "part_name"), str(found, "base_unit"), null, null, quantity, price, amount));
         }
         // BR-49: paid is verified payments less refunds, each with its applied corrections. The deposit is separate.
-        long deposit = depositApplications.sumAppliedTo(row.id());
+        long deposit = lng(order, "deposit_applied_amount");
         long paid = payments.sumVerifiedNet(row.id());
         // BR-49: the debt counts with its applied corrections too.
         Long credit = documents.row("""
@@ -632,7 +630,7 @@ public class DocumentServiceImpl implements DocumentService {
     private Map<String, Object> salesOrder(long id) {
         return documents.row("""
                 SELECT o.customer_id, o.customer_name_snapshot, o.customer_phone_snapshot, o.customer_address_snapshot,
-                       o.discount_rate, o.completion_type, o.price_type, c.tax_code
+                       o.discount_rate, o.completion_type, o.price_type, o.deposit_applied_amount, c.tax_code
                   FROM sales_order o LEFT JOIN customer c ON c.id = o.customer_id
                  WHERE o.id = :id""", Map.of("id", id)).orElseThrow();
     }

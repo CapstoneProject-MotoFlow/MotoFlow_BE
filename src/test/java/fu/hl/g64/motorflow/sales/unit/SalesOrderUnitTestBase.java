@@ -24,7 +24,6 @@ import fu.hl.g64.motorflow.sales.helper.OrderCollections;
 import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
@@ -50,6 +49,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static fu.hl.g64.motorflow.support.unit.UnitFixtures.CLOCK;
@@ -97,7 +97,6 @@ abstract class SalesOrderUnitTestBase {
     @Mock AttachmentService attachments;
     @Mock PaymentRepository payments;
     @Mock PlatformTransactionManager transactionManager;
-    @Mock SalesDepositApplicationRepository depositApplications;
     @Mock SalesDepositExpiryChangeRepository depositExpiry;
     @Mock WaitingOrderReadiness readiness;
 
@@ -120,10 +119,10 @@ abstract class SalesOrderUnitTestBase {
 
     @BeforeEach
     void baseData() {
-        OrderDeposits deposits = new OrderDeposits(depositApplications, depositExpiry, CLOCK);
+        OrderDeposits deposits = new OrderDeposits(orders, depositExpiry, CLOCK);
         service = new SalesOrderServiceImpl(orders, orderLines, products, customers, stores, users, auditLog, tasks,
                 warehouseTasks, notifications, pricing, guide, balances, collections, receivables, attachments,
-                deposits, depositApplications, new TransactionReferences(payments, transactionManager), readiness, CLOCK);
+                deposits, new TransactionReferences(payments, transactionManager), readiness, CLOCK);
         gialam = with(store(2, StoreStatus.ACTIVE, false), "storeName", "Kho Gia Lâm");
         part(OIL, "NHOT-01", ProductStatus.ACTIVE, 110_000L);
         part(FILTER, "LOC-01", ProductStatus.ACTIVE, 50_000L);
@@ -173,6 +172,14 @@ abstract class SalesOrderUnitTestBase {
         });
         when(orders.findByIdForUpdate(anyLong())).thenAnswer(inv -> Optional.ofNullable(saved.get(
                 inv.<Long>getArgument(0))));
+        // The deposit columns of the orders saved: what a waiting order gave, as the repository query adds it up.
+        when(orders.sumDepositAppliedFrom(anyLong())).thenAnswer(inv -> {
+            long id = inv.<Long>getArgument(0);
+            return Optional.ofNullable(saved.get(id)).map(SalesOrder::getDepositAppliedAmount).orElse(0L)
+                    + saved.values().stream().filter(child -> Objects.equals(child.getSplitFromOrderId(), id)
+                            && child.getDepositExpiresOn() == null)
+                    .mapToLong(SalesOrder::getDepositAppliedAmount).sum();
+        });
         when(orderLines.saveAll(any())).thenAnswer(inv -> {
             List<SalesOrderLine> added = new ArrayList<>();
             inv.<Iterable<SalesOrderLine>>getArgument(0).forEach(line -> {

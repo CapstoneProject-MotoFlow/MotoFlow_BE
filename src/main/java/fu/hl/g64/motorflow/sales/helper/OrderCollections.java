@@ -4,7 +4,7 @@ import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
+import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
 public class OrderCollections {
 
     private final PaymentRepository payments;
-    private final SalesDepositApplicationRepository depositApplications;
+    private final SalesOrderRepository orders;
 
     /** The order's payments and refunds, oldest first, with what they add up to. */
     public Money of(long orderId) {
@@ -60,7 +60,7 @@ public class OrderCollections {
                 }
             }
         }
-        long fromDeposit = depositApplications.sumAppliedTo(orderId);
+        long fromDeposit = orders.depositAppliedTo(orderId);
         return new Money(rows, corrections, paid, refunded, unverifiedPaid, unverifiedRefunded, unverified,
                 fromDeposit);
     }

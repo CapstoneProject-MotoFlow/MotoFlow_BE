@@ -73,9 +73,9 @@ public class ReportQueries {
                 SELECT m.store_id, CAST(date_trunc(:unit, m.at) AS DATE) AS day,
                        coalesce(sum(m.applied), 0) AS deposits_applied,
                        coalesce(sum(m.forfeited), 0) AS deposits_forfeited
-                FROM (SELECT o.store_id, a.applied_at AS at, a.amount AS applied, 0 AS forfeited
-                      FROM sales_deposit_application a
-                      JOIN sales_order o ON o.id = a.waiting_order_id
+                FROM (SELECT o.store_id, o.deposit_applied_at AS at, o.deposit_applied_amount AS applied, 0 AS forfeited
+                      FROM sales_order o
+                      WHERE o.deposit_applied_at IS NOT NULL
                       UNION ALL
                       SELECT o.store_id, o.deposit_forfeited_at, 0, o.deposit_forfeited_amount
                       FROM sales_order o

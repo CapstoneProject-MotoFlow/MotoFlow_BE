@@ -76,8 +76,10 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
         assertThat(jdbc.queryForList("SELECT payment_type || ' ' || amount || ' ' || status FROM payment "
                 + "WHERE sales_order_id = ? ORDER BY id", String.class, waiting))
                 .containsExactly("DEPOSIT 400000 VERIFIED", "DEPOSIT_REFUND 100000 VERIFIED");
-        assertThat(jdbc.queryForList("SELECT sales_order_id FROM sales_deposit_application WHERE waiting_order_id = ? "
-                + "ORDER BY id", Long.class, waiting)).containsExactly(sold, waiting);
+        // Each order keeps what it took: the sold order its share, the waiting order the last release's.
+        assertThat(jdbc.queryForList("SELECT id || ' ' || deposit_applied_amount || ' ' || "
+                + "coalesce(split_from_order_id, 0) FROM sales_order WHERE id IN (?, ?) ORDER BY id", String.class,
+                waiting, sold)).containsExactly(waiting + " 200000 0", sold + " 100000 " + waiting);
 
         // The released order is paid by the deposit: once confirmed it completes with no payment.
         assign(managerToken, "PICKING", sold, staff).andExpect(status().isOk());
@@ -285,6 +287,37 @@ class SalesDepositReleaseApiTest extends SalesOrderTestData {
         detail(managerToken, waiting)
                 .andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
                 .andExpect(jsonPath("$.deposit.remaining").value(400_000));
+    }
+
+    @Test
+    void aWaitingOrderSplitFromAShortPickingKeepsItsOwnDeposit() throws Exception {
+        // Plan 25/11: the waiting order gives its 300,000 at its whole release and is then picked short. The order
+        // made for the missing pad takes its own deposit, which does not count as given by the first one.
+        long waiting = waitingOrder();
+        paidDeposit(waiting, 400_000, "2026-10-16");
+        release(waiting, 3, null, refund("CASH", null)).andExpect(status().isOk());
+        assign(managerToken, "PICKING", waiting, staff).andExpect(status().isOk());
+        pick(staffToken, waiting, 2, pad, 2, "Hàng hỏng").andExpect(status().isOk());
+        String body = mvc.perform(post("/api/v1/sales-orders/" + waiting + "/confirm")
+                        .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("version", 2, "customerAgreed", true, "lines", List.of(Map.of(
+                                "productId", pad, "deliveredQty", 2, "waitForShort", true))))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        long rest = ((Number) JsonPath.read(body, "$.split.waitingOrderId")).longValue();
+        paidDeposit(rest, 50_000, "2026-10-20");
+        release(rest, 1, null, null).andExpect(status().isOk())
+                .andExpect(jsonPath("$.splitFromOrderId").value((int) waiting))
+                .andExpect(jsonPath("$.money.depositApplied").value(50_000))
+                .andExpect(jsonPath("$.deposit.applied").value(50_000))
+                .andExpect(jsonPath("$.deposit.status").value("SETTLED"));
+        detail(managerToken, waiting)
+                .andExpect(jsonPath("$.money.depositApplied").value(300_000))
+                .andExpect(jsonPath("$.deposit.applied").value(300_000))
+                .andExpect(jsonPath("$.deposit.refunded").value(100_000))
+                .andExpect(jsonPath("$.deposit.remaining").value(0));
+        report("/sales-collection?storeId=" + store + "&from=2026-10-13&to=2026-10-13")
+                .andExpect(jsonPath("$.total.depositsReceived").value(450_000))
+                .andExpect(jsonPath("$.total.depositsApplied").value(350_000));
     }
 
     /** A new order of the customer that takes none of 3 pads now and waits for them. */
