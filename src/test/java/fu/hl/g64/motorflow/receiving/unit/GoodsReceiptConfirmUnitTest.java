@@ -32,6 +32,7 @@ import static fu.hl.g64.motorflow.support.unit.UnitFixtures.withId;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -62,10 +63,13 @@ class GoodsReceiptConfirmUnitTest extends GoodsReceiptUnitTestBase {
         when(orders.findByIdForUpdate(30L)).thenAnswer(inv -> Optional.of(order));
         when(receipts.findByIdForUpdate(50L)).thenAnswer(inv -> Optional.of(grn));
         // Posting takes the AVAILABLE quantity off what the PO still expects, as the real ledger would read it.
-        when(posting.receiveNewLot(any())).thenAnswer(inv -> {
-            NewLotPosting lot = inv.getArgument(0);
-            outstanding.merge(lot.productId(), -lot.quantities().getOrDefault(StockStatus.AVAILABLE, 0), Integer::sum);
-            return null;
+        when(posting.receiveNewLotsAll(anyList())).thenAnswer(inv -> {
+            List<NewLotPosting> posted = inv.getArgument(0);
+            for (NewLotPosting lot : posted) {
+                outstanding.merge(lot.productId(), -lot.quantities().getOrDefault(StockStatus.AVAILABLE, 0),
+                        Integer::sum);
+            }
+            return List.of();
         });
         case77 = withId(DiscrepancyCase.supplier(40, PAD, 3, 0, 0, 3, NOW.minusDays(1)), 77);
         when(discrepancies.findAllByIdForUpdate(any())).thenAnswer(inv -> List.of(case77));
@@ -100,7 +104,7 @@ class GoodsReceiptConfirmUnitTest extends GoodsReceiptUnitTestBase {
 
     private void assertRefused(AuthenticatedUser user, HttpStatus status, String code) {
         assertBusiness(() -> service.confirm(user, 50), status, code);
-        verify(posting, never()).receiveNewLot(any());
+        verify(posting, never()).receiveNewLotsAll(anyList());
         verify(warehouseTasks, never()).confirmResult(any(), any(), anyLong());
     }
 
@@ -113,9 +117,10 @@ class GoodsReceiptConfirmUnitTest extends GoodsReceiptUnitTestBase {
         assertThat(result.openDiscrepancies()).isZero();
         assertThat(stocked(result)).containsExactly(tuple(PAD, 10), tuple(OIL, 5));
         assertThat(order.getStatus()).isEqualTo(PurchaseOrderStatus.FULLY_RECEIVED);
-        ArgumentCaptor<NewLotPosting> lots = ArgumentCaptor.forClass(NewLotPosting.class);
-        verify(posting, org.mockito.Mockito.times(2)).receiveNewLot(lots.capture());
-        assertThat(lots.getAllValues()).extracting(NewLotPosting::productId, NewLotPosting::purchaseUnitPrice)
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<NewLotPosting>> lots = ArgumentCaptor.forClass(List.class);
+        verify(posting).receiveNewLotsAll(lots.capture());
+        assertThat(lots.getValue()).extracting(NewLotPosting::productId, NewLotPosting::purchaseUnitPrice)
                 .containsExactly(tuple(PAD, 60000L), tuple(OIL, 70000L));
         verify(warehouseTasks).confirmResult(manager, TaskType.INSPECTION, 50);
         verify(warehouseTasks).cancelForDocument(TaskType.SUPPLIER_RECEIVING, 30);
@@ -166,7 +171,10 @@ class GoodsReceiptConfirmUnitTest extends GoodsReceiptUnitTestBase {
         assertThat(result.lines().get(0).toStockQty()).isEqualTo(10);
         assertThat(result.lines().get(1).deliveredQty()).isZero();
         assertThat(result.lines().get(1).shortQty()).isEqualTo(5);
-        verify(posting).receiveNewLot(any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<NewLotPosting>> lots = ArgumentCaptor.forClass(List.class);
+        verify(posting).receiveNewLotsAll(lots.capture());
+        assertThat(lots.getValue()).hasSize(1);
         assertThat(openedCases).singleElement().satisfies(c -> {
             assertThat(c.getProductId()).isEqualTo(OIL);
             assertThat(c.getShortQty()).isEqualTo(5);
@@ -210,7 +218,10 @@ class GoodsReceiptConfirmUnitTest extends GoodsReceiptUnitTestBase {
 
         assertThat(result.recordedById()).isEqualTo(5L);
         assertThat(result.confirmedById()).isEqualTo(5L);
-        verify(posting, org.mockito.Mockito.times(2)).receiveNewLot(any());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<NewLotPosting>> lots = ArgumentCaptor.forClass(List.class);
+        verify(posting).receiveNewLotsAll(lots.capture());
+        assertThat(lots.getValue()).hasSize(2);
     }
 
     @Test

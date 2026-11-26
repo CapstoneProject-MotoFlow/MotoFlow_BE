@@ -59,6 +59,14 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
             on conflict (store_id, product_id) do nothing""", nativeQuery = true)
     void insertIfMissing(Long storeId, Long productId, LocalDateTime now);
 
+    /** Bulk-creates empty rows if missing, in paired array order; safe when two transactions do it at once. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            insert into stock_balance (store_id, product_id, updated_at)
+            select u.s, u.p, :now from unnest(cast(:storeIds as bigint[]), cast(:productIds as bigint[])) as u(s, p)
+            on conflict (store_id, product_id) do nothing""", nativeQuery = true)
+    void insertIfMissingBatch(Long[] storeIds, Long[] productIds, LocalDateTime now);
+
     /** Row lock that serialises every posting for one part in one warehouse (BR-29). */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select b from StockBalance b where b.storeId = :storeId and b.productId = :productId")
@@ -80,6 +88,13 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
             select coalesce(sum(b.availableQty + b.awaitingInspectionQty + b.inTransitQty), 0)
             from StockBalance b where b.productId = :productId""")
     long sumValuedQuantity(Long productId);
+
+    /** Chain-wide valued quantity per part id, for batch average recalculation. */
+    @Query("""
+            select b.productId, coalesce(sum(b.availableQty + b.awaitingInspectionQty + b.inTransitQty), 0)
+            from StockBalance b where b.productId in :productIds
+            group by b.productId""")
+    List<Object[]> sumValuedQuantityByProductIdIn(Collection<Long> productIds);
 
     Optional<StockBalance> findByStoreIdAndProductId(Long storeId, Long productId);
 

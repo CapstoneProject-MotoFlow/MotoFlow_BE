@@ -42,6 +42,17 @@ public class LotBalance {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    /** Creates a new empty lot balance row matching insertIfMissing defaults. */
+    public static LotBalance create(Long lotId, Long storeId, StockStatus stockStatus, LocalDateTime now) {
+        LotBalance balance = new LotBalance();
+        balance.lotId = lotId;
+        balance.storeId = storeId;
+        balance.stockStatus = stockStatus;
+        balance.quantity = 0;
+        balance.updatedAt = now;
+        return balance;
+    }
+
     /** Adds (or removes, when negative) quantity; the posting service checked it stays at zero or above. */
     public void change(int delta, LocalDateTime now) {
         if (quantity + delta < 0) {

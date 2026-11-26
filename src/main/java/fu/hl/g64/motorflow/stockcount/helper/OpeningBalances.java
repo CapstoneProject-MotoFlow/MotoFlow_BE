@@ -25,6 +25,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -128,6 +129,7 @@ public class OpeningBalances {
         Map<Long, Product> parts = products.findAllById(preview.parts().stream()
                 .map(OpeningCostsResponse.Part::productId).toList()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
+        List<NewLotPosting> postings = new ArrayList<>();
         for (StockCountLine line : countedLines(count)) {
             Map<StockStatus, Integer> quantities = new LinkedHashMap<>();
             int available = line.getCountedQty() - line.getDamagedQty();
@@ -137,10 +139,13 @@ public class OpeningBalances {
             if (line.getDamagedQty() > 0) {
                 quantities.put(StockStatus.DAMAGED, line.getDamagedQty());
             }
-            posting.receiveNewLot(new NewLotPosting(count.getStoreId(), line.getProductId(), LotSourceType.OPENING,
+            postings.add(new NewLotPosting(count.getStoreId(), line.getProductId(), LotSourceType.OPENING,
                     null, null, count.getCountDate(), parts.get(line.getProductId()).getInitialUnitCost(), null, null,
                     line.getExpiryDate(), quantities, MovementType.OPENING_BALANCE, SourceRef.stockCount(count.getId()),
                     ownerId, null, period.getId(), occurredAt));
+        }
+        if (!postings.isEmpty()) {
+            posting.receiveNewLotsAll(postings);
         }
     }
 }

@@ -39,6 +39,12 @@ public interface InventoryPostingService {
     Lot receiveNewLot(NewLotPosting posting);
 
     /**
+     * {@link #receiveNewLot} for every new lot of one document. Locks warehouse stock rows in store id then product id
+     * order, then locks parts in product id order, and recalculates each part's moving average in list order.
+     */
+    List<Lot> receiveNewLotsAll(List<NewLotPosting> postings);
+
+    /**
      * Stock out of one status. Without given lots it takes FEFO, then FIFO. A sale or transfer dispatch never takes
      * an expired lot (MSG86) and never goes below zero (MSG84). Valued at the moving average.
      *
