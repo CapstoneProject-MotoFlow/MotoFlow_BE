@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.catalog.entity.Product;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.transfer.entity.ReplenishmentRequestLine;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -12,6 +13,11 @@ import java.util.List;
 public interface ReplenishmentRequestLineRepository extends JpaRepository<ReplenishmentRequestLine, Long> {
 
     List<ReplenishmentRequestLine> findByReplenishmentRequestIdOrderById(Long replenishmentRequestId);
+
+    /** Removes every line of one replenishment request in one statement (draft rewrite or discard). */
+    @Modifying(flushAutomatically = true)
+    @Query("delete from ReplenishmentRequestLine l where l.replenishmentRequestId = :replenishmentRequestId")
+    void deleteByReplenishmentRequestId(Long replenishmentRequestId);
 
     interface LowStockPart {
         StockBalance getBalance();

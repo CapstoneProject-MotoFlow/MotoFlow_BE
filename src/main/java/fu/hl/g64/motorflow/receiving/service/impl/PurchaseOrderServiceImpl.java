@@ -330,13 +330,12 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
     @Override
     public void deleteDraft(AuthenticatedUser owner, long id) {
         PurchaseOrder draft = ownDraft(owner, orders.findByIdForUpdate(id));
-        orderLines.deleteAll(orderLines.findByPurchaseOrderIdOrderByIdAsc(draft.getId()));
+        orderLines.deleteByPurchaseOrderId(draft.getId());
         orders.delete(draft);
     }
 
     private void replaceDraft(PurchaseOrder draft, PurchaseOrderRequest request, Checked checked, LocalDateTime now) {
-        orderLines.deleteAll(orderLines.findByPurchaseOrderIdOrderByIdAsc(draft.getId()));
-        orderLines.flush();
+        orderLines.deleteByPurchaseOrderId(draft.getId());
         draft.replaceDraft(checked.supplier().getId(), checked.store().getId(), request.expectedArrival(),
                 text(request.note()), now);
         saveLines(draft.getId(), request);

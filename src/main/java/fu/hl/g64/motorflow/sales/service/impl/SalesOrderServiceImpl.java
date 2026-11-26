@@ -382,8 +382,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 now.toLocalDate());
         order.submit(now);
         // GVHD 20/11: the draft becomes the order sold now (or the waiting order if nothing can be sold now).
-        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
-        orderLines.flush();
+        orderLines.deleteBySalesOrderId(id);
         return openSplit(seller, order, shares, content, now, expected);
     }
 
@@ -544,8 +543,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Override
     public void deleteDraft(AuthenticatedUser seller, long id) {
         SalesOrder order = lockOwnDraft(seller, id);
-        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
-        orderLines.flush();
+        orderLines.deleteBySalesOrderId(id);
         orders.delete(order);
     }
 
@@ -565,8 +563,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Content content = content(seller, request, now);
         order.changeDraft(content.store().getId(), content.customer(), request.priceType(), content.rate(),
                 text(request.note()), now);
-        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(order.getId()));
-        orderLines.flush();
+        orderLines.deleteBySalesOrderId(order.getId());
         saveLines(order, request, content);
         return content;
     }
