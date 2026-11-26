@@ -44,6 +44,9 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
     @Query("select coalesce(sum(b.quantity), 0) from LotBalance b where b.lotId = :lotId")
     long sumQuantityOfLot(Long lotId);
 
+    @Query("select b.lotId, coalesce(sum(b.quantity), 0) from LotBalance b where b.lotId in :lotIds group by b.lotId")
+    List<Object[]> sumQuantityByLotIdIn(Collection<Long> lotIds);
+
     /**
      * [storeId, productId, expired quantity, quantity expiring by {@code warnUntil}] of AVAILABLE stock, for lots with an
      * expiry date (BR-76). A lot already marked EXPIRED counts as expired.

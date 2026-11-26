@@ -148,6 +148,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 .map(p -> new PoolKey(p.storeId(), p.fromStatus(), p.productId())).toList(),
                 namedLots(postings.stream().map(OutPosting::lots).toList()), now);
         Set<Long> checkedStores = new HashSet<>();
+        Map<Long, Lot> touchedLots = new LinkedHashMap<>();
         List<List<LotQuantity>> taken = new ArrayList<>();
         for (OutPosting p : postings) {
             Product product = batch.product(p.productId());
@@ -158,10 +159,20 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             for (Pick pick : picks) {
                 post(balance, pick.lot, p.fromStatus(), -pick.quantity, costOf(product, pick.lot), p.movementType(),
                         p.source(), p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
-                refreshDepletion(pick.lot);
+                touchedLots.putIfAbsent(pick.lot.getId(), pick.lot);
                 line.add(new LotQuantity(pick.lot.getId(), pick.quantity));
             }
             taken.add(line);
+        }
+        if (!touchedLots.isEmpty()) {
+            lotBalances.flush();
+            Map<Long, Integer> totals = new HashMap<>();
+            for (Object[] row : lotBalances.sumQuantityByLotIdIn(touchedLots.keySet())) {
+                totals.put(((Number) row[0]).longValue(), ((Number) row[1]).intValue());
+            }
+            for (Lot lot : touchedLots.values()) {
+                lot.refreshDepletion(totals.getOrDefault(lot.getId(), 0));
+            }
         }
         return taken;
     }
