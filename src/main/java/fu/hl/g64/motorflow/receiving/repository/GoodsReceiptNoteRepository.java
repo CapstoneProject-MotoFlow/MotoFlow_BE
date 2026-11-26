@@ -34,7 +34,10 @@ public interface GoodsReceiptNoteRepository extends JpaRepository<GoodsReceiptNo
             where r.purchaseOrderId in (select q.id from PurchaseOrder q where q.supplierId = :supplierId)""")
     Page<GoodsReceiptNote> findBySupplier(Long supplierId, Pageable pageable);
 
-    /** Receipts at the store needing BM attention on the home page: unassigned inspection, awaiting confirmation. */
+    /**
+     * Receipts at the store needing BM attention on the home page: unassigned inspection, awaiting confirmation. Only
+     * open receipts are read.
+     */
     @Query("""
             select coalesce(sum(case when r.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.AWAITING_INSPECTION
                                           and not exists (select t.id from WarehouseTask t where t.goodsReceiptNoteId = r.id
@@ -43,7 +46,9 @@ public interface GoodsReceiptNoteRepository extends JpaRepository<GoodsReceiptNo
                    coalesce(sum(case when r.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.AWAITING_CONFIRMATION
                                      then 1L else 0L end), 0L) as awaitingConfirmation
             from GoodsReceiptNote r
-            where """ + RECEIVED_AT_STORE)
+            where r.status in (fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.AWAITING_INSPECTION,
+                               fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.AWAITING_CONFIRMATION)
+              and (""" + RECEIVED_AT_STORE + ")")
     HomeCounts countHomeWork(Long storeId);
 
     interface HomeCounts {
