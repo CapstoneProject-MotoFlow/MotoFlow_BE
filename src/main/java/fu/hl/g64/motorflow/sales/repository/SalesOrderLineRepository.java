@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.sales.repository;
 import fu.hl.g64.motorflow.sales.entity.SalesOrderLine;
 import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,11 @@ public interface SalesOrderLineRepository extends JpaRepository<SalesOrderLine, 
 
     /** The lines of one order in the order they were added. */
     List<SalesOrderLine> findBySalesOrderIdOrderByLineNoAsc(Long salesOrderId);
+
+    /** Removes every line of one order in one statement (draft rewrite, submit, or discard). */
+    @Modifying(flushAutomatically = true)
+    @Query("delete from SalesOrderLine l where l.salesOrderId = :salesOrderId")
+    void deleteBySalesOrderId(Long salesOrderId);
 
     /** What the lines of open sales orders hold (BR-33, GVHD 20/11), as JPQL on {@code l} and {@code o}. */
     String HELD = """

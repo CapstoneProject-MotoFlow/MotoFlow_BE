@@ -474,7 +474,10 @@ public class StockCountServiceImpl implements StockCountService {
         }
 
         warehouseTasks.confirmResult(user, TaskType.COUNTING, id);
-        lines.deleteAll(all.stream().filter(l -> removedIds.contains(l.getId())).toList());
+        List<StockCountLine> removed = all.stream().filter(l -> removedIds.contains(l.getId())).toList();
+        if (!removed.isEmpty()) {
+            lines.deleteAllInBatch(removed);
+        }
         for (StockCountLine line : kept) {
             boolean needsReason = line.difference() != 0 || line.damagedChange() != 0;
             line.explain(needsReason ? reasons.get(line.getId()) : null);

@@ -356,8 +356,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
     @Override
     public void deleteDraft(AuthenticatedUser user, long id) {
         ReplenishmentRequest request = lockOwnDraft(user, id);
-        lines.deleteAll(lines.findByReplenishmentRequestIdOrderById(id));
-        lines.flush();
+        lines.deleteByReplenishmentRequestId(id);
         requests.delete(request);
     }
 
@@ -376,8 +375,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         Store store = requestingStore(user, body.storeId());
         requestedParts.requireBuyable(body.lines().stream().map(ReplenishmentCreateRequest.Line::productId).toList());
         request.changeDraft(store.getId(), note(body), now);
-        lines.deleteAll(lines.findByReplenishmentRequestIdOrderById(request.getId()));
-        lines.flush();
+        lines.deleteByReplenishmentRequestId(request.getId());
         saveLines(request, body);
         return store;
     }
