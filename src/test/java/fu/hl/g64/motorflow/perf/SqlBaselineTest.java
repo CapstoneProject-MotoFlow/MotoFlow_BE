@@ -220,6 +220,36 @@ class SqlBaselineTest {
         }
 
         @Test
+        void salesDraftSubmit10Lines() throws Exception {
+            long[] products = tenPricedParts();
+            long[] createPairs = new long[20];
+            for (int i = 0; i < 10; i++) {
+                createPairs[i * 2] = products[i];
+                createPairs[i * 2 + 1] = 1;
+            }
+            Map<String, Object> body = order(null, customer, "RETAIL", null, lines(createPairs));
+            String created = mvc.perform(post("/api/v1/sales-orders/drafts")
+                            .header(HttpHeaders.AUTHORIZATION, managerToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(body)))
+                    .andExpect(status().isCreated())
+                    .andReturn().getResponse().getContentAsString();
+            long draftId = ((Number) JsonPath.read(created, "$.id")).longValue();
+
+            queries.reset();
+            // Pin the path: some lines sold now, the rest on a waiting order (the split is what the count measures).
+            mvc.perform(post("/api/v1/sales-orders/drafts/" + draftId + "/submit")
+                            .header(HttpHeaders.AUTHORIZATION, managerToken)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json(body)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
+                    .andExpect(jsonPath("$.split.salesOrderId").value((int) draftId))
+                    .andExpect(jsonPath("$.split.waitingOrderId").isNumber());
+            assertBudget("sales-draft-submit-10-lines", queries, 63, 63);
+        }
+
+        @Test
         void homeBmAndAdmin() throws Exception {
             createUser("admin01", Role.ADMIN, null);
             String adminToken = signIn("admin01");
