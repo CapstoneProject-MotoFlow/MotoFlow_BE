@@ -231,7 +231,6 @@ class CatalogApiTest extends IntegrationTest {
                     "vehicleType", "MOTORCYCLE"));
             Map<String, Object> body = product(" sku-001 ", pads);
             body.put("oemCodes", List.of("06435-K01-902"));
-            body.put("barcodes", List.of("8930000000011"));
             body.put("vehicleModelIds", List.of(airBlade));
             body.put("imageUrls", List.of("https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/a.jpg", "https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/b.jpg"));
 
@@ -241,7 +240,6 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.sku").value("SKU-001"))
                     .andExpect(jsonPath("$.status").value("ACTIVE"))
                     .andExpect(jsonPath("$.oemCodes", contains("06435-K01-902")))
-                    .andExpect(jsonPath("$.barcodes", contains("8930000000011")))
                     .andExpect(jsonPath("$.imageUrls", contains("https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/a.jpg", "https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/b.jpg")))
                     .andExpect(jsonPath("$.vehicleModels[0].modelName").value("Air Blade"))
                     .andExpect(jsonPath("$.stock").doesNotExist())
@@ -252,9 +250,6 @@ class CatalogApiTest extends IntegrationTest {
             send(post("/api/v1/products"), ownerToken, body)
                     .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG53"));
             body.put("sku", "SKU-002");
-            send(post("/api/v1/products"), ownerToken, body)
-                    .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG54"));
-            body.put("barcodes", List.of());
             send(post("/api/v1/products"), ownerToken, body).andExpect(status().isCreated());
 
             body.put("sku", "IGNORED");
@@ -266,7 +261,6 @@ class CatalogApiTest extends IntegrationTest {
                     .andExpect(jsonPath("$.sku").value("SKU-001"))
                     .andExpect(jsonPath("$.partName").value("Bố thắng đĩa trước"))
                     .andExpect(jsonPath("$.oemCodes", contains("06435-K01-903")))
-                    .andExpect(jsonPath("$.barcodes", hasSize(0)))
                     .andExpect(jsonPath("$.imageUrls", contains("https://res.cloudinary.com/motoflow-test/image/upload/v1/motoflow/products/c.jpg")));
 
             send(post("/api/v1/products/{id}/discontinue", id), ownerToken).andExpect(status().isNoContent());

@@ -3,11 +3,10 @@ package fu.hl.g64.motorflow.discrepancy.service.impl;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
-import fu.hl.g64.motorflow.catalog.entity.ProductIdentifier;
+import fu.hl.g64.motorflow.catalog.entity.ProductOemCode;
 import fu.hl.g64.motorflow.catalog.entity.ProductVehicleModel;
-import fu.hl.g64.motorflow.catalog.entity.enums.IdentifierType;
 import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
-import fu.hl.g64.motorflow.catalog.repository.ProductIdentifierRepository;
+import fu.hl.g64.motorflow.catalog.repository.ProductOemCodeRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductVehicleModelRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
@@ -140,7 +139,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
     private final AuditLogRepository auditLog;
     private final ReceivingLedger ledger;
     private final DiscrepancySettlement settlement;
-    private final ProductIdentifierRepository identifiers;
+    private final ProductOemCodeRepository oemCodes;
     private final ProductVehicleModelRepository vehicles;
     private final RetailPriceService retailPrices;
     private final PricingPolicyRepository pricingPolicies;
@@ -809,8 +808,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
 
     /**
      * The dented-goods variant of {@code original}, made the first time (BR GVHD 20/11): SKU "<SKU>-M" (MSG312 when
-     * another part has it), name "<name> (hàng lỗi)", the original's details, its OEM codes and vehicles, no barcode
-     * so that a scan never finds it instead of the original.
+     * another part has it), name "<name> (hàng lỗi)", the original's details, its OEM codes and vehicles.
      */
     private Product variantOf(Product original, long by, LocalDateTime now) {
         if (original.getVariantOfProductId() != null) {
@@ -825,9 +823,8 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG312", sku);
         }
         Product variant = products.saveAndFlush(Product.damagedVariantOf(original, by, now));
-        identifiers.saveAll(identifiers.findByProductIdIn(List.of(original.getId())).stream()
-                .filter(code -> code.getIdentifierType() == IdentifierType.OEM)
-                .map(code -> ProductIdentifier.of(variant.getId(), IdentifierType.OEM, code.getIdentifierValue()))
+        oemCodes.saveAll(oemCodes.findByProductIdIn(List.of(original.getId())).stream()
+                .map(code -> ProductOemCode.of(variant.getId(), code.getOemCode()))
                 .toList());
         vehicles.saveAll(vehicles.findByProductIdIn(List.of(original.getId())).stream()
                 .map(link -> ProductVehicleModel.of(variant.getId(), link.getVehicleModelId())).toList());

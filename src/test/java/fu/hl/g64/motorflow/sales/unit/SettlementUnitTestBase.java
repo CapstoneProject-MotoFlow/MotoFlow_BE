@@ -161,7 +161,7 @@ abstract class SettlementUnitTestBase {
         when(guide.parts(anyLong(), anyCollection(), any(), any())).thenAnswer(inv -> {
             Map<Long, PickingGuide.Part> found = new HashMap<>();
             inv.<Collection<Long>>getArgument(1).forEach(id -> found.put(id, new PickingGuide.Part(
-                    sellable.getOrDefault(id, 0), 0, null, null, List.of(), List.of(), List.of())));
+                    sellable.getOrDefault(id, 0), 0, null, null, List.of(), List.of())));
             return found;
         });
         when(pricing.discountThreshold(any())).thenAnswer(inv -> threshold);

@@ -4,8 +4,7 @@ import fu.hl.g64.motorflow.account.entity.UserAccount;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.Product;
-import fu.hl.g64.motorflow.catalog.entity.ProductIdentifier;
-import fu.hl.g64.motorflow.catalog.entity.enums.IdentifierType;
+import fu.hl.g64.motorflow.catalog.entity.ProductOemCode;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.service.PartCategoryService;
 import fu.hl.g64.motorflow.common.dto.PageResponse;
@@ -477,10 +476,8 @@ public class InventoryServiceImpl implements InventoryService {
                 byName.select(product.get("id")).where(cb.or(SearchText.like(cb, product.get("sku"), like),
                         SearchText.like(cb, product.get("partName"), like)));
                 Subquery<Long> byOemCode = query.subquery(Long.class);
-                var identifier = byOemCode.from(ProductIdentifier.class);
-                byOemCode.select(identifier.get("productId")).where(
-                        cb.equal(identifier.get("identifierType"), IdentifierType.OEM),
-                        SearchText.like(cb, identifier.get("identifierValue"), like));
+                var oemCode = byOemCode.from(ProductOemCode.class);
+                byOemCode.select(oemCode.get("productId")).where(SearchText.like(cb, oemCode.get("oemCode"), like));
                 where.add(cb.or(root.get("productId").in(byName), root.get("productId").in(byOemCode),
                         SearchText.like(cb, root.get("binLocation"), like)));
             }

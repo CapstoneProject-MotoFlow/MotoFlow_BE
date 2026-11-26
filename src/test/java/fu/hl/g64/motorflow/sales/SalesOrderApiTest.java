@@ -36,7 +36,6 @@ class SalesOrderApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.lines[0].actualUnitPrice").value(100_000))
                 .andExpect(jsonPath("$.lines[0].storageArea").value("Kệ A"))
                 .andExpect(jsonPath("$.lines[0].binLocation").value("A-01"))
-                .andExpect(jsonPath("$.lines[0].barcodes[0]").value("8930001"))
                 // 2 of the 10 units expired on 01/10 and cannot be sold (BR-76).
                 .andExpect(jsonPath("$.lines[0].sellableQty").value(8))
                 .andExpect(jsonPath("$.lines[0].stockShortQty").value(0))

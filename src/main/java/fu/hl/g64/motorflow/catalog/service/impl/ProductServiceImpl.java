@@ -1,6 +1,5 @@
 package fu.hl.g64.motorflow.catalog.service.impl;
 
-import fu.hl.g64.motorflow.catalog.dto.BarcodeLookupResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductRequest;
 import fu.hl.g64.motorflow.catalog.dto.ProductResponse;
 import fu.hl.g64.motorflow.catalog.dto.ProductSearch;
@@ -8,16 +7,15 @@ import fu.hl.g64.motorflow.catalog.dto.ProductSummaryResponse;
 import fu.hl.g64.motorflow.catalog.dto.VehicleModelResponse;
 import fu.hl.g64.motorflow.catalog.entity.PartCategory;
 import fu.hl.g64.motorflow.catalog.entity.Product;
-import fu.hl.g64.motorflow.catalog.entity.ProductIdentifier;
 import fu.hl.g64.motorflow.catalog.entity.ProductImage;
+import fu.hl.g64.motorflow.catalog.entity.ProductOemCode;
 import fu.hl.g64.motorflow.catalog.entity.ProductVehicleModel;
 import fu.hl.g64.motorflow.catalog.entity.VehicleModel;
-import fu.hl.g64.motorflow.catalog.entity.enums.IdentifierType;
 import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
 import fu.hl.g64.motorflow.catalog.entity.enums.VehicleModelStatus;
 import fu.hl.g64.motorflow.catalog.repository.PartCategoryRepository;
-import fu.hl.g64.motorflow.catalog.repository.ProductIdentifierRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductImageRepository;
+import fu.hl.g64.motorflow.catalog.repository.ProductOemCodeRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductVehicleModelRepository;
 import fu.hl.g64.motorflow.catalog.repository.VehicleModelRepository;
@@ -71,7 +69,7 @@ public class ProductServiceImpl implements ProductService {
     private final PartCategoryRepository categories;
     private final PartCategoryService categoryService;
     private final VehicleModelRepository vehicleModels;
-    private final ProductIdentifierRepository identifiers;
+    private final ProductOemCodeRepository oemCodes;
     private final ProductImageRepository images;
     private final ProductVehicleModelRepository compatibility;
     private final PricingPolicyRepository pricingPolicies;
@@ -94,10 +92,9 @@ public class ProductServiceImpl implements ProductService {
 
         Map<Long, String> categoryNames = categories.findAllById(found.map(Product::getCategoryId).toSet()).stream()
                 .collect(Collectors.toMap(PartCategory::getId, PartCategory::getCategoryName));
-        Map<Long, List<String>> oemCodes = identifiers.findByProductIdIn(ids).stream()
-                .filter(i -> i.getIdentifierType() == IdentifierType.OEM)
-                .collect(Collectors.groupingBy(ProductIdentifier::getProductId,
-                        Collectors.mapping(ProductIdentifier::getIdentifierValue, Collectors.toList())));
+        Map<Long, List<String>> oemCodesByProduct = oemCodes.findByProductIdIn(ids).stream()
+                .collect(Collectors.groupingBy(ProductOemCode::getProductId,
+                        Collectors.mapping(ProductOemCode::getOemCode, Collectors.toList())));
         Map<Long, Long> prices = retailPricesInEffect(ids);
         Map<Long, StockBalance> stock = store == null ? Map.of()
                 : stockBalances.findByStoreIdAndProductIdIn(store.getId(), ids).stream()
@@ -106,7 +103,7 @@ public class ProductServiceImpl implements ProductService {
         return PageResponse.of(found, found.getContent().stream().map(p -> {
             StockBalance balance = stock.get(p.getId());
             return new ProductSummaryResponse(p.getId(), p.getSku(), p.getPartName(), p.getBrand(), p.getBaseUnit(),
-                    p.getCategoryId(), categoryNames.get(p.getCategoryId()), oemCodes.getOrDefault(p.getId(), List.of()),
+                    p.getCategoryId(), categoryNames.get(p.getCategoryId()), oemCodesByProduct.getOrDefault(p.getId(), List.of()),
                     p.getStatus(), prices.get(p.getId()),
                     store == null ? null : balance == null ? 0 : balance.getAvailableQty(),
                     balance == null ? null : balance.getStorageArea(), balance == null ? null : balance.getBinLocation());
@@ -119,7 +116,7 @@ public class ProductServiceImpl implements ProductService {
         Product product = find(id);
         Store store = storeScope.viewableStore(user, storeId);
 
-        List<ProductIdentifier> codes = identifiers.findByProductIdIn(List.of(id));
+        List<ProductOemCode> codes = oemCodes.findByProductIdIn(List.of(id));
         List<String> imageUrls = images.findByProductIdIn(List.of(id)).stream()
                 .sorted(Comparator.comparingInt(ProductImage::getSortOrder)).map(ProductImage::getStorageKey).toList();
         List<VehicleModelResponse> models = vehicleModels.findAllById(compatibility.findByProductIdIn(List.of(id)).stream()
@@ -132,25 +129,9 @@ public class ProductServiceImpl implements ProductService {
         return new ProductResponse(product.getId(), product.getSku(), product.getPartName(), product.getCategoryId(),
                 categories.findById(product.getCategoryId()).map(PartCategory::getCategoryName).orElse(null),
                 product.getBrand(), product.getCountryOfOrigin(), product.getBaseUnit(), product.getSpecifications(),
-                product.getStatus(), product.getDiscontinuedAt(), values(codes, IdentifierType.OEM),
-                values(codes, IdentifierType.BARCODE), imageUrls, models, retailPricesInEffect(List.of(id)).get(id),
+                product.getStatus(), product.getDiscontinuedAt(), codes.stream().map(ProductOemCode::getOemCode).toList(),
+                imageUrls, models, retailPricesInEffect(List.of(id)).get(id),
                 stock, product.getCreatedAt(), product.getUpdatedAt());
-    }
-
-    @Transactional(readOnly = true)
-    @Override
-    public BarcodeLookupResponse findByBarcode(AuthenticatedUser user, String code, Long storeId) {
-        String barcode = code.strip();
-        ProductIdentifier match = identifiers.findByIdentifierTypeAndIdentifierValueIn(IdentifierType.BARCODE,
-                        List.of(barcode)).stream().findFirst()
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG91", barcode));
-        Product product = find(match.getProductId());
-        // Staff and Branch Managers scan at their own counter, so a requested store is ignored for them.
-        Store store = storeScope.viewableStore(user, user.storeId() == null ? storeId : null);
-        Integer available = store == null ? null : stockBalances.findByStoreIdAndProductId(store.getId(), product.getId())
-                .map(StockBalance::getAvailableQty).orElse(0);
-        return new BarcodeLookupResponse(product.getId(), product.getSku(), product.getPartName(), product.getBrand(),
-                product.getBaseUnit(), product.getStatus(), barcode, store == null ? null : store.getId(), available);
     }
 
     @Transactional
@@ -164,7 +145,7 @@ public class ProductServiceImpl implements ProductService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG53", sku);
         }
         categoryService.requireLeafForParts(request.categoryId());
-        requireUsableDetails(null, request, Set.of());
+        requireUsableDetails(request, Set.of());
 
         LocalDateTime now = LocalDateTime.now(clock);
         Product product = Product.create(sku, request.partName().strip(), request.categoryId(), request.brand().strip(),
@@ -190,7 +171,7 @@ public class ProductServiceImpl implements ProductService {
         }
         Set<Long> linkedModels = compatibility.findByProductIdIn(List.of(id)).stream()
                 .map(ProductVehicleModel::getVehicleModelId).collect(Collectors.toSet());
-        requireUsableDetails(id, request, linkedModels);
+        requireUsableDetails(request, linkedModels);
 
         LocalDateTime now = LocalDateTime.now(clock);
         product.update(request.partName().strip(), request.categoryId(), request.brand().strip(),
@@ -223,8 +204,8 @@ public class ProductServiceImpl implements ProductService {
             if (StringUtils.hasText(filter.q())) {
                 String like = SearchText.likePattern(filter.q());
                 Subquery<Long> byCode = query.subquery(Long.class);
-                Root<ProductIdentifier> identifier = byCode.from(ProductIdentifier.class);
-                byCode.select(identifier.get("productId")).where(SearchText.like(cb, identifier.get("identifierValue"), like));
+                Root<ProductOemCode> oemCode = byCode.from(ProductOemCode.class);
+                byCode.select(oemCode.get("productId")).where(SearchText.like(cb, oemCode.get("oemCode"), like));
                 where.add(cb.or(SearchText.like(cb, root.get("sku"), like), SearchText.like(cb, root.get("partName"), like),
                         root.get("id").in(byCode)));
             }
@@ -260,15 +241,8 @@ public class ProductServiceImpl implements ProductService {
         };
     }
 
-    /** Barcodes are unique across parts; vehicle models must be in use unless the part already had them. */
-    private void requireUsableDetails(Long productId, ProductRequest request, Set<Long> linkedModels) {
-        identifiers.findByIdentifierTypeAndIdentifierValueIn(IdentifierType.BARCODE, distinctStripped(request.barcodes()))
-                .stream()
-                .filter(other -> !other.getProductId().equals(productId))
-                .findFirst()
-                .ifPresent(other -> {
-                    throw new BusinessException(HttpStatus.CONFLICT, "MSG54", other.getIdentifierValue());
-                });
+    /** Vehicle models must be in use unless the part already had them. */
+    private void requireUsableDetails(ProductRequest request, Set<Long> linkedModels) {
         Map<Long, VehicleModel> models = vehicleModels.findAllById(request.vehicleModelIds()).stream()
                 .collect(Collectors.toMap(VehicleModel::getId, Function.identity()));
         for (Long modelId : request.vehicleModelIds()) {
@@ -280,14 +254,12 @@ public class ProductServiceImpl implements ProductService {
     }
 
     private void replaceDetails(long productId, ProductRequest request, AuthenticatedUser actor, LocalDateTime now) {
-        identifiers.deleteByProductId(productId);
+        oemCodes.deleteByProductId(productId);
         compatibility.deleteByProductId(productId);
         images.deleteByProductId(productId);
 
-        List<ProductIdentifier> codes = new ArrayList<>();
-        distinctStripped(request.oemCodes()).forEach(code -> codes.add(ProductIdentifier.of(productId, IdentifierType.OEM, code)));
-        distinctStripped(request.barcodes()).forEach(code -> codes.add(ProductIdentifier.of(productId, IdentifierType.BARCODE, code)));
-        identifiers.saveAll(codes);
+        oemCodes.saveAll(distinctStripped(request.oemCodes()).stream()
+                .map(code -> ProductOemCode.of(productId, code)).toList());
         compatibility.saveAll(request.vehicleModelIds().stream().distinct()
                 .map(modelId -> ProductVehicleModel.of(productId, modelId)).toList());
         List<String> urls = request.imageUrls().stream().map(String::strip).distinct().toList();
@@ -316,10 +288,6 @@ public class ProductServiceImpl implements ProductService {
      */
     private Product lock(long id) {
         return products.findByIdForUpdate(id).orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57"));
-    }
-
-    private static List<String> values(List<ProductIdentifier> codes, IdentifierType type) {
-        return codes.stream().filter(c -> c.getIdentifierType() == type).map(ProductIdentifier::getIdentifierValue).toList();
     }
 
     private static List<String> distinctStripped(List<String> values) {

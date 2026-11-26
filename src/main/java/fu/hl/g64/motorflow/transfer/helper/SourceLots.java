@@ -64,6 +64,6 @@ public final class SourceLots {
             }
         }
         return new PickingGuide.Part(available.sellableQty() - taken, available.heldByOthersQty(),
-                available.storageArea(), available.binLocation(), available.barcodes(), available.lotsInOrder(), left);
+                available.storageArea(), available.binLocation(), available.lotsInOrder(), left);
     }
 }

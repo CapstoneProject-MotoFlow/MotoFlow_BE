@@ -90,7 +90,7 @@ src/main/java/fu/hl/g64/motorflow/
 ├── account/             UC-08 tạo tài khoản, UC-11 cấp lại mật khẩu, quyền
 ├── home/                Trang chủ sau đăng nhập (SCR-03): thông báo chưa đọc, việc đang chờ theo vai trò
 ├── store/               Store (mỗi cửa hàng là một kho, có cờ kho tổng), UC-05 sao chép cấu hình cửa hàng
-├── catalog/             PartCategory, VehicleModel, Product, ProductIdentifier, ProductImage, ProductVehicleModel
+├── catalog/             PartCategory, VehicleModel, Product, ProductOemCode, ProductImage, ProductVehicleModel
 ├── pricing/             PricingPolicy; UC-34..36 bảng giá, sửa giá, lịch sử giá, UC-38 ngưỡng chiết khấu và biên lợi nhuận, UC-101 quy tắc giá gợi ý (BR-69)
 ├── partner/             Customer, Supplier; UC-26..29 khách hàng, UC-30..33 nhà cung cấp
 ├── sales/               SalesOrder, SalesOrderLine; UC-52 danh sách đơn bán, UC-53 lập đơn, UC-54 chi tiết đơn, UC-55 sửa đơn
