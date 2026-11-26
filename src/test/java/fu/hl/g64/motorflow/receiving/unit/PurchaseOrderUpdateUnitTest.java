@@ -51,7 +51,7 @@ class PurchaseOrderUpdateUnitTest extends PurchaseOrderUnitTestBase {
         org.mockito.Mockito.doAnswer(inv -> {
             savedLines.removeAll((List<PurchaseOrderLine>) inv.getArgument(0));
             return null;
-        }).when(orderLines).deleteAll(any());
+        }).when(orderLines).deleteAllInBatch(any());
     }
 
     private static PurchaseOrderUpdateRequest request(LocalDate arrival, String note, PurchaseOrderLineRequest... lines) {

@@ -94,7 +94,7 @@ class StockCountConfirmUnitTest extends StockCountUnitTestBase {
     private void assertNotConfirmed() {
         assertThat(count.getStatus()).isNotIn(StockCountStatus.COMPLETED, StockCountStatus.AWAITING_APPROVAL);
         verify(warehouseTasks, never()).confirmResult(any(), any(), anyLong());
-        verify(lines, never()).deleteAll(any());
+        verify(lines, never()).deleteAllInBatch(any());
         verify(notifications, never()).notifyOwners(anyString(), anyString(), anyString(), anyLong());
     }
 
@@ -136,7 +136,7 @@ class StockCountConfirmUnitTest extends StockCountUnitTestBase {
         StockCountLine l3 = l3();
         service.confirm(bmStore2, 1, body(List.of(3L), List.of()));
         assertThat(count.getStatus()).isEqualTo(StockCountStatus.COMPLETED);
-        verify(lines).deleteAll(List.of(l3));
+        verify(lines).deleteAllInBatch(List.of(l3));
     }
 
     @Test
@@ -255,7 +255,7 @@ class StockCountConfirmUnitTest extends StockCountUnitTestBase {
         assertBusiness(() -> service.confirm(bmStore2, 1, body(List.of(3L), List.of())), HttpStatus.CONFLICT,
                 "MSG243");
         verify(warehouseTasks, never()).confirmResult(any(), any(), anyLong());
-        verify(lines, never()).deleteAll(any());
+        verify(lines, never()).deleteAllInBatch(any());
     }
 
     @Test

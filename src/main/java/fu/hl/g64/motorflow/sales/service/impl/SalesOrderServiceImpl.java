@@ -686,7 +686,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 existing.clearDelivery();
             }
         }
-        orderLines.deleteAll(removed);
+        if (!removed.isEmpty()) {
+            orderLines.deleteAllInBatch(removed);
+        }
         orderLines.saveAll(added);
         orderLines.flush();
 
@@ -1020,7 +1022,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 == line.getRequestedQty()).toList();
         taken.stream().filter(line -> !gone.contains(line))
                 .forEach(line -> line.keepWaiting(line.getRequestedQty() - released.get(line.getId())));
-        orderLines.deleteAll(gone);
+        if (!gone.isEmpty()) {
+            orderLines.deleteAllInBatch(gone);
+        }
         orderLines.flush();
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(), null,
                 previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,

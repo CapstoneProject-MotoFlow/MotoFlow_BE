@@ -386,7 +386,9 @@ public class PurchaseOrderServiceImpl implements PurchaseOrderService {
 
         LocalDateTime now = LocalDateTime.now(clock);
         String reason = request.reason().strip();
-        orderLines.deleteAll(removed);
+        if (!removed.isEmpty()) {
+            orderLines.deleteAllInBatch(removed);
+        }
         orderLines.saveAll(added);
         order.changeDelivery(request.expectedArrival(), note, now);
         auditLog.save(AuditLog.record(PurchaseOrderHistory.ENTITY, id, PurchaseOrderHistory.UPDATED, owner.id(),
