@@ -12,7 +12,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -166,8 +169,19 @@ class SalesDepositApiTest extends SalesOrderTestData {
                         "Đơn đã quá hạn cọc (14/10/2026) nên không thu thêm cọc, sửa hạn hay chuyển sang soạn được."));
         deposit(managerToken, order, 100_000, "CASH", null, true, null, 1_000_000)
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG321"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM sales_deposit_expiry_change WHERE sales_order_id = ?",
-                Long.class, order)).isEqualTo(2);
+        // Plan 25/11: the changes live in audit_log, the dates as yyyy-MM-dd.
+        assertThat(jdbc.queryForList("SELECT old_data ->> 'deposit_expires_on' || ' ' || (new_data ->> "
+                + "'deposit_expires_on') FROM audit_log WHERE entity_type = 'SALES_ORDER' AND entity_id = ? "
+                + "AND action = 'SALES_ORDER_DEPOSIT_EXPIRY_CHANGED' ORDER BY id", String.class, order))
+                .containsExactly("2026-10-15 2026-10-18", "2026-10-18 2026-10-14");
+        // They are not steps of the sales order document.
+        mvc.perform(post("/api/v1/sales-orders/" + order + "/cancel").header(HttpHeaders.AUTHORIZATION, managerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(Map.of("reason", "Hết hạn cọc"))))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/documents/SALES_ORDER/" + order).header(HttpHeaders.AUTHORIZATION, managerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.history[*].action", hasItem("SALES_ORDER_CANCELLED")))
+                .andExpect(jsonPath("$.history[*].action", not(hasItem("SALES_ORDER_DEPOSIT_EXPIRY_CHANGED"))));
     }
 
     @Test

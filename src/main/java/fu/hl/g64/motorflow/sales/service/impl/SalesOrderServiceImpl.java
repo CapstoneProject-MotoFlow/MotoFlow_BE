@@ -1479,7 +1479,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         people.add(order.getCancelledBy());
         people.add(order.getDepositForfeitedBy());
         if (deposit != null) {
-            deposit.changes().forEach(change -> people.add(change.getChangedBy()));
+            deposit.changes().forEach(change -> people.add(change.changedBy()));
         }
         if (collected != null) {
             collected.rows().forEach(row -> {
@@ -1588,8 +1588,8 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             return null;
         }
         List<SalesOrderDetail.ExpiryChange> changes = state.changes().stream()
-                .map(change -> new SalesOrderDetail.ExpiryChange(change.getOldDate(), change.getNewDate(),
-                        change.getChangedBy(), names.get(change.getChangedBy()), change.getChangedAt()))
+                .map(change -> new SalesOrderDetail.ExpiryChange(change.oldDate(), change.newDate(),
+                        change.changedBy(), names.get(change.changedBy()), change.changedAt()))
                 .toList();
         return new SalesOrderDetail.Deposit(state.total(), state.unverified(), state.applied(), state.refunded(),
                 state.remaining(), state.expiresOn(), state.status(), order.getDepositForfeitedAmount(),

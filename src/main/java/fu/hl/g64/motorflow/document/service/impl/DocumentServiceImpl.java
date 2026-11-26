@@ -32,6 +32,7 @@ import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.receiving.service.GoodsReceiptService;
+import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.service.TransferOrderService;
@@ -238,7 +239,8 @@ public class DocumentServiceImpl implements DocumentService {
                  WHERE r.sales_order_id = :id ORDER BY p.id""", id)
                 .forEach(payment -> related.add(link("PAYMENT", payment, str(payment, "payment_type"))));
         return new DocumentDetail(row, salesOrders.get(user, row.id()), List.of(), related,
-                adjustments("sales_order_id", row.id()), history("SALES_ORDER", row.id()));
+                adjustments("sales_order_id", row.id()), history("SALES_ORDER", row.id(),
+                        List.of(SalesOrderHistory.DEPOSIT_EXPIRY_CHANGED)));
     }
 
     private DocumentDetail receiptDetail(AuthenticatedUser user, DocumentRow row) {
@@ -375,7 +377,12 @@ public class DocumentServiceImpl implements DocumentService {
     }
 
     private List<HistoryEntry> history(String entityType, long id) {
-        return documents.history(entityType, id, List.of()).stream().map(DocumentServiceImpl::historyEntry).toList();
+        return history(entityType, id, List.of());
+    }
+
+    /** As above without {@code skipped}: steps kept in audit_log that are no event of the document itself. */
+    private List<HistoryEntry> history(String entityType, long id, List<String> skipped) {
+        return documents.history(entityType, id, skipped).stream().map(DocumentServiceImpl::historyEntry).toList();
     }
 
     private static HistoryEntry historyEntry(Map<String, Object> entry) {

@@ -28,6 +28,12 @@ public final class SalesOrderHistory {
     public static final String CANCELLED = "SALES_ORDER_CANCELLED";
     /** GVHD 24/11: the expected ready date of a waiting order changed; not a version, not in the history list. */
     public static final String EXPECTED_READY_DATE_CHANGED = "SALES_ORDER_EXPECTED_DATE_CHANGED";
+    /**
+     * PM 21/11 (BE-4): the deposit's expiry date changed, {"deposit_expires_on": "yyyy-MM-dd"} before and after; not
+     * a version, not in the history list.
+     */
+    public static final String DEPOSIT_EXPIRY_CHANGED = "SALES_ORDER_DEPOSIT_EXPIRY_CHANGED";
+    public static final String DEPOSIT_EXPIRES_ON = "deposit_expires_on";
     public static final List<String> ACTIONS = List.of(CREATED, VERSIONED, PICKED, CONFIRMED, PAYMENT_REJECTED,
             COMPLETED, CANCELLED);
     public static final List<String> VERSION_ACTIONS = List.of(CREATED, VERSIONED);

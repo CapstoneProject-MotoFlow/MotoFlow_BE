@@ -1,19 +1,21 @@
 package fu.hl.g64.motorflow.sales.helper;
 
+import fu.hl.g64.motorflow.common.audit.AuditLog;
+import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
-import fu.hl.g64.motorflow.sales.entity.SalesDepositExpiryChange;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * PM 21/11: the deposit of a waiting order. The deposit is DEPOSIT payments on the waiting order itself; releases take
@@ -26,7 +28,7 @@ import java.util.List;
 public class OrderDeposits {
 
     private final SalesOrderRepository orders;
-    private final SalesDepositExpiryChangeRepository expiryChanges;
+    private final AuditLogRepository auditLog;
     private final Clock clock;
 
     /** The deposit of {@code order}, read from the money it holds. */
@@ -52,8 +54,7 @@ public class OrderDeposits {
         long remaining = forfeited ? 0 : Math.max(0, total - applied - refunded);
         LocalDate expiresOn = order.getDepositExpiresOn();
         DepositStatus status = status(forfeited, total, remaining, expiresOn, LocalDate.now(clock));
-        List<SalesDepositExpiryChange> changes = expiresOn == null ? List.of()
-                : expiryChanges.findBySalesOrderIdOrderByChangedAtAscIdAsc(order.getId());
+        List<ExpiryChange> changes = expiresOn == null ? List.of() : expiryChanges(order.getId());
         return new State(total, unverified, applied, refunded, remaining, expiresOn, status, changes);
     }
 
@@ -86,13 +87,31 @@ public class OrderDeposits {
         return order.getDepositExpiresOn() != null && LocalDate.now(clock).isAfter(order.getDepositExpiresOn());
     }
 
+    /** The expiry date changes of the order, oldest first, as audit_log keeps them. */
+    private List<ExpiryChange> expiryChanges(long orderId) {
+        return auditLog.findByEntityTypeAndEntityIdAndActionInOrderByOccurredAtDescIdDesc(SalesOrderHistory.ENTITY,
+                        orderId, List.of(SalesOrderHistory.DEPOSIT_EXPIRY_CHANGED)).reversed().stream()
+                .map(step -> new ExpiryChange(date(step.getOldData()), date(step.getNewData()), step.getActorId(),
+                        step.getOccurredAt()))
+                .toList();
+    }
+
+    private static LocalDate date(Map<String, Object> data) {
+        Object value = data == null ? null : data.get(SalesOrderHistory.DEPOSIT_EXPIRES_ON);
+        return value == null ? null : LocalDate.parse(value.toString());
+    }
+
+    /** One change of the deposit's expiry date, by {@code changedBy} at {@code changedAt}. */
+    public record ExpiryChange(LocalDate oldDate, LocalDate newDate, Long changedBy, LocalDateTime changedAt) {
+    }
+
     /**
      * {@code total} and {@code unverified}: verified and still unverified DEPOSIT payments; {@code applied} what
      * releases took into their orders; {@code refunded} what went back to the customer; {@code remaining} what the
      * waiting order still holds.
      */
     public record State(long total, long unverified, long applied, long refunded, long remaining,
-                        LocalDate expiresOn, DepositStatus status, List<SalesDepositExpiryChange> changes) {
+                        LocalDate expiresOn, DepositStatus status, List<ExpiryChange> changes) {
 
         /** What the seller has recorded so far, verified or not: the request echoes it back (BR-45, MSG194). */
         public long recorded() {

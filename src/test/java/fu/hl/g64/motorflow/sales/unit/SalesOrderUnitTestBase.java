@@ -24,7 +24,6 @@ import fu.hl.g64.motorflow.sales.helper.OrderCollections;
 import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.impl.SalesOrderServiceImpl;
@@ -97,7 +96,6 @@ abstract class SalesOrderUnitTestBase {
     @Mock AttachmentService attachments;
     @Mock PaymentRepository payments;
     @Mock PlatformTransactionManager transactionManager;
-    @Mock SalesDepositExpiryChangeRepository depositExpiry;
     @Mock WaitingOrderReadiness readiness;
 
     SalesOrderServiceImpl service;
@@ -119,7 +117,7 @@ abstract class SalesOrderUnitTestBase {
 
     @BeforeEach
     void baseData() {
-        OrderDeposits deposits = new OrderDeposits(orders, depositExpiry, CLOCK);
+        OrderDeposits deposits = new OrderDeposits(orders, auditLog, CLOCK);
         service = new SalesOrderServiceImpl(orders, orderLines, products, customers, stores, users, auditLog, tasks,
                 warehouseTasks, notifications, pricing, guide, balances, collections, receivables, attachments,
                 deposits, new TransactionReferences(payments, transactionManager), readiness, CLOCK);

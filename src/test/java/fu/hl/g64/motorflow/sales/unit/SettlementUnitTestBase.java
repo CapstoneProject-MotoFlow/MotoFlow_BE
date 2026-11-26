@@ -31,7 +31,6 @@ import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -103,7 +102,6 @@ abstract class SettlementUnitTestBase {
     @Mock TransactionTemplate transactions;
     @Mock MessageSource messages;
     @Mock PlatformTransactionManager transactionManager;
-    @Mock SalesDepositExpiryChangeRepository depositExpiry;
     @Mock WaitingOrderReadiness readiness;
 
     SalesOrderSettlementServiceImpl service;
@@ -125,7 +123,7 @@ abstract class SettlementUnitTestBase {
     @BeforeEach
     void baseData() {
         collections = new OrderCollections(payments, orders);
-        OrderDeposits deposits = new OrderDeposits(orders, depositExpiry, CLOCK);
+        OrderDeposits deposits = new OrderDeposits(orders, auditLog, CLOCK);
         service = new SalesOrderSettlementServiceImpl(orders, orderLines, products, customers, payments,
                 new TransactionReferences(payments, transactionManager), receivables, auditLog, tasks,
                 warehouseTasks, notifications, attachments, inventory, collections, deposits, pricing, guide,
