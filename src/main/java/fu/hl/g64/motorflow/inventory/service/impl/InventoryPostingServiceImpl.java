@@ -384,9 +384,12 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         List<StoreProduct> ordered = keys.stream().distinct()
                 .sorted(Comparator.comparingLong(StoreProduct::storeId).thenComparingLong(StoreProduct::productId))
                 .toList();
-        for (StoreProduct key : ordered) {
-            stockBalances.insertIfMissing(key.storeId(), key.productId(), now);
+        if (ordered.isEmpty()) {
+            return Map.of();
         }
+        Long[] storeIds = ordered.stream().map(StoreProduct::storeId).toArray(Long[]::new);
+        Long[] productIds = ordered.stream().map(StoreProduct::productId).toArray(Long[]::new);
+        stockBalances.insertIfMissingBatch(storeIds, productIds, now);
         Map<Long, List<Long>> byStore = ordered.stream().collect(Collectors.groupingBy(StoreProduct::storeId,
                 LinkedHashMap::new, Collectors.mapping(StoreProduct::productId, Collectors.toList())));
         Map<StoreProduct, StockBalance> locked = new HashMap<>();
