@@ -31,6 +31,7 @@
         <jjwt.version>0.13.0</jjwt.version>
         <embedded-postgres.version>2.2.2</embedded-postgres.version>
         <embedded-postgres-binaries.version>19.0.0</embedded-postgres-binaries.version>
+        <datasource-proxy.version>1.11.1</datasource-proxy.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -127,6 +128,12 @@
             <groupId>io.zonky.test</groupId>
             <artifactId>embedded-postgres</artifactId>
             <version>${embedded-postgres.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.ttddyy</groupId>
+            <artifactId>datasource-proxy</artifactId>
+            <version>${datasource-proxy.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

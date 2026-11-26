@@ -5,23 +5,46 @@ import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 
 /**
- * Counts the SQL statements Hibernate prepares (repositories and JPQL; not JdbcTemplate), so a test can show that a
- * list or a detail runs the same number of queries for 1 row as for 5: no N+1.
+ * Counts the SQL statements Hibernate prepares ({@link #prepared()}) and the statements actually executed on JDBC
+ * ({@link #executed()}, including {@code JdbcTemplate} / {@code NamedParameterJdbcTemplate}), so tests can guard
+ * against N+1 regressions and measure query budgets.
  */
 public class QueryCounter {
 
-    private final Statistics statistics;
+    public enum Kind {
+        SELECT, INSERT, UPDATE, DELETE, OTHER
+    }
 
-    public QueryCounter(EntityManagerFactory entityManagerFactory) {
+    private final Statistics statistics;
+    private final SqlCountingDataSource dataSource;
+
+    public QueryCounter(EntityManagerFactory entityManagerFactory, SqlCountingDataSource dataSource) {
         this.statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        this.dataSource = dataSource;
     }
 
     public void reset() {
         statistics.clear();
+        dataSource.reset();
     }
 
-    /** Statements prepared since the last {@link #reset()}. */
+    /** Statements prepared by Hibernate since the last {@link #reset()}. */
     public long prepared() {
         return statistics.getPrepareStatementCount();
+    }
+
+    /** Statements actually executed on JDBC since the last {@link #reset()}. */
+    public long executed() {
+        return dataSource.executed();
+    }
+
+    /** Executed statements of a given kind since the last {@link #reset()}. */
+    public long executed(Kind kind) {
+        return dataSource.executed(kind);
+    }
+
+    /** Compact breakdown of executed statements since the last {@link #reset()}. */
+    public String summary() {
+        return dataSource.summary();
     }
 }

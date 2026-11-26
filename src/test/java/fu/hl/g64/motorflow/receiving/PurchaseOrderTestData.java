@@ -26,7 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Two warehouses with their users, three suppliers and five parts, shared by the purchase order API tests. The clock
  * starts on 13/10/2026 at 08:00 Vietnam time.
  */
-abstract class PurchaseOrderTestData extends ApiTestUsers {
+public abstract class PurchaseOrderTestData extends ApiTestUsers {
 
     protected static final LocalDate TODAY = LocalDate.of(2026, 10, 13);
 
@@ -67,7 +67,7 @@ abstract class PurchaseOrderTestData extends ApiTestUsers {
     protected long discontinued;
 
     @BeforeEach
-    void createPurchaseOrderData() throws Exception {
+    protected void createPurchaseOrderData() throws Exception {
         resetDatabaseAndClock();
         giaLam = createStore("Gia Lâm");
         longBien = createStore("Long Biên");

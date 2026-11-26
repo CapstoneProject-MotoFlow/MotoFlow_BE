@@ -90,7 +90,7 @@ public abstract class StockCountTestData extends ApiTestUsers {
     private long openingCount;
 
     @BeforeEach
-    void createStockCountData() throws Exception {
+    protected void createStockCountData() throws Exception {
         resetDatabaseAndClock();
         store = createStore("Gia Lâm");
         otherStore = createStore("Long Biên");
