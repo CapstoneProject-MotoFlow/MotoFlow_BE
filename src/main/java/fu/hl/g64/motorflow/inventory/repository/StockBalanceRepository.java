@@ -89,6 +89,13 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
             from StockBalance b where b.productId = :productId""")
     long sumValuedQuantity(Long productId);
 
+    /** Chain-wide valued quantity per part id, for batch average recalculation. */
+    @Query("""
+            select b.productId, coalesce(sum(b.availableQty + b.awaitingInspectionQty + b.inTransitQty), 0)
+            from StockBalance b where b.productId in :productIds
+            group by b.productId""")
+    List<Object[]> sumValuedQuantityByProductIdIn(Collection<Long> productIds);
+
     Optional<StockBalance> findByStoreIdAndProductId(Long storeId, Long productId);
 
     /** UC-47: the storage areas in use in one warehouse, or in every warehouse when {@code storeId} is null. */

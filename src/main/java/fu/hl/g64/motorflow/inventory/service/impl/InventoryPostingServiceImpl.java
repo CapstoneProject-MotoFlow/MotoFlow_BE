@@ -87,52 +87,104 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
     public Lot receiveNewLot(NewLotPosting p) {
-        LocalDateTime now = LocalDateTime.now(clock);
-        PostingTime when = postingTime(p.movementType(), p.periodId(), p.occurredAt(), now);
-        InventoryPeriod period = when.period();
-        // Lock order everywhere: stock_balance, then product, then lot_balance.
-        StockBalance balance = lockBalance(p.storeId(), p.productId(), now);
-        Product product = fresh(products.findByIdForUpdate(p.productId())
-                .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
+        return receiveNewLotsAll(List.of(p)).getFirst();
+    }
 
-        int available = p.quantities().getOrDefault(StockStatus.AVAILABLE, 0);
-        // A count surplus comes in at the average (BR-74), so it leaves the average alone.
-        boolean surplus = p.sourceType() == LotSourceType.COUNT_SURPLUS;
-        if (!surplus) {
-            product.receiveIntoAverage(stockBalances.sumValuedQuantity(p.productId()), available,
-                    p.purchaseUnitPrice());
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public List<Lot> receiveNewLotsAll(List<NewLotPosting> postings) {
+        if (postings.isEmpty()) {
+            return List.of();
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        List<PostingTime> times = resolvePostingTimes(postings, now);
+        // Lock order everywhere: stock_balance, then product, then lot_balance.
+        Map<StoreProduct, StockBalance> balances = lockBalances(postings.stream()
+                .map(p -> new StoreProduct(p.storeId(), p.productId())).toList(), now);
+
+        List<Long> productIds = postings.stream().map(NewLotPosting::productId).distinct().sorted().toList();
+        Map<Long, Product> lockedProducts = products.findAllByIdForUpdate(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        if (lockedProducts.size() != productIds.size()) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
+        }
+        em.flush();
+        for (Long productId : productIds) {
+            em.refresh(lockedProducts.get(productId));
         }
 
-        boolean counted = p.sourceType() == LotSourceType.OPENING || p.sourceType() == LotSourceType.COUNT_SURPLUS;
-        Long stockCountId = counted ? p.source().id() : null;
-        Lot lot = lots.save(Lot.create(p.productId(), p.sourceType(), p.goodsReceiptNoteLineId(), stockCountId,
-                p.supplierId(), p.storeId(), p.receivedDate(), p.purchaseUnitPrice(), p.manufacturerLotNo(),
-                p.manufactureDate(), p.expiryDate()));
+        List<Long> avgProductIds = postings.stream()
+                .filter(p -> p.sourceType() != LotSourceType.COUNT_SURPLUS)
+                .map(NewLotPosting::productId)
+                .distinct()
+                .toList();
+        Map<Long, Long> valuedQtyByProduct = new HashMap<>();
+        if (!avgProductIds.isEmpty()) {
+            for (Object[] row : stockBalances.sumValuedQuantityByProductIdIn(avgProductIds)) {
+                valuedQtyByProduct.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+            }
+        }
 
-        BigDecimal unitCost = surplus && product.getMovingAvgCost() != null ? product.getMovingAvgCost()
-                : BigDecimal.valueOf(p.purchaseUnitPrice());
         Set<Long> checkedStores = new HashSet<>();
         Map<LotKey, LotBalance> locked = new HashMap<>();
-        boolean anyPositive = false;
-        for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
-            if (e.getValue() == null || e.getValue() == 0) {
-                continue;
+        List<Lot> created = new ArrayList<>(postings.size());
+        List<Lot> depleted = new ArrayList<>();
+        for (int i = 0; i < postings.size(); i++) {
+            NewLotPosting p = postings.get(i);
+            PostingTime when = times.get(i);
+            StockBalance balance = balances.get(new StoreProduct(p.storeId(), p.productId()));
+            Product product = lockedProducts.get(p.productId());
+
+            int available = p.quantities().getOrDefault(StockStatus.AVAILABLE, 0);
+            // A count surplus comes in at the average (BR-74), so it leaves the average alone.
+            boolean surplus = p.sourceType() == LotSourceType.COUNT_SURPLUS;
+            if (!surplus) {
+                product.receiveIntoAverage(valuedQtyByProduct.getOrDefault(p.productId(), 0L), available,
+                        p.purchaseUnitPrice());
             }
-            if (e.getValue() < 0) {
-                throw new IllegalArgumentException("received quantity must be positive");
+
+            boolean counted = p.sourceType() == LotSourceType.OPENING || p.sourceType() == LotSourceType.COUNT_SURPLUS;
+            Long stockCountId = counted ? p.source().id() : null;
+            Lot lot = lots.save(Lot.create(p.productId(), p.sourceType(), p.goodsReceiptNoteLineId(), stockCountId,
+                    p.supplierId(), p.storeId(), p.receivedDate(), p.purchaseUnitPrice(), p.manufacturerLotNo(),
+                    p.manufactureDate(), p.expiryDate()));
+
+            BigDecimal unitCost = surplus && product.getMovingAvgCost() != null ? product.getMovingAvgCost()
+                    : BigDecimal.valueOf(p.purchaseUnitPrice());
+            boolean anyPositive = false;
+            for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
+                if (e.getValue() == null || e.getValue() == 0) {
+                    continue;
+                }
+                if (e.getValue() < 0) {
+                    throw new IllegalArgumentException("received quantity must be positive");
+                }
+                LotKey key = new LotKey(lot.getId(), p.storeId(), e.getKey());
+                LotBalance lb = LotBalance.create(lot.getId(), p.storeId(), e.getKey(), now);
+                locked.put(key, lb);
+                post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
+                        p.performedBy(), when.period(), now, when.at(), checkedStores, locked);
+                lotBalances.save(lb);
+                anyPositive = true;
             }
-            LotKey key = new LotKey(lot.getId(), p.storeId(), e.getKey());
-            LotBalance lb = LotBalance.create(lot.getId(), p.storeId(), e.getKey(), now);
-            locked.put(key, lb);
-            post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
-                    p.performedBy(), period, now, when.at(), checkedStores, locked);
-            lotBalances.save(lb);
-            anyPositive = true;
+            if (!anyPositive) {
+                depleted.add(lot);
+            }
+            long addedValued = (long) available
+                    + p.quantities().getOrDefault(StockStatus.AWAITING_INSPECTION, 0)
+                    + p.quantities().getOrDefault(StockStatus.IN_TRANSIT, 0);
+            if (addedValued != 0) {
+                valuedQtyByProduct.merge(p.productId(), addedValued, Long::sum);
+            }
+            created.add(lot);
         }
-        if (!anyPositive) {
-            refreshDepletion(lot);
+        if (!depleted.isEmpty()) {
+            lotBalances.flush();
+            for (Lot lot : depleted) {
+                lot.refreshDepletion(0);
+            }
         }
-        return lot;
+        return created;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -579,6 +631,23 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private record PostingTime(InventoryPeriod period, LocalDateTime at) {
     }
 
+    private List<PostingTime> resolvePostingTimes(List<NewLotPosting> postings, LocalDateTime now) {
+        InventoryPeriod defaultPeriod = null;
+        Map<Long, InventoryPeriod> periodCache = new HashMap<>();
+        List<PostingTime> times = new ArrayList<>(postings.size());
+        for (NewLotPosting p : postings) {
+            if (p.periodId() == null && p.occurredAt() == null) {
+                if (defaultPeriod == null) {
+                    defaultPeriod = inventoryPeriods.openFor(now.toLocalDate());
+                }
+                times.add(new PostingTime(defaultPeriod, now));
+            } else {
+                times.add(postingTime(p.movementType(), p.periodId(), p.occurredAt(), now, periodCache));
+            }
+        }
+        return times;
+    }
+
     /**
      * The current month's open period and now, unless a count adjustment names its own period and time (BR-83): that
      * period must be OPEN (MSG85). Anything else naming a period, or only one of the two, is a programming error.
@@ -587,14 +656,29 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         if (periodId == null && occurredAt == null) {
             return new PostingTime(inventoryPeriods.openFor(now.toLocalDate()), now);
         }
+        return postingTime(type, periodId, occurredAt, now, null);
+    }
+
+    private PostingTime postingTime(MovementType type, Long periodId, LocalDateTime occurredAt, LocalDateTime now,
+                                    Map<Long, InventoryPeriod> periodCache) {
         if (type != MovementType.COUNT_ADJUSTMENT && type != MovementType.OPENING_BALANCE) {
             throw new IllegalArgumentException("only a count adjustment or opening balance names its period and time");
         }
         if (periodId == null || occurredAt == null) {
             throw new IllegalArgumentException("periodId and occurredAt go together");
         }
-        InventoryPeriod period = periods.findForPostingById(periodId)
-                .orElseThrow(() -> new IllegalArgumentException("unknown period " + periodId));
+        InventoryPeriod period;
+        if (periodCache != null) {
+            period = periodCache.get(periodId);
+            if (period == null) {
+                period = periods.findForPostingById(periodId)
+                        .orElseThrow(() -> new IllegalArgumentException("unknown period " + periodId));
+                periodCache.put(periodId, period);
+            }
+        } else {
+            period = periods.findForPostingById(periodId)
+                    .orElseThrow(() -> new IllegalArgumentException("unknown period " + periodId));
+        }
         if (!period.isOpen()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
                     period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));

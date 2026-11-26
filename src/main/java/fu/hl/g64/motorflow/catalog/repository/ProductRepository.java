@@ -27,4 +27,9 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Product p where p.id = :id")
     Optional<Product> findByIdForUpdate(Long id);
+
+    /** Locks all listed parts in ascending id order so batch receipts never deadlock. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Product p where p.id in :ids order by p.id asc")
+    List<Product> findAllByIdForUpdate(Collection<Long> ids);
 }
