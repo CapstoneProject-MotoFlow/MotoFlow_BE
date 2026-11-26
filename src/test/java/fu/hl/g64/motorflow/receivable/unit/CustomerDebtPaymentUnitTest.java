@@ -101,7 +101,7 @@ class CustomerDebtPaymentUnitTest {
                 NOW.minusMonths(2)), 100);
         credit = withId(Receivable.creditSale(20, 2, 60, 200_000, NOW.toLocalDate().plusDays(20), 5,
                 NOW.minusDays(10)), 101);
-        when(receivables.findWithRemaining(20L, 2L)).thenAnswer(inv -> List.of(new Object[]{credit, owed101},
+        when(receivables.findOwedWithRemaining(20L, 2L)).thenAnswer(inv -> List.of(new Object[]{credit, owed101},
                 new Object[]{opening, owed100}));
         when(payments.findByTransactionReference(anyString())).thenReturn(List.of());
         when(payments.saveAndFlush(any())).thenAnswer(inv -> withId(inv.getArgument(0, Payment.class), 900));

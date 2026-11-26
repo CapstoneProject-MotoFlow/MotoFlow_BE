@@ -58,6 +58,12 @@ public class DebtLedger {
         return inSettlementOrder(debts(receivables.findWithRemaining(customerId, storeId)));
     }
 
+    /** What the customer still owes, at one store or every store, in settlement order (BR-70). */
+    public List<Debt> owedOf(long customerId, Long storeId) {
+        return inSettlementOrder(debts(receivables.findOwedWithRemaining(customerId, storeId))).stream()
+                .filter(debt -> debt.remaining() > 0).toList();
+    }
+
     /**
      * Receivables still owed at one store, or at every store when {@code storeId} is null. Not in settlement order: the
      * debtor list only adds them up per customer, so it does not load their orders.

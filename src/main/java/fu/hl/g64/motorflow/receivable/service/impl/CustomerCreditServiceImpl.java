@@ -86,7 +86,7 @@ public class CustomerCreditServiceImpl implements CustomerCreditService {
                         entry.getOccurredAt()))
                 .orElse(null);
         LocalDate today = ledger.today();
-        List<DebtLedger.Debt> debts = ledger.debtsOf(customer.getId(), null);
+        List<DebtLedger.Debt> debts = ledger.owedOf(customer.getId(), null);
         return new CustomerCreditResponse(customer.getId(), customer.getCustomerName(), customer.getCreditStatus(),
                 changed, last, debts.stream().mapToLong(DebtLedger.Debt::remaining).sum(),
                 debts.stream().filter(debt -> debt.overdue(today)).mapToLong(DebtLedger.Debt::remaining).sum());
