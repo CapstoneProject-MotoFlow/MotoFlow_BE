@@ -19,7 +19,7 @@ public record TransferReceiptResponse(long id, long transferOrderId, ReceiptType
                                       LocalDateTime arrivedAt, Long createdBy, String createdByName,
                                       Long recordedBy, String recordedByName, LocalDateTime submittedAt,
                                       String inspectionNote, String recountReason,
-                                      Long confirmedBy, LocalDateTime confirmedAt, List<Line> lines,
+                                      Long confirmedBy, String confirmedByName, LocalDateTime confirmedAt, List<Line> lines,
                                       List<AttachmentResponse> documents) {
 
     /**
