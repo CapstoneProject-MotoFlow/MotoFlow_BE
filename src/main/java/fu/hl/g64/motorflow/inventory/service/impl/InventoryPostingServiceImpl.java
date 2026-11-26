@@ -113,6 +113,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 : BigDecimal.valueOf(p.purchaseUnitPrice());
         Set<Long> checkedStores = new HashSet<>();
         Map<LotKey, LotBalance> locked = new HashMap<>();
+        boolean anyPositive = false;
         for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
             if (e.getValue() == null || e.getValue() == 0) {
                 continue;
@@ -120,10 +121,17 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             if (e.getValue() < 0) {
                 throw new IllegalArgumentException("received quantity must be positive");
             }
+            LotKey key = new LotKey(lot.getId(), p.storeId(), e.getKey());
+            LotBalance lb = LotBalance.create(lot.getId(), p.storeId(), e.getKey(), now);
+            locked.put(key, lb);
             post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
                     p.performedBy(), period, now, when.at(), checkedStores, locked);
+            lotBalances.save(lb);
+            anyPositive = true;
         }
-        refreshDepletion(lot);
+        if (!anyPositive) {
+            refreshDepletion(lot);
+        }
         return lot;
     }
 
