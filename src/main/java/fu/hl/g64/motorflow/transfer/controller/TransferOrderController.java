@@ -5,6 +5,7 @@ import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.transfer.dto.ClosingPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.DispatchPreviewResponse;
 import fu.hl.g64.motorflow.transfer.dto.ExtraDispatchRequest;
+import fu.hl.g64.motorflow.transfer.dto.ReconciliationRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferDispatchRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderCreateRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
@@ -105,11 +106,25 @@ public class TransferOrderController {
         return service.confirmExtraDispatch(user, id, request);
     }
 
+    @Operation(summary = "GVHD 24/11: the receiving store's BM sends the reconciliation request (note and photos, both "
+            + "optional); the source store's BM gets a summary per part. Sent again before the source confirms, it "
+            + "replaces the note and adds the photos; MSG365 once confirmed")
     @PostMapping("/{id}/discrepancy-acknowledgement")
     @PreAuthorize("hasRole('BRANCH_MANAGER')")
     public TransferOrderDetailResponse acknowledgeDiscrepancy(@AuthenticationPrincipal AuthenticatedUser user,
-                                                              @PathVariable long id) {
-        return service.acknowledgeDiscrepancy(user, id);
+                                                              @PathVariable long id,
+                                                              @Valid @RequestBody(required = false)
+                                                              ReconciliationRequest request) {
+        return service.acknowledgeDiscrepancy(user, id, request);
+    }
+
+    @Operation(summary = "GVHD 24/11: the source store's BM confirms the reconciliation request (MSG366 before it is "
+            + "sent). An order with discrepancies closes only after it (MSG363)")
+    @PostMapping("/{id}/reconciliation-confirmation")
+    @PreAuthorize("hasRole('BRANCH_MANAGER')")
+    public TransferOrderDetailResponse confirmReconciliation(@AuthenticationPrincipal AuthenticatedUser user,
+                                                             @PathVariable long id) {
+        return service.confirmReconciliation(user, id);
     }
 
     @Operation(summary = "Closing preview (UC-77): the final figures of each part and the message codes that would stop "

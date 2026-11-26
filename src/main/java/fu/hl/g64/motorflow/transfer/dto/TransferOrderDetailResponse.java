@@ -16,7 +16,9 @@ import java.util.List;
 /**
  * UC-73. For Staff the reconciliation figures are null and {@code discrepancies} is empty: they see only what to
  * prepare or receive. {@code unitCost} of a lot is for the Owner only (BR-72). {@code attachments}: evidence of the
- * dispatch (UC-74) and extra dispatch (UC-75), empty for Staff.
+ * dispatch (UC-74) and extra dispatch (UC-75), empty for Staff. GVHD 24/11: {@code discrepancyAcknowledgedBy/At}
+ * is who sent the reconciliation request and when, with {@code reconciliationNote}; its photos are the attachments of
+ * purpose RECONCILIATION. {@code reconciliationConfirmedBy/At}: the source's BM who confirmed it.
  */
 public record TransferOrderDetailResponse(
         long id, TransferOrderStatus status, Long replenishmentRequestId,
@@ -26,7 +28,8 @@ public record TransferOrderDetailResponse(
         String delivererName, String vehiclePlateNo,
         Person extraDispatchConfirmedBy, LocalDateTime extraDispatchConfirmedAt,
         Person closedBy, LocalDateTime closedAt,
-        Person discrepancyAcknowledgedBy, LocalDateTime discrepancyAcknowledgedAt,
+        Person discrepancyAcknowledgedBy, LocalDateTime discrepancyAcknowledgedAt, String reconciliationNote,
+        Person reconciliationConfirmedBy, LocalDateTime reconciliationConfirmedAt,
         List<Line> lines, List<Lot> lots, List<Receipt> receipts, List<Discrepancy> discrepancies,
         List<AttachmentResponse> attachments) {
 
@@ -38,7 +41,9 @@ public record TransferOrderDetailResponse(
      * returned, lost and not to be replaced; a wrong item never counts), {@code unresolvedQty} chờ quyết (shortage
      * with no late delivery or no replacement chosen), {@code noReplacementQty} không giao bù, {@code lossQty} mất,
      * {@code wrongItemQty} giao sai, {@code wrongPendingQty} giao sai without a phiếu nhận hàng giao sai,
-     * {@code wrongAwaitingOwnerQty} on phiếu awaiting the Owner, {@code latePendingQty} to come later and not arrived,
+     * {@code wrongAwaitingSourceQty} on phiếu awaiting the source's BM, {@code wrongConfirmedQty} on phiếu it
+     * confirmed, {@code wrongReturnedQty} handed back to the source and confirmed by it (GVHD 24/11; one awaiting it
+     * counts in {@code wrongAwaitingSourceQty}, review 25/11), {@code latePendingQty} to come later and not arrived,
      * {@code receiverMiscounted} the Owner found the destination counted the line wrong (it then holds what was
      * dispatched and every other figure is 0).
      */
@@ -46,8 +51,9 @@ public record TransferOrderDetailResponse(
                        Integer preparedQty, Integer dispatchedQty, Integer receivedQty, Integer returnedQty,
                        Integer lossQty, Integer extraReceivedQty, Integer extraDispatchedQty, Integer unresolvedQty,
                        Integer damagedQty, Integer shortageQty, Long makeupForCaseId, Integer wrongItemQty,
-                       Integer wrongPendingQty, Integer wrongAwaitingOwnerQty, Integer noReplacementQty,
-                       Integer latePendingQty, Boolean receiverMiscounted) {
+                       Integer wrongPendingQty, Integer wrongAwaitingSourceQty, Integer wrongConfirmedQty,
+                       Integer wrongReturnedQty, Integer noReplacementQty, Integer latePendingQty,
+                       Boolean receiverMiscounted) {
     }
 
     /** A lot taken out of the source on dispatch (BR-75). */
@@ -67,12 +73,14 @@ public record TransferOrderDetailResponse(
 
     /**
      * PM 23/11: a phiếu nhận hàng giao sai (RECEIVED_AS_OTHER_PRODUCT) carries the part really received, its
-     * expiry and {@code status}; {@code recordedBy} made the event.
+     * expiry and {@code status}; {@code recordedBy} made the event. GVHD 24/11: a hand-back (WRONG_ITEM_RETURNED)
+     * carries the part and, review 25/11 (R-14), a status too; a rejected phiếu carries who rejected it, when and why; {@code attachments} are the photos.
      */
     public record Event(long id, ResolutionType resolutionType, int quantity, Long goodsReceiptNoteId,
                         Long adjustmentRequestId, String reason, LocalDateTime occurredAt,
                         LocalDateTime confirmedAt, Long receivedProductId, String receivedSku,
                         String receivedPartName, LocalDate receivedExpiryDate, WrongItemReceiptStatus status,
-                        Person recordedBy) {
+                        Person recordedBy, Person confirmedBy, Person rejectedBy, LocalDateTime rejectedAt,
+                        String rejectionReason, List<AttachmentResponse> attachments) {
     }
 }

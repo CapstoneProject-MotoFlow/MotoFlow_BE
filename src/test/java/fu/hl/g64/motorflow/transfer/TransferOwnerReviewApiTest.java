@@ -41,6 +41,14 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
         assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
                 + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED'", String.class)).contains("Sẽ tính là mất khi đóng: MA-PHANH x1");
 
+        // GVHD 24/11: the source's BM confirms the reconciliation request before the Owner closes.
+        action("owner", order, "/close").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG363"));
+        action("bmlb", order, "/reconciliation-confirmation").andExpect(status().isForbidden());
+        action("owner", order, "/reconciliation-confirmation").andExpect(status().isForbidden());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk())
+                .andExpect(jsonPath("$.reconciliationConfirmedBy.id").value(sourceManager.getId()))
+                .andExpect(jsonPath("$.reconciliationConfirmedAt").exists());
         action("owner", order, "/close").andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CLOSED"))
                 .andExpect(jsonPath("$.lines[0].shortageQty").value(0))
@@ -48,6 +56,47 @@ class TransferOwnerReviewApiTest extends TransferFlowTestData {
         action("owner", order, "/close").andExpect(status().isOk());
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(6);
         assertThat(stock(dest, brake, "in_transit_qty")).isZero();
+    }
+
+    /**
+     * GVHD 24/11: the receiving BM sends the reconciliation request with a note and photos; the source's BM gets a
+     * summary per part. It can be sent again until the source confirms (MSG365 after); confirming before it is sent is
+     * MSG366.
+     */
+    @Test
+    void theReconciliationRequestCarriesANotePhotosAndASummaryForTheSource() throws Exception {
+        lot(source, brake, 15, 100_000, null, "A");
+        long order = dispatchedOrder(brake, 15);
+        confirm("bmlb", order, inspected(order, brake, 6, 8)).andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG366"));
+
+        request("bmlb", order, Map.of("note", "Thiếu 1, hỏng 8", "files", List.of(uploaded("thung-hang.jpg"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.discrepancyAcknowledgedBy.id").value(destManager.getId()))
+                .andExpect(jsonPath("$.reconciliationNote").value("Thiếu 1, hỏng 8"))
+                .andExpect(jsonPath("$.attachments[?(@.purpose == 'RECONCILIATION')].fileName")
+                        .value(org.hamcrest.Matchers.contains("thung-hang.jpg")));
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
+                + "'TRANSFER_RECONCILIATION_REQUESTED' AND recipient_id = ?", String.class, sourceManager.getId()))
+                .contains("MA-PHANH: thiếu 1, hỏng 8").contains("Ghi chú: Thiếu 1, hỏng 8");
+        request("bmlb", order, Map.of("note", "Thiếu 1, hỏng 8, ảnh thêm")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.reconciliationNote").value("Thiếu 1, hỏng 8, ảnh thêm"));
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM notification WHERE notification_type = "
+                + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED'", Long.class)).isEqualTo(1);
+
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
+        assertThat(jdbc.queryForList("SELECT recipient_id FROM notification WHERE notification_type = "
+                + "'TRANSFER_RECONCILIATION_CONFIRMED'", Long.class)).contains(destManager.getId(), owner.getId());
+        request("bmlb", order, Map.of("note", "Gửi lại")).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG365"));
+        action("owner", order, "/close").andExpect(status().isOk());
+    }
+
+    private ResultActions request(String username, long order, Map<String, Object> body) throws Exception {
+        return mvc.perform(post(ORDERS + "/" + order + "/discrepancy-acknowledgement")
+                .header(HttpHeaders.AUTHORIZATION, signIn(username)).contentType(MediaType.APPLICATION_JSON)
+                .content(json(body)));
     }
 
     @Test

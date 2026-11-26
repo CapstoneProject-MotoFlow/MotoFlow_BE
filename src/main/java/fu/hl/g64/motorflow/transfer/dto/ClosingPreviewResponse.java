@@ -23,7 +23,8 @@ public record ClosingPreviewResponse(long id, TransferOrderStatus status, boolea
      * shortage nobody chose a late delivery or no replacement for, or whose late delivery did not come) is written
      * off as lost. {@code unresolvedQty} is what is still in transit at the destination, {@code shortageQty} of it
      * not to be replaced excluded; {@code awaitingDecisionQty} the shortage without a decision yet.
-     * {@code wrongPendingQty}: wrong items without a phiếu nhận hàng giao sai; {@code receiverMiscounted}: the Owner
+     * {@code wrongPendingQty}: wrong items neither on a phiếu nhận hàng giao sai nor handed back,
+     * {@code wrongAwaitingSourceQty} on phiếu awaiting the source's BM; {@code receiverMiscounted}: the Owner
      * corrected the line, the destination holds what was dispatched. {@code latePendingQty}: chosen to come in a later
      * delivery and not arrived yet; it stops the order from closing (MSG348).
      */
@@ -31,7 +32,7 @@ public record ClosingPreviewResponse(long id, TransferOrderStatus status, boolea
                        int receivedQty, int returnedQty, int lossQty, int unresolvedQty, int extraReceivedQty,
                        int extraDispatchedQty, int sourceSellableQty, int damagedQty, int legacyExcessQty,
                        int pendingExcessQty, int shortageQty, int awaitingDecisionQty, int toSourceQty, int toLossQty,
-                       int excessToAcceptQty, int wrongItemQty, int wrongPendingQty, int wrongAwaitingOwnerQty,
-                       boolean receiverMiscounted, int latePendingQty) {
+                       int excessToAcceptQty, int wrongItemQty, int wrongPendingQty, int wrongAwaitingSourceQty,
+                       int wrongConfirmedQty, int wrongReturnedQty, boolean receiverMiscounted, int latePendingQty) {
     }
 }

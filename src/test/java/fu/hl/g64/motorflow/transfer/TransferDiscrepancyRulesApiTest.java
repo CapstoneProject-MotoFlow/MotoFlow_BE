@@ -43,37 +43,51 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.blockedBy", contains("MSG336", "MSG342")));
     }
 
-    /** (2), (3) The receiving BM records the wrong items; only the Owner's confirmation moves Y, X is untouched. */
+    /**
+     * (2), (3) The receiving BM records the wrong items with photos; GVHD 24/11: only the source BM's confirmation
+     * moves Y, X is untouched. The Owner sees the phiếu but may not confirm it.
+     */
     @Test
-    void theOwnerConfirmsAWrongItemReceiptAndOnlyThePartReceivedMoves() throws Exception {
+    void theSourceConfirmsAWrongItemReceiptAndOnlyThePartReceivedMoves() throws Exception {
         long brakes = lot(source, brake, 10, 100_000, null, "A");
         long older = lot(source, chain, 2, 200_000, today.plusDays(30), "X1");
         long matching = lot(source, chain, 5, 210_000, today.plusDays(90), "X2");
         long order = dispatchedOrder(brake, 5);
         confirm("bmlb", order, received(order, 3, 2, 0)).andExpect(status().isOk());
 
-        record("bmlb", order, chain, 2, today.plusDays(90)).andExpect(status().isOk())
+        record("bmlb", order, chain, 2, today.plusDays(90), uploaded("xich.jpg")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(0))
-                .andExpect(jsonPath("$.lines[0].wrongAwaitingOwnerQty").value(2))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].resolutionType").value("RECEIVED_AS_OTHER_PRODUCT"))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].receivedSku").value("XICH-XE"))
-                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("AWAITING_OWNER"));
+                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("AWAITING_SOURCE"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].attachments[0].fileName").value("xich.jpg"));
         assertThat(stock(dest, chain, "available_qty")).isZero();
         assertThat(stock(source, chain, "available_qty")).isEqualTo(7);
-        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(owner.getId());
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(sourceManager.getId()).doesNotContain(owner.getId());
 
+        pending("owner").andExpect(status().isOk()).andExpect(jsonPath("$[0].transferOrderId").value(order));
+        pending("bmlb").andExpect(status().isOk()).andExpect(jsonPath("$").isEmpty());
+        pending("nvcg").andExpect(status().isForbidden());
         long eventId = eventIdOf(pending().andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].transferOrderId").value(order))
                 .andExpect(jsonPath("$[0].receivedSku").value("XICH-XE"))
                 .andExpect(jsonPath("$[0].quantity").value(2))
                 .andExpect(jsonPath("$[0].lots[0].lotId").value(matching))
-                .andExpect(jsonPath("$[0].blockedCode").doesNotExist()));
+                .andExpect(jsonPath("$[0].blockedCode").doesNotExist())
+                .andExpect(jsonPath("$[0].attachments[0].fileName").value("xich.jpg")));
         confirmWrongItem("bmlb", order, eventId).andExpect(status().isForbidden());
-        confirmWrongItem("owner", order, eventId).andExpect(status().isOk())
-                .andExpect(jsonPath("$.lines[0].wrongAwaitingOwnerQty").value(0))
+        confirmWrongItem("owner", order, eventId).andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MSG05"));
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(0))
                 .andExpect(jsonPath("$.lines[0].shortageQty").value(2))
                 .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("CONFIRMED"));
 
+        assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
+                + "'TRANSFER_WRONG_ITEM' AND recipient_id = ? ORDER BY id DESC LIMIT 1", String.class,
+                destManager.getId())).isEqualTo("Phiếu chuyển kho #" + order
+                + ": cộng 2 XICH-XE vào kho Long Biên, trừ 2 ở kho Cầu Giấy.");
         assertThat(lotStock(matching, source, "AVAILABLE")).isEqualTo(3);
         assertThat(lotStock(older, source, "AVAILABLE")).isEqualTo(2);
         assertThat(lotStock(matching, dest, "AVAILABLE")).isEqualTo(2);
@@ -83,7 +97,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE movement_type = 'TRANSFER_WRONG_ITEM'",
                 Long.class)).isEqualTo(2);
         pending().andExpect(jsonPath("$").isEmpty());
-        confirmWrongItem("owner", order, eventId).andExpect(status().isConflict())
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG29"));
     }
 
@@ -102,7 +116,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
 
         long eventId = eventIdOf(pending().andExpect(jsonPath("$[0].blockedCode").value("MSG339"))
                 .andExpect(jsonPath("$[0].sourceSellableQty").value(1)));
-        confirmWrongItem("owner", order, eventId).andExpect(status().isConflict())
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG339"))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("còn 1, cần 2")));
         assertThat(stock(source, chain, "available_qty")).isEqualTo(5);
@@ -146,6 +160,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
 
         close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG336"));
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
                 + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED' AND recipient_id = ?", String.class, owner.getId()))
                 .contains("Sẽ tính là mất khi đóng: MA-PHANH x2");
@@ -170,15 +185,102 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].wrongItemQty").value(1));
 
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
-        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
+        // Review 25/11: the source confirms only once every wrong item is settled.
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG342"));
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG363"));
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
-        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG342"));
-        confirmWrongItem("owner", order, eventIdOf(pending())).andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG342"));
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG363"));
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
 
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
         assertThat(stock(dest, chain, "available_qty")).isEqualTo(1);
         assertThat(stock(source, chain, "available_qty")).isEqualTo(2);
+    }
+
+    /**
+     * GVHD 24/11: 2 chains came with a full delivery; the receiving store keeps 1 on a phiếu the source confirms and
+     * hands 1 back. Nothing moves for the one handed back, and the order closes.
+     */
+    @Test
+    void aWrongItemIsPartlyKeptAndPartlyHandedBack() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 3, 200_000, null, "X1");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, received(order, 5, 2, 0)).andExpect(status().isOk());
+        action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        record("bmlb", order, chain, 1, null).andExpect(status().isOk());
+
+        handBack("bmcg", order, 1).andExpect(status().isForbidden());
+        handBack("owner", order, 1).andExpect(status().isForbidden());
+        handBack("bmlb", order, 2).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG362"))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("Chỉ còn 1")));
+        handBack("bmlb", order, 1).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(0))
+                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(0))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(2))
+                .andExpect(jsonPath("$.discrepancies[0].events[1].resolutionType").value("WRONG_ITEM_RETURNED"))
+                .andExpect(jsonPath("$.discrepancies[0].events[1].status").value("AWAITING_SOURCE"))
+                .andExpect(jsonPath("$.discrepancies[0].events[1].receivedSku").value("XICH-XE"));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(sourceManager.getId());
+        close(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG363"));
+        // Review 25/11 (R-14): the hand-back waits for the source's BM too, and blocks its confirmation until then.
+        pending().andExpect(jsonPath("$[0].resolutionType").value("WRONG_ITEM_RETURNED"))
+                .andExpect(jsonPath("$[0].lots").isEmpty())
+                .andExpect(jsonPath("$[1].resolutionType").value("RECEIVED_AS_OTHER_PRODUCT"));
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(1))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(1));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(destManager.getId());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG342"));
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
+        close(order).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
+
+        assertThat(stock(dest, chain, "available_qty")).isEqualTo(1);
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE discrepancy_resolution_event_id = "
+                + "(SELECT id FROM discrepancy_resolution_event WHERE resolution_type = 'WRONG_ITEM_RETURNED')",
+                Long.class)).isZero();
+    }
+
+    /**
+     * Review 25/11 (R-14, PM): the source's BM rejects a hand-back with a reason; the items are undecided again. A
+     * hand-back still awaiting the source does not stop the Owner's "receiver miscounted", which cancels it.
+     */
+    @Test
+    void theSourceRejectsAHandBackAndTheOwnerMayStillCorrectTheLine() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 3, 200_000, null, "X1");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, received(order, 4, 1, 0)).andExpect(status().isOk());
+        handBack("bmlb", order, 1).andExpect(status().isOk());
+        long eventId = eventIdOf(pending());
+
+        reject("bmlb", order, eventId, "Đã trả").andExpect(status().isForbidden());
+        reject("bmcg", order, eventId, "Kho chưa nhận lại xích").andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(1))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(0))
+                .andExpect(jsonPath("$.lines[0].wrongReturnedQty").value(0))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("REJECTED"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].rejectionReason").value("Kho chưa nhận lại xích"));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(destManager.getId());
+        pending().andExpect(jsonPath("$").isEmpty());
+
+        handBack("bmlb", order, 1).andExpect(status().isOk());
+        long caseId = jdbc.queryForObject("SELECT id FROM discrepancy_case WHERE transfer_order_id = ?", Long.class,
+                order);
+        miscount("owner", order, caseId, "Đếm nhầm").andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].receiverMiscounted").value(true));
+        assertThat(jdbc.queryForList("SELECT status FROM discrepancy_resolution_event WHERE resolution_type = "
+                + "'WRONG_ITEM_RETURNED' ORDER BY id", String.class)).containsExactly("REJECTED", "CANCELLED");
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(3);
     }
 
     /** (8) Excess is accepted on closing when the source has it, and blocks closing when it does not. */
@@ -249,6 +351,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         decide("bmlb", order, "LATE_DELIVERY", 2).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].latePendingQty").value(2));
         action("bmlb", order, "/discrepancy-acknowledgement").andExpect(status().isOk());
+        action("bmcg", order, "/reconciliation-confirmation").andExpect(status().isOk());
         assertThat(jdbc.queryForObject("SELECT message FROM notification WHERE notification_type = "
                 + "'TRANSFER_DISCREPANCY_ACKNOWLEDGED' AND recipient_id = ?", String.class, owner.getId()))
                 .doesNotContain("Sẽ tính là mất");
@@ -298,13 +401,49 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         long order = dispatchedOrder(brake, 5);
         confirm("bmlb", order, received(order, 4, 1, 0)).andExpect(status().isOk());
         record("bmlb", order, chain, 1, null).andExpect(status().isOk());
-        confirmWrongItem("owner", order, eventIdOf(pending())).andExpect(status().isOk());
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk());
         long caseId = jdbc.queryForObject("SELECT id FROM discrepancy_case WHERE transfer_order_id = ?", Long.class,
                 order);
 
         miscount("owner", order, caseId, "Đếm nhầm").andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG344"));
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
+    }
+
+    /**
+     * GVHD 24/11: the source BM rejects a phiếu with a reason; nothing moves, the items are undecided again and the
+     * receiving BM is told. They record them again, and that phiếu can be confirmed.
+     */
+    @Test
+    void theSourceRejectsAWrongItemReceiptWithAReason() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 5, 200_000, null, "X1");
+        long order = dispatchedOrder(brake, 5);
+        confirm("bmlb", order, received(order, 3, 2, 0)).andExpect(status().isOk());
+        record("bmlb", order, chain, 2, null).andExpect(status().isOk());
+        long eventId = eventIdOf(pending());
+
+        reject("bmcg", order, eventId, "  ").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG361"));
+        reject("owner", order, eventId, "Không phải hàng của kho").andExpect(status().isForbidden());
+        reject("bmlb", order, eventId, "Không phải hàng của kho").andExpect(status().isForbidden());
+        reject("bmcg", order, eventId, "Kho không xuất xích").andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongPendingQty").value(2))
+                .andExpect(jsonPath("$.lines[0].wrongAwaitingSourceQty").value(0))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].status").value("REJECTED"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].rejectionReason").value("Kho không xuất xích"))
+                .andExpect(jsonPath("$.discrepancies[0].events[0].rejectedBy.id").value(sourceManager.getId()));
+        assertThat(recipients("TRANSFER_WRONG_ITEM")).contains(destManager.getId());
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(5);
+        pending().andExpect(jsonPath("$").isEmpty());
+        reject("bmcg", order, eventId, "Lần nữa").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("MSG29"));
+        confirmWrongItem("bmcg", order, eventId).andExpect(status().isConflict());
+
+        record("bmlb", order, chain, 2, null).andExpect(status().isOk());
+        confirmWrongItem("bmcg", order, eventIdOf(pending())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].wrongConfirmedQty").value(2));
+        assertThat(stock(dest, chain, "available_qty")).isEqualTo(2);
     }
 
     /** (10), (11) Returns and losses are no longer decided; only the receiving store's BM or the Owner records. */
@@ -325,8 +464,7 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.code").value("MSG310"));
         record("bmlb", order, chain, 3, null).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("MSG309"));
-        mvc.perform(get(ORDERS + "/wrong-items/pending").header(HttpHeaders.AUTHORIZATION, signIn("bmlb")))
-                .andExpect(status().isForbidden());
+        pending("nvlb").andExpect(status().isForbidden());
     }
 
     /** Arrives and is inspected: {@code passed} X good, {@code damaged} X damaged, {@code wrong} wrong items. */
@@ -342,9 +480,13 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         return receipt;
     }
 
-    private ResultActions record(String username, long order, long received, int quantity, LocalDate expiry)
-            throws Exception {
+    @SafeVarargs
+    private ResultActions record(String username, long order, long received, int quantity, LocalDate expiry,
+                                 Map<String, Object>... files) throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
+        if (files.length > 0) {
+            body.put("files", List.of(files));
+        }
         body.put("productId", brake);
         body.put("receivedProductId", received);
         body.put("quantity", quantity);
@@ -353,6 +495,13 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
         }
         return mvc.perform(post(ORDERS + "/" + order + "/wrong-items").header(HttpHeaders.AUTHORIZATION,
                 signIn(username)).contentType(MediaType.APPLICATION_JSON).content(json(body)));
+    }
+
+    private ResultActions handBack(String username, long order, int quantity) throws Exception {
+        return mvc.perform(post(ORDERS + "/" + order + "/wrong-items/returns")
+                .header(HttpHeaders.AUTHORIZATION, signIn(username)).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("productId", brake, "receivedProductId", chain, "quantity", quantity,
+                        "note", "Trả xích cho kho gửi"))));
     }
 
     private ResultActions decide(String username, long order, String decision, int quantity) throws Exception {
@@ -367,8 +516,19 @@ class TransferDiscrepancyRulesApiTest extends TransferFlowTestData {
                 .content(json(Map.of("reason", reason))));
     }
 
+    /** What the source's BM has to confirm or reject. */
     private ResultActions pending() throws Exception {
-        return mvc.perform(get(ORDERS + "/wrong-items/pending").header(HttpHeaders.AUTHORIZATION, signIn("owner")));
+        return pending("bmcg");
+    }
+
+    private ResultActions pending(String username) throws Exception {
+        return mvc.perform(get(ORDERS + "/wrong-items/pending").header(HttpHeaders.AUTHORIZATION, signIn(username)));
+    }
+
+    private ResultActions reject(String username, long order, long eventId, String reason) throws Exception {
+        return mvc.perform(post(ORDERS + "/" + order + "/wrong-items/" + eventId + "/reject")
+                .header(HttpHeaders.AUTHORIZATION, signIn(username)).contentType(MediaType.APPLICATION_JSON)
+                .content(json(Map.of("reason", reason))));
     }
 
     private ResultActions confirmWrongItem(String username, long order, long eventId) throws Exception {

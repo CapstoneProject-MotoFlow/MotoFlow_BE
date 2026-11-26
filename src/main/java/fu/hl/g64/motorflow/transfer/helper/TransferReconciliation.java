@@ -79,22 +79,29 @@ public class TransferReconciliation {
             return loss + closedShortage;
         }
 
-        /** Giao sai chờ: wrong items with no phiếu nhận hàng giao sai yet. */
+        /**
+         * Giao sai chờ: wrong items neither on a phiếu nhận hàng giao sai awaiting or confirmed by the source nor
+         * handed back to it (GVHD 24/11). A rejected phiếu leaves its items here again.
+         */
         public int wrongPending() {
-            return Math.max(rules.wrongItem() - rules.wrongAwaitingOwner() - rules.wrongConfirmed(), 0);
+            return Math.max(rules.wrongItem() - rules.wrongAwaitingSource() - rules.wrongConfirmed()
+                    - rules.wrongReturned(), 0);
         }
     }
 
     /**
-     * PM 23/11. {@code wrongItem} recorded on confirmed receipts at the destination; {@code wrongAwaitingOwner} and
-     * {@code wrongConfirmed} on phiếu nhận hàng giao sai; {@code noReplacement} decided not to be replaced,
+     * PM 23/11. {@code wrongItem} recorded on confirmed receipts at the destination; {@code wrongAwaitingSource} on
+     * phiếu nhận hàng giao sai or hand-backs awaiting the source's BM (review 25/11), {@code wrongConfirmed} on phiếu
+     * it confirmed, {@code wrongReturned} handed back and confirmed by it (GVHD 24/11);
+     * {@code noReplacement} decided not to be replaced,
      * {@code noReplacementDone} of which moved back on closing; {@code latePending} decided to come later and not
      * arrived; {@code legacyClaims} losses awaiting their adjustment and return decisions of orders before 23/11;
      * {@code miscounted} the Owner found the receiver counted the line wrong.
      */
-    public record Rules(int wrongItem, int wrongAwaitingOwner, int wrongConfirmed, int noReplacement,
-                        int noReplacementDone, int latePending, int legacyClaims, boolean miscounted) {
-        public static final Rules NONE = new Rules(0, 0, 0, 0, 0, 0, 0, false);
+    public record Rules(int wrongItem, int wrongAwaitingSource, int wrongConfirmed, int wrongReturned,
+                        int noReplacement, int noReplacementDone, int latePending, int legacyClaims,
+                        boolean miscounted) {
+        public static final Rules NONE = new Rules(0, 0, 0, 0, 0, 0, 0, 0, false);
     }
 
     public Map<Long, Part> byProduct(long transferOrderId, List<TransferOrderLine> orderLines) {
@@ -117,7 +124,7 @@ public class TransferReconciliation {
                 // PM 23/11 case 7: the destination holds what was dispatched; excess, damage, wrong items and
                 // shortage of the line are void. The receipts keep what the staff recorded.
                 return new Part(dispatched, dispatched, 0, 0, 0, 0, 0, 0, 0, 0,
-                        new Rules(0, 0, 0, 0, 0, 0, 0, true));
+                        new Rules(0, 0, 0, 0, 0, 0, 0, 0, true));
             }
             int extra = receipt == null ? 0 : (int) receipt.getExcess();
             int received = receipt == null ? 0 : (int) receipt.getReceived() - extra;
@@ -125,8 +132,9 @@ public class TransferReconciliation {
             int loss = losses.getOrDefault(line.getProductId(), 0L).intValue();
             int closedShortage = shortages.getOrDefault(line.getProductId(), 0L).intValue();
             Rules rules = new Rules(receipt == null ? 0 : Math.toIntExact(receipt.getWrongItem()),
-                    event == null ? 0 : Math.toIntExact(event.getWrongAwaitingOwner()),
+                    event == null ? 0 : Math.toIntExact(event.getWrongAwaitingSource()),
                     event == null ? 0 : Math.toIntExact(event.getWrongConfirmed()),
+                    event == null ? 0 : Math.toIntExact(event.getWrongReturned()),
                     event == null ? 0 : Math.toIntExact(event.getNoReplacement()),
                     event == null ? 0 : Math.toIntExact(event.getNoReplacementDone()),
                     event == null ? 0 : Math.toIntExact(event.getLatePending()),

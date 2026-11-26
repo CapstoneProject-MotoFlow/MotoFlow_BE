@@ -447,7 +447,7 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         if (!wrong.isEmpty() && receipt.getReceiptType() == ReceiptType.TRANSFER_IN) {
             notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_WRONG_ITEM",
                     ("Phiếu chuyển kho #%d nhận giao sai kèm %s. Hàng giao sai chưa nhập kho nhận và chưa trừ tồn "
-                            + "kho gửi cho tới khi Owner xác nhận phiếu nhận hàng giao sai.").formatted(id, wrong),
+                            + "kho gửi cho tới khi kho gửi xác nhận phiếu nhận hàng giao sai.").formatted(id, wrong),
                     ENTITY, id);
         }
         if (!missing.isEmpty()) {

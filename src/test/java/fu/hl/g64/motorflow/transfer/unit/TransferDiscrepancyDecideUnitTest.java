@@ -112,7 +112,7 @@ class TransferDiscrepancyDecideUnitTest {
         latePendingP1 = 0;
         when(reconciliation.byProduct(eq(1L), any())).thenAnswer(inv -> Map.of(P1,
                 new TransferReconciliation.Part(5, 3, 0, 0, 0, 2, 0, 0, 0, 0,
-                        new TransferReconciliation.Rules(0, 0, 0, 0, 0, latePendingP1, 0, false))));
+                        new TransferReconciliation.Rules(0, 0, 0, 0, 0, 0, latePendingP1, 0, false))));
         when(events.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(transferOrders.detail(any(), eq(1L))).thenReturn(detail);
     }

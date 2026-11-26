@@ -22,14 +22,19 @@ import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
+import fu.hl.g64.motorflow.operation.dto.AttachmentResponse;
+import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
+import fu.hl.g64.motorflow.operation.service.AttachmentService;
 import fu.hl.g64.motorflow.operation.service.NotificationService;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import fu.hl.g64.motorflow.transfer.dto.PendingWrongItemResponse;
+import fu.hl.g64.motorflow.transfer.dto.RejectWrongItemRequest;
 import fu.hl.g64.motorflow.transfer.dto.TransferOrderDetailResponse;
 import fu.hl.g64.motorflow.transfer.dto.WrongItemRequest;
+import fu.hl.g64.motorflow.transfer.dto.WrongItemReturnRequest;
 import fu.hl.g64.motorflow.transfer.entity.TransferOrder;
 import fu.hl.g64.motorflow.transfer.entity.enums.TransferOrderStatus;
 import fu.hl.g64.motorflow.transfer.helper.SourceLots;
@@ -37,6 +42,7 @@ import fu.hl.g64.motorflow.transfer.helper.TransferReconciliation;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderLineRepository;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.MessageSource;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -50,6 +56,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
@@ -59,9 +66,10 @@ import java.util.stream.Stream;
 /**
  * PM 23/11 (giao sai khi điều chuyển, cases 4–6). The source sent part Y as well as, or instead of, part X: Y is at the
  * destination but still on the source's books. The destination's BM records a phiếu nhận hàng giao sai (Y, quantity,
- * expiry; nothing moves); the Owner's confirmation moves Y from the source's sellable stock into the destination. The
- * part ordered is never touched: what of it did not arrive is a shortage like any other. There is no rejection; if
- * the receiving store counted wrong, the Owner uses "receiver miscounted" on the line instead.
+ * expiry, photos; nothing moves). GVHD 24/11: the source's BM, not the Owner, confirms it, which moves Y from the
+ * source's sellable stock into the destination, or rejects it with a reason, which leaves the items undecided again.
+ * The part ordered is never touched: what of it did not arrive is a shortage like any other. If the receiving store
+ * counted wrong, the Owner uses "receiver miscounted" on the line, which cancels the phiếu still awaiting the source.
  */
 @Service
 @RequiredArgsConstructor
@@ -83,10 +91,15 @@ public class TransferWrongItemService {
     private final InventoryPostingService posting;
     private final AuditLogRepository auditLog;
     private final NotificationService notifications;
+    private final AttachmentService attachments;
     private final TransferOrderService transferOrders;
+    private final MessageSource messages;
     private final Clock clock;
 
-    /** The destination's BM (or the Owner) records a phiếu nhận hàng giao sai; the Owner is told. */
+    /**
+     * The destination's BM (or the Owner) records a phiếu nhận hàng giao sai with its photos; GVHD 24/11: the source's
+     * BM is told, as they confirm it.
+     */
     @Transactional
     public TransferOrderDetailResponse record(AuthenticatedUser user, long orderId, WrongItemRequest body) {
         TransferOrder order = reconciling(orderId);
@@ -105,20 +118,67 @@ public class TransferWrongItemService {
         data.put("received_product_id", received.getId());
         data.put("quantity", body.quantity());
         data.put("expiry_date", body.expiryDate() == null ? null : body.expiryDate().toString());
+        attachments.attach(OwnerType.DISCREPANCY_RESOLUTION_EVENT, event.getId(),
+                body.files() == null ? List.of() : body.files(), user.id());
         auditLog.save(AuditLog.record(ENTITY, orderId, "TRANSFER_WRONG_ITEM_RECORDED", user.id(), reason, null, data,
                 now));
-        notifications.notifyOwners("TRANSFER_WRONG_ITEM", ("Phiếu chuyển kho #%d: kho nhận nhận %s x%d giao sai kèm %s, "
-                + "cần Owner xác nhận cộng trừ tồn").formatted(orderId, received.getSku(), body.quantity(),
-                ordered.getSku()), ENTITY, orderId);
+        notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_WRONG_ITEM",
+                ("Phiếu chuyển kho #%d: kho nhận nhận %s x%d giao sai kèm %s, cần kho gửi xác nhận hoặc từ chối")
+                        .formatted(orderId, received.getSku(), body.quantity(), ordered.getSku()), ENTITY, orderId);
         return transferOrders.detail(user, orderId);
     }
 
-    /** Owner: phiếu nhận hàng giao sai awaiting confirmation, newest first, with the source lots it would take now. */
+    /**
+     * GVHD 24/11: the destination's BM hands wrong items back to the source (MSG362 above what is still undecided).
+     * Nothing moves: they never left the source's books. Review 25/11 (R-14, PM): the hand-back waits for the source's
+     * BM, who is told, to confirm the items came back or reject it. The order may close once every wrong item is on a
+     * phiếu or hand-back the source confirmed.
+     */
+    @Transactional
+    public TransferOrderDetailResponse handBack(AuthenticatedUser user, long orderId, WrongItemReturnRequest body) {
+        TransferOrder order = reconciling(orderId);
+        if (user.role() != Role.BRANCH_MANAGER || !Objects.equals(user.storeId(), order.getDestStoreId())) {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
+        Product ordered = part(body.productId());
+        DiscrepancyCase found = lockedCase(order, ordered);
+        Product received = receivedPart(ordered, body.receivedProductId());
+        TransferReconciliation.Part figure = reconciliation.byProduct(order.getId(),
+                lines.findByTransferOrderIdOrderByProductId(order.getId())).get(ordered.getId());
+        int undecided = figure == null ? 0 : figure.wrongPending();
+        if (body.quantity() > undecided) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG362", undecided);
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        String note = text(body.note());
+        DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.wrongItemReturned(found.getId(),
+                body.quantity(), received.getId(), note, user.id(), now));
+        auditLog.save(AuditLog.record(ENTITY, orderId, "TRANSFER_WRONG_ITEM_RETURNED", user.id(), note, null,
+                Map.of("event_id", event.getId(), "product_id", ordered.getId(), "received_product_id",
+                        received.getId(), "quantity", body.quantity()), now));
+        notifications.notifyStoreManagers(order.getSourceStoreId(), "TRANSFER_WRONG_ITEM",
+                ("Phiếu chuyển kho #%d: kho nhận hoàn trả %s x%d giao sai kèm %s về kho gửi, cần kho gửi xác nhận "
+                        + "đã nhận lại hoặc từ chối").formatted(orderId, received.getSku(), body.quantity(),
+                        ordered.getSku()), ENTITY, orderId);
+        return transferOrders.detail(user, orderId);
+    }
+
+    /**
+     * Phiếu nhận hàng giao sai awaiting confirmation, newest first, with the source lots it would take now and its
+     * photos. GVHD 24/11: a BM sees those of orders sent from their store, to confirm or reject; the Owner sees all,
+     * to view only.
+     */
     @Transactional(readOnly = true)
     public List<PendingWrongItemResponse> pending(AuthenticatedUser user, int page, int size) {
-        requireOwner(user);
-        List<DiscrepancyResolutionEvent> rows = events.findPendingTransferSwaps(
-                PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100)));
+        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100));
+        List<DiscrepancyResolutionEvent> rows;
+        if (user.role() == Role.OWNER) {
+            rows = events.findPendingTransferSwaps(pageable);
+        } else if (user.role() == Role.BRANCH_MANAGER && user.storeId() != null) {
+            rows = events.findPendingTransferSwapsFromSource(user.storeId(), pageable);
+        } else {
+            throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
+        }
         if (rows.isEmpty()) {
             return List.of();
         }
@@ -136,6 +196,8 @@ public class TransferWrongItemService {
                 .distinct().toList()).stream().collect(Collectors.toMap(Product::getId, Function.identity()));
         Map<Long, String> names = users.findAllById(rows.stream().map(DiscrepancyResolutionEvent::getRecordedBy)
                 .distinct().toList()).stream().collect(Collectors.toMap(UserAccount::getId, UserAccount::getFullName));
+        Map<Long, List<AttachmentResponse>> photos = attachments.list(OwnerType.DISCREPANCY_RESOLUTION_EVENT,
+                rows.stream().map(DiscrepancyResolutionEvent::getId).toList());
         LocalDate today = LocalDate.now(clock);
         Map<Long, Map<Long, PickingGuide.Part>> stockBySource = new LinkedHashMap<>();
         rows.stream().collect(Collectors.groupingBy(event -> orderById.get(caseById.get(event.getDiscrepancyCaseId())
@@ -148,30 +210,37 @@ public class TransferWrongItemService {
             Product ordered = parts.get(found.getProductId());
             Product received = parts.get(event.getReceivedProductId());
             PickingGuide.Part available = stockBySource.get(order.getSourceStoreId()).get(received.getId());
-            SourceLots.Plan plan = SourceLots.plan(event.getQuantity(), event.getReceivedExpiryDate(), available);
+            // Review 25/11 (R-14): a hand-back moves nothing, so it takes no lots and is never blocked.
+            boolean handBack = event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED;
+            SourceLots.Plan plan = handBack ? new SourceLots.Plan(List.of(), null)
+                    : SourceLots.plan(event.getQuantity(), event.getReceivedExpiryDate(), available);
             return new PendingWrongItemResponse(event.getId(), order.getId(), order.getSourceStoreId(),
                     storeNames.get(order.getSourceStoreId()), order.getDestStoreId(),
                     storeNames.get(order.getDestStoreId()), ordered.getId(), ordered.getSku(), ordered.getPartName(),
                     received.getId(), received.getSku(), received.getPartName(), event.getQuantity(),
                     event.getReceivedExpiryDate(), event.getReason(), names.get(event.getRecordedBy()),
                     event.getOccurredAt(), available == null ? 0 : available.sellableQty(), plan.lots(),
-                    plan.blockedCode());
+                    plan.blockedCode(), photos.getOrDefault(event.getId(), List.of()), event.getResolutionType());
         }).toList();
     }
 
     /**
-     * Owner confirms a phiếu nhận hàng giao sai. The source must have Y sellable (what open sales orders hold is not
+     * GVHD 24/11: the source's BM confirms a phiếu nhận hàng giao sai (the Owner only views it, MSG05). The source must
+     * have Y sellable (what open sales orders hold is not
      * taken): of the expiry the BM recorded, or the oldest lots without one. Otherwise MSG339 or MSG341 and nothing
      * moves. The part ordered is not touched. Lock order: order, event, stock of the lower store id, then the higher.
      */
     @Transactional
     public TransferOrderDetailResponse confirm(AuthenticatedUser user, long orderId, long eventId) {
-        requireOwner(user);
         TransferOrder order = reconciling(orderId);
+        requireSource(user, order);
         DiscrepancyResolutionEvent event = awaiting(order, eventId);
         DiscrepancyCase found = cases.findById(event.getDiscrepancyCaseId()).orElseThrow();
         Product ordered = part(found.getProductId());
         Product received = part(event.getReceivedProductId());
+        if (event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED) {
+            return confirmHandBack(user, order, event, ordered, received);
+        }
         long source = order.getSourceStoreId();
         long destination = order.getDestStoreId();
         balances.findByStoreForUpdate(Math.min(source, destination), List.of(received.getId()));
@@ -200,11 +269,62 @@ public class TransferWrongItemService {
         auditLog.save(AuditLog.record(ENTITY, orderId, "TRANSFER_WRONG_ITEM_CONFIRMED", user.id(), null, null,
                 Map.of("event_id", event.getId(), "product_id", ordered.getId(), "received_product_id",
                         received.getId(), "quantity", quantity), now));
-        String message = "Phiếu chuyển kho #%d: Owner đã xác nhận nhận %s x%d giao sai, kho gửi đã trừ, kho nhận đã cộng"
-                .formatted(orderId, received.getSku(), quantity);
+        // GVHD 24/11 (C5): two facts only, what is added where and what is taken where (MSG364).
+        Map<Long, String> storeNames = stores.findAllById(List.of(source, destination)).stream()
+                .collect(Collectors.toMap(Store::getId, Store::getStoreName));
+        String message = messages.getMessage("MSG364", new Object[]{String.valueOf(orderId), String.valueOf(quantity),
+                received.getSku(), storeNames.get(destination), storeNames.get(source)}, "MSG364",
+                Locale.forLanguageTag("vi"));
         notifications.notifyStoreManagers(source, "TRANSFER_WRONG_ITEM", message, ENTITY, orderId);
         notifications.notifyStoreManagers(destination, "TRANSFER_WRONG_ITEM", message, ENTITY, orderId);
         return transferOrders.detail(user, orderId);
+    }
+
+    /**
+     * GVHD 24/11: the source's BM rejects a phiếu nhận hàng giao sai, or a hand-back (review 25/11, R-14), with a
+     * reason (MSG361). Nothing moves; its wrong items are undecided again, and the destination's BM is told so they record them again or hand them back.
+     */
+    @Transactional
+    public TransferOrderDetailResponse reject(AuthenticatedUser user, long orderId, long eventId,
+                                              RejectWrongItemRequest body) {
+        String reason = body == null ? null : text(body.reason());
+        if (reason == null) {
+            throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG361");
+        }
+        TransferOrder order = reconciling(orderId);
+        requireSource(user, order);
+        DiscrepancyResolutionEvent event = awaiting(order, eventId);
+        Product received = part(event.getReceivedProductId());
+        LocalDateTime now = LocalDateTime.now(clock);
+        event.rejectWrongItemReceipt(user.id(), reason, now);
+        String action = event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED
+                ? "TRANSFER_WRONG_ITEM_RETURN_REJECTED" : "TRANSFER_WRONG_ITEM_REJECTED";
+        auditLog.save(AuditLog.record(ENTITY, orderId, action, user.id(), reason, null,
+                Map.of("event_id", event.getId(), "received_product_id", received.getId(), "quantity",
+                        event.getQuantity()), now));
+        String what = event.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED ? "việc hoàn trả" : "phiếu nhận";
+        notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_WRONG_ITEM",
+                "Phiếu chuyển kho #%d: kho gửi từ chối %s %s x%d giao sai. Lý do: %s"
+                        .formatted(orderId, what, received.getSku(), event.getQuantity(), reason), ENTITY, orderId);
+        return transferOrders.detail(user, orderId);
+    }
+
+    /**
+     * Review 25/11 (R-14, PM): the source's BM confirms the handed-back wrong items came back. Nothing moves, as they
+     * never left the source's books; the destination's BM is told.
+     */
+    private TransferOrderDetailResponse confirmHandBack(AuthenticatedUser user, TransferOrder order,
+                                                        DiscrepancyResolutionEvent event, Product ordered,
+                                                        Product received) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        event.confirmWrongItemReceipt(user.id(), now);
+        auditLog.save(AuditLog.record(ENTITY, order.getId(), "TRANSFER_WRONG_ITEM_RETURN_CONFIRMED", user.id(), null,
+                null, Map.of("event_id", event.getId(), "product_id", ordered.getId(), "received_product_id",
+                        received.getId(), "quantity", event.getQuantity()), now));
+        notifications.notifyStoreManagers(order.getDestStoreId(), "TRANSFER_WRONG_ITEM",
+                "Phiếu chuyển kho #%d: kho gửi xác nhận đã nhận lại %s x%d hoàn trả"
+                        .formatted(order.getId(), received.getSku(), event.getQuantity()), ENTITY, order.getId());
+        return transferOrders.detail(user, order.getId());
     }
 
     private TransferOrder reconciling(long orderId) {
@@ -216,8 +336,9 @@ public class TransferWrongItemService {
         return order;
     }
 
-    private static void requireOwner(AuthenticatedUser user) {
-        if (user.role() != Role.OWNER) {
+    /** GVHD 24/11: only the source store's BM confirms or rejects; the Owner views. */
+    private static void requireSource(AuthenticatedUser user, TransferOrder order) {
+        if (user.role() != Role.BRANCH_MANAGER || !Objects.equals(user.storeId(), order.getSourceStoreId())) {
             throw new BusinessException(HttpStatus.FORBIDDEN, "MSG05");
         }
     }
@@ -269,11 +390,12 @@ public class TransferWrongItemService {
 
     private DiscrepancyResolutionEvent awaiting(TransferOrder order, long eventId) {
         DiscrepancyResolutionEvent event = events.findByIdForUpdate(eventId)
-                .filter(found -> found.getResolutionType() == ResolutionType.RECEIVED_AS_OTHER_PRODUCT)
+                .filter(found -> found.getResolutionType() == ResolutionType.RECEIVED_AS_OTHER_PRODUCT
+                        || found.getResolutionType() == ResolutionType.WRONG_ITEM_RETURNED)
                 .filter(found -> cases.findById(found.getDiscrepancyCaseId())
                         .map(item -> order.getId().equals(item.getTransferOrderId())).orElse(false))
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG70"));
-        if (event.getStatus() != WrongItemReceiptStatus.AWAITING_OWNER) {
+        if (event.getStatus() != WrongItemReceiptStatus.AWAITING_SOURCE) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
         return event;
