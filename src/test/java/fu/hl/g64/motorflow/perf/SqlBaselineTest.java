@@ -175,7 +175,7 @@ class SqlBaselineTest {
                                     "expectedPayable", payable))))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.completed").value(true));
-            assertBudget("sales-complete-10-lines", queries, 160);
+            assertBudget("sales-complete-10-lines", queries, 157);
         }
 
         @Test
@@ -219,12 +219,12 @@ class SqlBaselineTest {
             queries.reset();
             mvc.perform(get("/api/v1/home").header(HttpHeaders.AUTHORIZATION, managerToken))
                     .andExpect(status().isOk());
-            assertBudget("home-bm", queries, 13);
+            assertBudget("home-bm", queries, 10);
 
             queries.reset();
             mvc.perform(get("/api/v1/home").header(HttpHeaders.AUTHORIZATION, adminToken))
                     .andExpect(status().isOk());
-            assertBudget("home-admin", queries, 4);
+            assertBudget("home-admin", queries, 3);
         }
 
         @Test
@@ -247,7 +247,7 @@ class SqlBaselineTest {
             mvc.perform(get("/api/v1/documents").header(HttpHeaders.AUTHORIZATION, managerToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalItems").value(2));
-            assertBudget("documents-page-0", queries, 3);
+            assertBudget("documents-page-0", queries, 2);
         }
 
         @Test
@@ -267,7 +267,7 @@ class SqlBaselineTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(body)))
                     .andExpect(status().isCreated());
-            assertBudget("product-create-2-oem", queries, 15);
+            assertBudget("product-create-2-oem", queries, 12);
         }
 
         private long[] tenPricedParts() {

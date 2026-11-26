@@ -157,7 +157,7 @@ public class ProductServiceImpl implements ProductService {
             // Another user created the same SKU a moment earlier.
             throw new BusinessException(HttpStatus.CONFLICT, "MSG53", sku);
         }
-        replaceDetails(product.getId(), request, actor, now);
+        saveDetails(product.getId(), request, actor, now, true);
         auditLog.save(AuditLog.record("PRODUCT", product.getId(), "PRODUCT_CREATED", actor.id(), null, now));
         return detail(actor, product.getId(), null);
     }
@@ -176,7 +176,7 @@ public class ProductServiceImpl implements ProductService {
         LocalDateTime now = LocalDateTime.now(clock);
         product.update(request.partName().strip(), request.categoryId(), request.brand().strip(),
                 blankToNull(request.countryOfOrigin()), request.baseUnit().strip(), blankToNull(request.specifications()), now);
-        replaceDetails(id, request, actor, now);
+        saveDetails(id, request, actor, now, false);
         auditLog.save(AuditLog.record("PRODUCT", id, "PRODUCT_UPDATED", actor.id(), null, now));
         return detail(actor, id, null);
     }
@@ -253,10 +253,13 @@ public class ProductServiceImpl implements ProductService {
         }
     }
 
-    private void replaceDetails(long productId, ProductRequest request, AuthenticatedUser actor, LocalDateTime now) {
-        oemCodes.deleteByProductId(productId);
-        compatibility.deleteByProductId(productId);
-        images.deleteByProductId(productId);
+    private void saveDetails(long productId, ProductRequest request, AuthenticatedUser actor, LocalDateTime now,
+                             boolean isNew) {
+        if (!isNew) {
+            oemCodes.deleteByProductId(productId);
+            compatibility.deleteByProductId(productId);
+            images.deleteByProductId(productId);
+        }
 
         oemCodes.saveAll(distinctStripped(request.oemCodes()).stream()
                 .map(code -> ProductOemCode.of(productId, code)).toList());

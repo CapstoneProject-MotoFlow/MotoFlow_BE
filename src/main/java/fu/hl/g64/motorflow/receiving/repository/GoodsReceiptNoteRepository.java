@@ -1,7 +1,6 @@
 package fu.hl.g64.motorflow.receiving.repository;
 
 import fu.hl.g64.motorflow.receiving.entity.GoodsReceiptNote;
-import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import jakarta.persistence.LockModeType;
@@ -35,17 +34,23 @@ public interface GoodsReceiptNoteRepository extends JpaRepository<GoodsReceiptNo
             where r.purchaseOrderId in (select q.id from PurchaseOrder q where q.supplierId = :supplierId)""")
     Page<GoodsReceiptNote> findBySupplier(Long supplierId, Pageable pageable);
 
-    @Query("select count(r) from GoodsReceiptNote r where r.status = :status and " + RECEIVED_AT_STORE)
-    long countAtStore(Long storeId, GoodsReceiptNoteStatus status);
-
-    /** Receipts waiting for inspection that no Staff member has been given yet. */
+    /** Receipts at the store needing BM attention on the home page: unassigned inspection, awaiting confirmation. */
     @Query("""
-            select count(r) from GoodsReceiptNote r
-            where r.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.AWAITING_INSPECTION
-              and not exists (select t.id from WarehouseTask t where t.goodsReceiptNoteId = r.id
-                              and t.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED)
-              and """ + RECEIVED_AT_STORE)
-    long countAwaitingInspectionWithoutTask(Long storeId);
+            select coalesce(sum(case when r.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.AWAITING_INSPECTION
+                                          and not exists (select t.id from WarehouseTask t where t.goodsReceiptNoteId = r.id
+                                                          and t.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED)
+                                     then 1L else 0L end), 0L) as toAssign,
+                   coalesce(sum(case when r.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.AWAITING_CONFIRMATION
+                                     then 1L else 0L end), 0L) as awaitingConfirmation
+            from GoodsReceiptNote r
+            where """ + RECEIVED_AT_STORE)
+    HomeCounts countHomeWork(Long storeId);
+
+    interface HomeCounts {
+        long getToAssign();
+
+        long getAwaitingConfirmation();
+    }
 
     /** BR-21: once a GRN is recorded for a PO, the PO can no longer be changed or cancelled. */
     boolean existsByPurchaseOrderId(Long purchaseOrderId);

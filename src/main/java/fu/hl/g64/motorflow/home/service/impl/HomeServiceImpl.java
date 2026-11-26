@@ -1,6 +1,5 @@
 package fu.hl.g64.motorflow.home.service.impl;
 
-import fu.hl.g64.motorflow.account.entity.enums.AccountStatus;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.adjustment.entity.enums.AdjustmentRequestStatus;
 import fu.hl.g64.motorflow.adjustment.repository.AdjustmentRequestRepository;
@@ -13,10 +12,8 @@ import fu.hl.g64.motorflow.operation.entity.enums.TaskType;
 import fu.hl.g64.motorflow.operation.repository.NotificationRepository;
 import fu.hl.g64.motorflow.operation.repository.WarehouseTaskRepository;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
-import fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteLineRepository;
 import fu.hl.g64.motorflow.receiving.repository.GoodsReceiptNoteRepository;
-import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.security.AuthenticatedUser;
 import fu.hl.g64.motorflow.store.entity.Store;
@@ -73,9 +70,9 @@ public class HomeServiceImpl implements HomeService {
         Map<HomeShortcut, Long> counts = new EnumMap<>(HomeShortcut.class);
         switch (user.role()) {
             case ADMIN -> {
-                counts.put(HomeShortcut.LOCKED_ACCOUNTS, users.countByStatus(AccountStatus.LOCKED));
-                counts.put(HomeShortcut.TEMPORARY_PASSWORD_ACCOUNTS,
-                        users.countByStatusAndMustChangePasswordTrue(AccountStatus.ACTIVE));
+                UserAccountRepository.HomeCounts summary = users.countHomeSummary();
+                counts.put(HomeShortcut.LOCKED_ACCOUNTS, summary.getLocked());
+                counts.put(HomeShortcut.TEMPORARY_PASSWORD_ACCOUNTS, summary.getTemporaryPassword());
                 counts.put(HomeShortcut.PLANNED_STORES, stores.countByStatus(StoreStatus.PLANNED));
             }
             case OWNER -> {
@@ -114,16 +111,15 @@ public class HomeServiceImpl implements HomeService {
     }
 
     private void branchManagerShortcuts(long storeId, Map<HomeShortcut, Long> counts) {
-        counts.put(HomeShortcut.ORDERS_TO_ASSIGN, salesOrders.countAwaitingPickingWithoutTask(storeId));
-        counts.put(HomeShortcut.ORDERS_AWAITING_CONFIRMATION,
-                salesOrders.countByStoreIdAndStatus(storeId, SalesOrderStatus.PICKED));
-        counts.put(HomeShortcut.ORDERS_AWAITING_COMPLETION,
-                salesOrders.countByStoreIdAndStatus(storeId, SalesOrderStatus.CONFIRMED));
+        SalesOrderRepository.HomeCounts orderCounts = salesOrders.countHomeWork(storeId);
+        counts.put(HomeShortcut.ORDERS_TO_ASSIGN, orderCounts.getToAssign());
+        counts.put(HomeShortcut.ORDERS_AWAITING_CONFIRMATION, orderCounts.getAwaitingConfirmation());
+        counts.put(HomeShortcut.ORDERS_AWAITING_COMPLETION, orderCounts.getAwaitingCompletion());
         counts.put(HomeShortcut.PAYMENTS_AWAITING_VERIFICATION, payments.countUnverifiedAtStore(storeId));
 
-        counts.put(HomeShortcut.RECEIPTS_TO_ASSIGN, receipts.countAwaitingInspectionWithoutTask(storeId));
-        counts.put(HomeShortcut.RECEIPTS_AWAITING_CONFIRMATION,
-                receipts.countAtStore(storeId, GoodsReceiptNoteStatus.AWAITING_CONFIRMATION));
+        GoodsReceiptNoteRepository.HomeCounts receiptCounts = receipts.countHomeWork(storeId);
+        counts.put(HomeShortcut.RECEIPTS_TO_ASSIGN, receiptCounts.getToAssign());
+        counts.put(HomeShortcut.RECEIPTS_AWAITING_CONFIRMATION, receiptCounts.getAwaitingConfirmation());
         counts.put(HomeShortcut.TRANSFERS_AWAITING_DISPATCH,
                 transfers.countBySourceStoreIdAndStatus(storeId, TransferOrderStatus.AWAITING_DISPATCH));
         counts.put(HomeShortcut.OPEN_DISCREPANCIES, discrepancies.countOpenSupplierCasesAtStore(storeId));

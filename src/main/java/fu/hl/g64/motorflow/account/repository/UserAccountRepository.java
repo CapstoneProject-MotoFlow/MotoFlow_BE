@@ -40,7 +40,18 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, Long> 
 
     List<UserAccount> findByStoreId(Long storeId);
 
-    long countByStatus(AccountStatus status);
+    @Query("""
+            select coalesce(sum(case when u.status = fu.hl.g64.motorflow.account.entity.enums.AccountStatus.LOCKED
+                                     then 1L else 0L end), 0L) as locked,
+                   coalesce(sum(case when u.status = fu.hl.g64.motorflow.account.entity.enums.AccountStatus.ACTIVE
+                                          and u.mustChangePassword = true
+                                     then 1L else 0L end), 0L) as temporaryPassword
+            from UserAccount u""")
+    HomeCounts countHomeSummary();
 
-    long countByStatusAndMustChangePasswordTrue(AccountStatus status);
+    interface HomeCounts {
+        long getLocked();
+
+        long getTemporaryPassword();
+    }
 }

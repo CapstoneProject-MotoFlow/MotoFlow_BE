@@ -932,7 +932,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG307", id);
         }
         // PM 21/11 (BE-5): after its last day the deposit waits for the Branch Manager's forfeit, not a release.
-        OrderDeposits.State deposit = deposits.of(order, collections.of(id));
+        OrderDeposits.State deposit = deposits.of(order, collections.of(order));
         if (deposit.status() == DepositStatus.EXPIRED) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG321", order.getDepositExpiresOn().format(DAY));
         }
@@ -1470,7 +1470,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 ? guide.parts(order.getStoreId(), productIds, now.toLocalDate(), id) : Map.of();
         Map<Long, String> reasons = shortReasons(steps, lines);
         boolean draft = order.isDraft();
-        OrderCollections.Money collected = staff || draft ? null : collections.of(id);
+        OrderCollections.Money collected = staff || draft ? null : collections.of(order);
         OrderDeposits.State deposit = collected == null ? null : deposits.of(order, collected);
         Set<Long> people = new HashSet<>();
         people.add(order.getCreatedBy());
