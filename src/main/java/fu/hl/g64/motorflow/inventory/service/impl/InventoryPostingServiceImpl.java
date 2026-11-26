@@ -275,16 +275,26 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 .map(p -> new PoolKey(p.fromStoreId(), p.fromStatus(), p.productId())).toList(),
                 namedLots(postings.stream().map(MovePosting::lots).toList()), now);
         Set<Long> checkedStores = new HashSet<>();
-        List<List<LotQuantity>> moved = new ArrayList<>();
+        List<ChosenMove> chosen = new ArrayList<>(postings.size());
+        Set<LotKey> destKeys = new HashSet<>();
         for (MovePosting p : postings) {
             Product product = batch.product(p.productId());
             List<Pick> picks = choose(p.fromStoreId(), product, p.fromStatus(), p.quantity(), p.lots(),
                     p.movementType(), batch, now);
+            for (Pick pick : picks) {
+                destKeys.add(new LotKey(pick.lot.getId(), p.toStoreId(), p.toStatus()));
+            }
+            chosen.add(new ChosenMove(p, product, picks));
+        }
+        lockDestinationLotBalances(destKeys, batch.locked, now);
+        List<List<LotQuantity>> moved = new ArrayList<>(chosen.size());
+        for (ChosenMove item : chosen) {
+            MovePosting p = item.posting;
             StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
             StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
             List<LotQuantity> line = new ArrayList<>();
-            for (Pick pick : picks) {
-                BigDecimal unitCost = costOf(product, pick.lot);
+            for (Pick pick : item.picks) {
+                BigDecimal unitCost = costOf(item.product, pick.lot);
                 post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
                         p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
                 post(to, pick.lot, p.toStatus(), pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
@@ -327,32 +337,48 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         Batch batch = batch(postings.stream().map(SplitMovePosting::productId).toList(), List.of(),
                 namedLots(postings.stream().map(SplitMovePosting::lots).toList()), now);
         Set<Long> checkedStores = new HashSet<>();
+        List<ChosenSplit> chosen = new ArrayList<>(prepared.size());
+        Set<LotKey> destKeys = new HashSet<>();
         for (PreparedSplit row : prepared) {
             SplitMovePosting p = row.posting;
             Product product = batch.product(p.productId());
             int total = row.wanted.values().stream().mapToInt(Integer::intValue).sum();
             List<Pick> picks = choose(p.fromStoreId(), product, p.fromStatus(), total, p.lots(), p.movementType(),
                     batch, now);
-            StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
-            StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
             Iterator<Map.Entry<StockStatus, Integer>> statuses = row.wanted.entrySet().iterator();
             Map.Entry<StockStatus, Integer> filling = statuses.next();
             int left = filling.getValue();
+            List<SplitPick> splitPicks = new ArrayList<>(picks.size());
             for (Pick pick : picks) {
-                BigDecimal unitCost = costOf(product, pick.lot);
-                post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
-                        p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
                 int lotLeft = pick.quantity;
+                List<StatusShare> shares = new ArrayList<>();
                 while (lotLeft > 0) {
                     if (left == 0) {
                         filling = statuses.next();
                         left = filling.getValue();
                     }
                     int part = Math.min(lotLeft, left);
-                    post(to, pick.lot, filling.getKey(), part, unitCost, p.movementType(), p.source(), p.reason(),
-                            p.performedBy(), period, now, now, checkedStores, batch.locked);
+                    shares.add(new StatusShare(filling.getKey(), part));
+                    destKeys.add(new LotKey(pick.lot.getId(), p.toStoreId(), filling.getKey()));
                     lotLeft -= part;
                     left -= part;
+                }
+                splitPicks.add(new SplitPick(pick, shares));
+            }
+            chosen.add(new ChosenSplit(p, product, splitPicks));
+        }
+        lockDestinationLotBalances(destKeys, batch.locked, now);
+        for (ChosenSplit row : chosen) {
+            SplitMovePosting p = row.posting;
+            StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
+            StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
+            for (SplitPick sp : row.picks) {
+                BigDecimal unitCost = costOf(row.product, sp.pick.lot);
+                post(from, sp.pick.lot, p.fromStatus(), -sp.pick.quantity, unitCost, p.movementType(), p.source(),
+                        p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
+                for (StatusShare share : sp.shares) {
+                    post(to, sp.pick.lot, share.status, share.quantity, unitCost, p.movementType(), p.source(),
+                            p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
                 }
             }
         }
@@ -435,6 +461,18 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private record PreparedSplit(SplitMovePosting posting, Map<StockStatus, Integer> wanted) {
     }
 
+    private record ChosenMove(MovePosting posting, Product product, List<Pick> picks) {
+    }
+
+    private record StatusShare(StockStatus status, int quantity) {
+    }
+
+    private record SplitPick(Pick pick, List<StatusShare> shares) {
+    }
+
+    private record ChosenSplit(SplitMovePosting posting, Product product, List<SplitPick> picks) {
+    }
+
     /** Lots still available to a later line of the same part in this document. */
     private static final class Held {
         private final Lot lot;
@@ -498,6 +536,48 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             toRefresh.forEach(em::refresh);
         }
         return locked;
+    }
+
+    /** Bulk-creates and locks every missing destination lot balance in {@code (lotId, storeId, stockStatus)} order. */
+    private void lockDestinationLotBalances(Collection<LotKey> destKeys, Map<LotKey, LotBalance> locked,
+                                            LocalDateTime now) {
+        List<LotKey> ordered = destKeys.stream()
+                .filter(key -> !locked.containsKey(key))
+                .distinct()
+                .sorted(Comparator.comparingLong(LotKey::lotId)
+                        .thenComparingLong(LotKey::storeId)
+                        .thenComparing(key -> key.status().name()))
+                .toList();
+        if (ordered.isEmpty()) {
+            return;
+        }
+        Long[] lotIds = ordered.stream().map(LotKey::lotId).toArray(Long[]::new);
+        Long[] storeIds = ordered.stream().map(LotKey::storeId).toArray(Long[]::new);
+        String[] statuses = ordered.stream().map(key -> key.status().name()).toArray(String[]::new);
+        lotBalances.insertIfMissingBatch(lotIds, storeIds, statuses, now);
+
+        Set<Long> distinctLotIds = ordered.stream().map(LotKey::lotId).collect(Collectors.toSet());
+        Set<Long> distinctStoreIds = ordered.stream().map(LotKey::storeId).collect(Collectors.toSet());
+        Set<StockStatus> distinctStatuses = ordered.stream().map(LotKey::status)
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(StockStatus.class)));
+        List<String> exactKeys = ordered.stream()
+                .map(key -> key.lotId() + ":" + key.storeId() + ":" + key.status().name())
+                .toList();
+
+        Set<Object> managedIds = managedIds(LotBalance.class);
+        List<LotBalance> rows = lotBalances.findAllByKeysForUpdate(distinctLotIds, distinctStoreIds, distinctStatuses,
+                exactKeys);
+        List<LotBalance> toRefresh = new ArrayList<>();
+        for (LotBalance row : rows) {
+            if (managedIds.contains(row.getId())) {
+                toRefresh.add(row);
+            }
+            locked.put(new LotKey(row.getLotId(), row.getStoreId(), row.getStockStatus()), row);
+        }
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
+        }
     }
 
     private static List<Long> namedLots(List<List<LotQuantity>> lines) {
