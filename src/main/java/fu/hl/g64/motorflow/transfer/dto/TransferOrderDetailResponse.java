@@ -53,7 +53,7 @@ public record TransferOrderDetailResponse(
                        Integer damagedQty, Integer shortageQty, Long makeupForCaseId, Integer wrongItemQty,
                        Integer wrongPendingQty, Integer wrongAwaitingSourceQty, Integer wrongConfirmedQty,
                        Integer wrongReturnedQty, Integer noReplacementQty, Integer latePendingQty,
-                       Boolean receiverMiscounted) {
+                       Boolean receiverMiscounted, Integer legacyExcessQty) {
     }
 
     /** A lot taken out of the source on dispatch (BR-75). */

@@ -772,7 +772,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                             staff ? null : figure.rules().wrongConfirmed(),
                             staff ? null : figure.rules().wrongReturned(),
                             staff ? null : figure.rules().noReplacement(), staff ? null : figure.rules().latePending(),
-                            staff ? null : figure.rules().miscounted());
+                            staff ? null : figure.rules().miscounted(),
+                            staff ? null : figure.legacyExcess());
                 }).toList(),
                 orders.findDispatchedLots(id).stream().map(lot -> new TransferOrderDetailResponse.Lot(
                         lot.getProductId(), lot.getLotId(), lot.getManufacturerLotNo(), lot.getExpiryDate(),
