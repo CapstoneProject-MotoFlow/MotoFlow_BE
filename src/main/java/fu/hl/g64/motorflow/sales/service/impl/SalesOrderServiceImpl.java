@@ -382,8 +382,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 now.toLocalDate());
         order.submit(now);
         // GVHD 20/11: the draft becomes the order sold now (or the waiting order if nothing can be sold now).
-        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
-        orderLines.flush();
+        orderLines.deleteBySalesOrderId(id);
         return openSplit(seller, order, shares, content, now, expected);
     }
 
@@ -544,8 +543,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     @Override
     public void deleteDraft(AuthenticatedUser seller, long id) {
         SalesOrder order = lockOwnDraft(seller, id);
-        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(id));
-        orderLines.flush();
+        orderLines.deleteBySalesOrderId(id);
         orders.delete(order);
     }
 
@@ -565,8 +563,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         Content content = content(seller, request, now);
         order.changeDraft(content.store().getId(), content.customer(), request.priceType(), content.rate(),
                 text(request.note()), now);
-        orderLines.deleteAll(orderLines.findBySalesOrderIdOrderByLineNoAsc(order.getId()));
-        orderLines.flush();
+        orderLines.deleteBySalesOrderId(order.getId());
         saveLines(order, request, content);
         return content;
     }
@@ -689,7 +686,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 existing.clearDelivery();
             }
         }
-        orderLines.deleteAll(removed);
+        if (!removed.isEmpty()) {
+            orderLines.deleteAllInBatch(removed);
+        }
         orderLines.saveAll(added);
         orderLines.flush();
 
@@ -933,7 +932,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG307", id);
         }
         // PM 21/11 (BE-5): after its last day the deposit waits for the Branch Manager's forfeit, not a release.
-        OrderDeposits.State deposit = deposits.of(order, collections.of(id));
+        OrderDeposits.State deposit = deposits.of(order, collections.of(order));
         if (deposit.status() == DepositStatus.EXPIRED) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG321", order.getDepositExpiresOn().format(DAY));
         }
@@ -1023,7 +1022,9 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 == line.getRequestedQty()).toList();
         taken.stream().filter(line -> !gone.contains(line))
                 .forEach(line -> line.keepWaiting(line.getRequestedQty() - released.get(line.getId())));
-        orderLines.deleteAll(gone);
+        if (!gone.isEmpty()) {
+            orderLines.deleteAllInBatch(gone);
+        }
         orderLines.flush();
         auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, id, SalesOrderHistory.VERSIONED, seller.id(), null,
                 previous, SalesOrderHistory.snapshot(version + 1, SalesOrderHistory.CAUSE_RELEASE, order,
@@ -1469,7 +1470,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                 ? guide.parts(order.getStoreId(), productIds, now.toLocalDate(), id) : Map.of();
         Map<Long, String> reasons = shortReasons(steps, lines);
         boolean draft = order.isDraft();
-        OrderCollections.Money collected = staff || draft ? null : collections.of(id);
+        OrderCollections.Money collected = staff || draft ? null : collections.of(order);
         OrderDeposits.State deposit = collected == null ? null : deposits.of(order, collected);
         Set<Long> people = new HashSet<>();
         people.add(order.getCreatedBy());

@@ -159,6 +159,7 @@ abstract class SalesOrderUnitTestBase {
         when(guide.parts(anyLong(), anyCollection(), any())).thenAnswer(this::stock);
         when(guide.parts(anyLong(), anyCollection(), any(), any())).thenAnswer(this::stock);
         when(collections.of(anyLong())).thenReturn(new OrderCollections.Money(List.of(), Map.of(), 0, 0, 0, 0, 0, 0));
+        when(collections.of(any(SalesOrder.class))).thenReturn(new OrderCollections.Money(List.of(), Map.of(), 0, 0, 0, 0, 0, 0));
 
         when(orders.save(any())).thenAnswer(inv -> {
             SalesOrder order = inv.getArgument(0);

@@ -82,7 +82,9 @@ public class OpeningBalanceServiceImpl implements OpeningBalanceService {
             }
         }
 
-        lines.deleteAll(old);
+        if (!old.isEmpty()) {
+            lines.deleteAllInBatch(old);
+        }
         lines.flush();
         LocalDateTime now = LocalDateTime.now(clock);
         lines.saveAll(sent.stream().map(item -> {

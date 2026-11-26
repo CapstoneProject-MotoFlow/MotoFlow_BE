@@ -106,7 +106,10 @@ public class DocumentServiceImpl implements DocumentService {
         int pageSize = Math.clamp(size, 1, 100);
         List<DocumentRow> rows = documents.find(filter, isOwner(user), pageNo * pageSize, pageSize).stream()
                 .map(DocumentServiceImpl::row).toList();
-        return new PageResponse<>(rows, documents.count(filter), pageNo, pageSize);
+        long total = rows.size() < pageSize && (pageNo == 0 || !rows.isEmpty())
+                ? (long) pageNo * pageSize + rows.size()
+                : documents.count(filter);
+        return new PageResponse<>(rows, total, pageNo, pageSize);
     }
 
     // UC-79

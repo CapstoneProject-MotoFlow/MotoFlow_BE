@@ -117,7 +117,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
             requireNotWaiting(order);
             requireConfirmed(order);
             long total = total(orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId));
-            long payable = collections.of(orderId).payable(total);
+            long payable = collections.of(order).payable(total);
             if (payable == 0) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG180");
             }
@@ -152,7 +152,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
             requireNotWaiting(order);
             requireConfirmed(order);
             long total = total(orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId));
-            long payable = collections.of(orderId).payable(total);
+            long payable = collections.of(order).payable(total);
             if (payable == 0) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG180");
             }
@@ -195,8 +195,9 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
     @Override
     public SettlementResult recordRefund(AuthenticatedUser seller, long orderId, OrderRefundRequest request) {
         Long refundId = transactions.execute(status -> {
-            requireNotWaiting(lockForSeller(seller, orderId));
-            OrderCollections.Money money = collections.of(orderId);
+            SalesOrder order = lockForSeller(seller, orderId);
+            requireNotWaiting(order);
+            OrderCollections.Money money = collections.of(order);
             // BR-45: the same refund sent twice finds less still refundable.
             if (request.expectedRefundable() != money.refundable()) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG194");
@@ -214,7 +215,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
             SalesOrder order = lockForSeller(seller, orderId);
             Payment payment = unverifiedRow(orderId, paymentId);
             if (payment.getPaymentType() == PaymentType.REFUND) {
-                OrderCollections.Money money = collections.of(orderId);
+                OrderCollections.Money money = collections.of(order);
                 if (money.amountOf(payment) > money.netCollected()) {
                     throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG183",
                             money(Math.max(0, money.netCollected())));
@@ -252,7 +253,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         requireVersion(request.version(), currentVersion(orderId));
         List<SalesOrderLine> lines = orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId);
         long total = total(lines);
-        OrderCollections.Money money = collections.of(orderId);
+        OrderCollections.Money money = collections.of(order);
         requireVerified(money);
         long unpaid = total - money.netCollected();
         if (unpaid > 0) {
@@ -283,7 +284,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         }
         List<SalesOrderLine> lines = orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId);
         long total = total(lines);
-        OrderCollections.Money money = collections.of(orderId);
+        OrderCollections.Money money = collections.of(order);
         requireVerified(money);
         long unpaid = total - money.netCollected();
         if (unpaid < 0) {
@@ -320,7 +321,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                     reference(PaymentMethod.BANK_TRANSFER, request.transactionReference()), true, seller.id(), now));
         }
         if (cash + transfer > 0) {
-            money = collections.of(orderId);
+            money = collections.of(order);
         }
         order.approveCredit(credit, seller.id(), now);
         completeLocked(seller, order, lines, money, new Credit(customer.getId(), credit, request.dueDate()));
@@ -341,7 +342,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
         if (order.getStatus() == SalesOrderStatus.COMPLETED) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG164");
         }
-        OrderCollections.Money money = collections.of(orderId);
+        OrderCollections.Money money = collections.of(order);
         requireVerified(money);
         LocalDateTime now = LocalDateTime.now(clock);
         long held = money.netCollected();
@@ -415,7 +416,7 @@ public class SalesOrderSettlementServiceImpl implements SalesOrderSettlementServ
                     return false;
                 }
                 List<SalesOrderLine> lines = orderLines.findBySalesOrderIdOrderByLineNoAsc(orderId);
-                OrderCollections.Money money = collections.of(orderId);
+                OrderCollections.Money money = collections.of(order);
                 if (money.unverifiedCount() > 0 || money.netCollected() != total(lines)) {
                     return false;
                 }

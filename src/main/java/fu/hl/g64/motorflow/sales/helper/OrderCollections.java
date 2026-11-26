@@ -4,6 +4,7 @@ import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentStatus;
 import fu.hl.g64.motorflow.receivable.entity.enums.PaymentType;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
+import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -26,7 +27,18 @@ public class OrderCollections {
     private final SalesOrderRepository orders;
 
     /** The order's payments and refunds, oldest first, with what they add up to. */
+    public Money of(SalesOrder order) {
+        return of(order.getId(), order.getDepositAppliedAmount());
+    }
+
+    /** The order's payments and refunds, oldest first, with what they add up to. */
     public Money of(long orderId) {
+        return orders.findById(orderId)
+                .map(this::of)
+                .orElseGet(() -> of(orderId, orders.depositAppliedTo(orderId)));
+    }
+
+    private Money of(long orderId, long fromDeposit) {
         List<Payment> rows = payments.findBySalesOrderIdOrderByRecordedAtAscIdAsc(orderId);
         Map<Long, Long> corrections = rows.isEmpty() ? Map.of()
                 : payments.sumCorrections(rows.stream().map(Payment::getId).toList()).stream()
@@ -60,7 +72,6 @@ public class OrderCollections {
                 }
             }
         }
-        long fromDeposit = orders.depositAppliedTo(orderId);
         return new Money(rows, corrections, paid, refunded, unverifiedPaid, unverifiedRefunded, unverified,
                 fromDeposit);
     }

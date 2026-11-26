@@ -1,7 +1,6 @@
 package fu.hl.g64.motorflow.sales.repository;
 
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
-import fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import jakarta.persistence.LockModeType;
@@ -47,7 +46,27 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
               and o.status <> fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.DRAFT""")
     Page<SalesOrder> findByCustomer(Long customerId, Long storeId, Pageable pageable);
 
-    long countByStoreIdAndStatus(Long storeId, SalesOrderStatus status);
+    /** Orders of the store needing BM attention on the home page: unassigned picking, awaiting confirmation, awaiting completion. */
+    @Query("""
+            select coalesce(sum(case when o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING
+                                          and not exists (select t.id from WarehouseTask t where t.salesOrderId = o.id
+                                                          and t.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED)
+                                     then 1L else 0L end), 0L) as toAssign,
+                   coalesce(sum(case when o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED
+                                     then 1L else 0L end), 0L) as awaitingConfirmation,
+                   coalesce(sum(case when o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.CONFIRMED
+                                     then 1L else 0L end), 0L) as awaitingCompletion
+            from SalesOrder o
+            where o.storeId = :storeId""")
+    HomeCounts countHomeWork(Long storeId);
+
+    interface HomeCounts {
+        long getToAssign();
+
+        long getAwaitingConfirmation();
+
+        long getAwaitingCompletion();
+    }
 
     /**
      * Sales summary: [store id, orders completed in [from, to), their revenue (delivered quantity × actual unit price),
@@ -97,15 +116,6 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
               AND (CAST(:storeId AS BIGINT) IS NULL OR r.store_id = :storeId)
             GROUP BY r.store_id""", nativeQuery = true)
     List<Object[]> sumDebtCollectedByStore(Long storeId, LocalDateTime from, LocalDateTime to);
-
-    /** Orders of the store waiting to be picked that no Staff member has been given yet. */
-    @Query("""
-            select count(o) from SalesOrder o
-            where o.storeId = :storeId
-              and o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING
-              and not exists (select t.id from WarehouseTask t where t.salesOrderId = o.id
-                              and t.status <> fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus.CANCELLED)""")
-    long countAwaitingPickingWithoutTask(Long storeId);
 
     /** The columns of {@link #depositFigures} and {@link #depositFiguresOf}. */
     String DEPOSIT_FIGURES = """

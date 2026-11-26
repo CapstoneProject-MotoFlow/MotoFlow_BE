@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.adjustment.repository;
 import fu.hl.g64.motorflow.adjustment.entity.AdjustmentStockLine;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.Collection;
@@ -15,6 +16,8 @@ public interface AdjustmentStockLineRepository extends JpaRepository<AdjustmentS
     List<AdjustmentStockLine> findByAdjustmentRequestIdIn(Collection<Long> adjustmentRequestIds);
 
     /** The lines of a draft being replaced or thrown away. */
+    @Modifying(flushAutomatically = true)
+    @Query("delete from AdjustmentStockLine l where l.adjustmentRequestId = :adjustmentRequestId")
     void deleteByAdjustmentRequestId(Long adjustmentRequestId);
 
     /** Statuses whose requests still hold stock they may take: submitted and not applied, rejected or withdrawn. */
