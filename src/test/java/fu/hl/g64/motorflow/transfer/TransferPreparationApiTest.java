@@ -46,7 +46,6 @@ class TransferPreparationApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.preparer.taskStatus").value("ASSIGNED"))
                 .andExpect(jsonPath("$.canRecord").value(true))
                 .andExpect(jsonPath("$.lines[0].sku").value("MA-PHANH-01"))
-                .andExpect(jsonPath("$.lines[0].barcodes[0]").value("8930001"))
                 .andExpect(jsonPath("$.lines[0].storageArea").value("Kệ A"))
                 .andExpect(jsonPath("$.lines[0].binLocation").value("A-01"))
                 .andExpect(jsonPath("$.lines[0].plannedQty").value(4))

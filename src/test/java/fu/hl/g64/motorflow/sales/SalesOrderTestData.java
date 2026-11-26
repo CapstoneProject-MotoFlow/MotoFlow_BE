@@ -54,7 +54,7 @@ public abstract class SalesOrderTestData extends ApiTestUsers {
     protected String staffToken;
     protected String otherStaffToken;
 
-    /** 100,000 đ; 3 units expiring 01/12, 5 without expiry, 2 expired on 01/10; average cost 60,000. Barcode 8930001. */
+    /** 100,000 đ; 3 units expiring 01/12, 5 without expiry, 2 expired on 01/10; average cost 60,000. */
     protected long pad;
     /** 85,000 đ; 4 units at 70,000. */
     protected long oil;
@@ -89,8 +89,6 @@ public abstract class SalesOrderTestData extends ApiTestUsers {
         lamp = part("DEN-01", "Đèn pha", category);
         old = part("CU-01", "Phụ tùng cũ", category);
         jdbc.update("UPDATE product SET status = 'DISCONTINUED', discontinued_at = now() WHERE id = ?", old);
-        jdbc.update("INSERT INTO product_identifier (product_id, identifier_type, identifier_value) "
-                + "VALUES (?, 'BARCODE', '8930001')", pad);
         price(pad, 100_000, TODAY.minusDays(12).atStartOfDay());
         price(oil, 85_000, TODAY.minusDays(12).atStartOfDay());
         price(old, 50_000, TODAY.minusDays(12).atStartOfDay());

@@ -13,7 +13,7 @@ import java.util.List;
 public record ProductResponse(long id, String sku, String partName, long categoryId, String categoryName,
                               String brand, String countryOfOrigin, String baseUnit, String specifications,
                               ProductStatus status, LocalDateTime discontinuedAt, List<String> oemCodes,
-                              List<String> barcodes, List<String> imageUrls, List<VehicleModelResponse> vehicleModels,
+                              List<String> imageUrls, List<VehicleModelResponse> vehicleModels,
                               Long retailPrice, Stock stock,
                               LocalDateTime createdAt, LocalDateTime updatedAt) {
 

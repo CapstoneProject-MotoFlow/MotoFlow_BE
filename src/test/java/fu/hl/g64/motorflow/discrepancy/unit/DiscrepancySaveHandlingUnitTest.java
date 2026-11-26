@@ -7,7 +7,7 @@ import fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.account.repository.UserAccountRepository;
 import fu.hl.g64.motorflow.catalog.entity.enums.ProductStatus;
-import fu.hl.g64.motorflow.catalog.repository.ProductIdentifierRepository;
+import fu.hl.g64.motorflow.catalog.repository.ProductOemCodeRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductVehicleModelRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
@@ -116,7 +116,7 @@ class DiscrepancySaveHandlingUnitTest {
     @Mock AuditLogRepository auditLog;
     @Mock ReceivingLedger ledger;
     @Mock DiscrepancySettlement settlement;
-    @Mock ProductIdentifierRepository identifiers;
+    @Mock ProductOemCodeRepository oemCodes;
     @Mock ProductVehicleModelRepository vehicles;
     @Mock RetailPriceService retailPrices;
     @Mock PricingPolicyRepository pricingPolicies;
@@ -134,7 +134,7 @@ class DiscrepancySaveHandlingUnitTest {
     @BeforeEach
     void data() {
         service = new DiscrepancyServiceImpl(discrepancies, events, receipts, receiptLines, orders, suppliers, stores,
-                products, users, lots, posting, attachments, auditLog, ledger, settlement, identifiers, vehicles,
+                products, users, lots, posting, attachments, auditLog, ledger, settlement, oemCodes, vehicles,
                 retailPrices, pricingPolicies, balances, notifications, CLOCK);
         grn = withId(GoodsReceiptNote.supplierDelivery(30, "PX-001", NOW.toLocalDate(), null, null,
                 NOW.minusDays(1)), 40);

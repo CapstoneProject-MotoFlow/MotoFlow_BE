@@ -39,8 +39,6 @@ public record ProductRequest(
 
         List<@NotBlank(message = "Mã OEM không được để trống.") @Size(max = 100, message = "Mã OEM tối đa 100 ký tự.") String> oemCodes,
 
-        List<@NotBlank(message = "Mã vạch không được để trống.") @Size(max = 100, message = "Mã vạch tối đa 100 ký tự.") String> barcodes,
-
         List<@NotNull Long> vehicleModelIds,
 
         @Size(max = 3, message = "Tối đa 3 ảnh.")
@@ -48,7 +46,6 @@ public record ProductRequest(
 
     public ProductRequest {
         oemCodes = oemCodes == null ? List.of() : oemCodes;
-        barcodes = barcodes == null ? List.of() : barcodes;
         vehicleModelIds = vehicleModelIds == null ? List.of() : vehicleModelIds;
         imageUrls = imageUrls == null ? List.of() : imageUrls;
     }

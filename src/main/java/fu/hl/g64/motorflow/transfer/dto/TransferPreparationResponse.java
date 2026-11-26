@@ -17,7 +17,7 @@ public record TransferPreparationResponse(long id, TransferOrderStatus status, l
     public record Preparer(long id, String name, WarehouseTaskStatus taskStatus) {
     }
 
-    public record Line(long id, long productId, String sku, String partName, String baseUnit, List<String> barcodes,
+    public record Line(long id, long productId, String sku, String partName, String baseUnit,
                        String storageArea, String binLocation, int plannedQty, Integer preparedQty, Integer shortQty,
                        String shortReason, int sellableQty, List<LotToPick> pickFirst) {
     }

@@ -1,8 +1,5 @@
 package fu.hl.g64.motorflow.sales.helper;
 
-import fu.hl.g64.motorflow.catalog.entity.ProductIdentifier;
-import fu.hl.g64.motorflow.catalog.entity.enums.IdentifierType;
-import fu.hl.g64.motorflow.catalog.repository.ProductIdentifierRepository;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
 import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -30,7 +27,6 @@ public class PickingGuide {
 
     private final SellableLotRepository sellable;
     private final StockBalanceRepository balances;
-    private final ProductIdentifierRepository identifiers;
     private final SalesOrderLineRepository orderLines;
 
     /** One lot to take from, with how many of the needed units it covers. */
@@ -44,7 +40,7 @@ public class PickingGuide {
      * first lots in picking order.
      */
     public record Part(int sellableQty, int heldByOthersQty, String storageArea, String binLocation,
-                       List<String> barcodes, List<Lot> lotsInOrder, List<Integer> lotQuantities) {
+                       List<Lot> lotsInOrder, List<Integer> lotQuantities) {
 
         /** The lots that cover {@code needed} units, in picking order; fewer units if the warehouse holds fewer. */
         public List<LotToPick> pickFirst(int needed) {
@@ -88,10 +84,6 @@ public class PickingGuide {
         }
         Map<Long, StockBalance> places = balances.findByStoreIdAndProductIdIn(storeId, productIds).stream()
                 .collect(Collectors.toMap(StockBalance::getProductId, b -> b));
-        Map<Long, List<String>> barcodes = identifiers.findByProductIdIn(productIds).stream()
-                .filter(x -> x.getIdentifierType() == IdentifierType.BARCODE)
-                .collect(Collectors.groupingBy(ProductIdentifier::getProductId,
-                        Collectors.mapping(ProductIdentifier::getIdentifierValue, Collectors.toList())));
         Map<Long, Part> parts = new HashMap<>();
         for (Long productId : productIds) {
             int holding = heldByOthers.getOrDefault(productId, 0);
@@ -112,7 +104,7 @@ public class PickingGuide {
             StockBalance place = places.get(productId);
             parts.put(productId, new Part(left.stream().mapToInt(Integer::intValue).sum(), holding,
                     place == null ? null : place.getStorageArea(), place == null ? null : place.getBinLocation(),
-                    barcodes.getOrDefault(productId, List.of()), inOrder, left));
+                    inOrder, left));
         }
         return parts;
     }

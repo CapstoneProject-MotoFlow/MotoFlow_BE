@@ -1510,7 +1510,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             Integer shortQty = line.getPickedQty() == null ? null : line.getRequestedQty() - line.getPickedQty();
             rows.add(new SalesOrderDetail.Line(line.getId(), line.getLineNo(), part.getId(), part.getSku(),
                     part.getPartName(), part.getBaseUnit(), part.getStatus(),
-                    held == null ? List.of() : held.barcodes(), held == null ? null : held.storageArea(),
+                    held == null ? null : held.storageArea(),
                     held == null ? null : held.binLocation(), line.getRequestedQty(), line.getPickedQty(), shortQty,
                     reasons.get(line.getProductId()), line.getDeliveredQty(),
                     staff ? null : line.getReferencePrice(), staff ? null : line.getActualUnitPrice(),

@@ -231,8 +231,7 @@ class InventoryApiTest extends ApiTestUsers {
 
     @Test
     void searchFindsOemCodesAndBins() throws Exception {
-        jdbc.update("INSERT INTO product_identifier (product_id, identifier_type, identifier_value) VALUES "
-                + "(?, 'OEM', '45121-KVB-900'), (?, 'BARCODE', '8931234567890')", chain, chain);
+        jdbc.update("INSERT INTO product_oem_code (product_id, oem_code) VALUES (?, '45121-KVB-900')", chain);
         place(branch, brake, "Kệ A", "A-03");
         stock("owner", "?q=kvb-9").andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));
         stock("owner", "?q=xich 428").andExpect(jsonPath("$.items[*].sku", contains("XICH-428")));

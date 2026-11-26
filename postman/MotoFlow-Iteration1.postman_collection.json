@@ -3035,7 +3035,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sku\": \" bt-{{run}}-01 \",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"oemCodes\": [\n    \"06455-{{run}}\"\n  ],\n  \"barcodes\": [\n    \"893{{run}}01\"\n  ],\n  \"vehicleModelIds\": [\n    {{vmId}}\n  ],\n  \"imageUrls\": [\n    \"https://res.cloudinary.com/demo/image/upload/sample.jpg\"\n  ]\n}",
+              "raw": "{\n  \"sku\": \" bt-{{run}}-01 \",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"oemCodes\": [\n    \"06455-{{run}}\"\n  ],\n  \"vehicleModelIds\": [\n    {{vmId}}\n  ],\n  \"imageUrls\": [\n    \"https://res.cloudinary.com/demo/image/upload/sample.jpg\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3052,11 +3052,10 @@
                   "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
                   "const b = pm.response.json();",
                   "pm.collectionVariables.set('productId', b.id);",
-                  "pm.test('SKU viết hoa, đủ mã OEM, mã vạch, dòng xe, ảnh; chưa có tồn kho', () => {",
+                  "pm.test('SKU viết hoa, đủ mã OEM, dòng xe, ảnh; chưa có tồn kho', () => {",
                   "    pm.expect(b.sku).to.eql('BT-' + pm.collectionVariables.get('RUN') + '-01');",
                   "    pm.expect(b.status).to.eql('ACTIVE');",
                   "    pm.expect(b.oemCodes).to.eql(['06455-' + pm.collectionVariables.get('run')]);",
-                  "    pm.expect(b.barcodes.length).to.eql(1);",
                   "    pm.expect(b.vehicleModels[0].id).to.eql(Number(pm.collectionVariables.get('vmId')));",
                   "    pm.expect(b.imageUrls.length).to.eql(1);",
                   "    pm.expect(b.stock).to.eql(null);",
@@ -3105,50 +3104,6 @@
                 "exec": [
                   "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
                   "pm.test('Mã lỗi MSG53', () => pm.expect(pm.response.json().code).to.eql('MSG53'));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Mã vạch đã gán cho phụ tùng khác",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{baseUrl}}/api/v1/products",
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "{{ownerToken}}",
-                  "type": "string"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"sku\": \"bt-{{run}}-02\",\n  \"partName\": \"Bố thắng đĩa trước {{run}}\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"barcodes\": [\n    \"893{{run}}01\"\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
-                  "pm.test('Mã lỗi MSG54', () => pm.expect(pm.response.json().code).to.eql('MSG54'));"
                 ]
               }
             }
@@ -3828,7 +3783,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"sku\": \"KHONG-DOI\",\n  \"partName\": \"Bố thắng đĩa trước {{run}} (sửa)\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"oemCodes\": [\n    \"06455-{{run}}\",\n    \"06455-{{run}}-B\"\n  ],\n  \"barcodes\": [],\n  \"vehicleModelIds\": [\n    {{vmId}}\n  ],\n  \"imageUrls\": []\n}",
+              "raw": "{\n  \"sku\": \"KHONG-DOI\",\n  \"partName\": \"Bố thắng đĩa trước {{run}} (sửa)\",\n  \"categoryId\": {{catLeafId}},\n  \"brand\": \"Nissin\",\n  \"countryOfOrigin\": \"Thái Lan\",\n  \"baseUnit\": \"Bộ\",\n  \"specifications\": \"Dùng cho phanh đĩa trước\",\n  \"oemCodes\": [\n    \"06455-{{run}}\",\n    \"06455-{{run}}-B\"\n  ],\n  \"vehicleModelIds\": [\n    {{vmId}}\n  ],\n  \"imageUrls\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3844,10 +3799,9 @@
                 "exec": [
                   "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
                   "const b = pm.response.json();",
-                  "pm.test('SKU giữ nguyên, mã OEM và mã vạch được thay', () => {",
+                  "pm.test('SKU giữ nguyên, mã OEM được thay', () => {",
                   "    pm.expect(b.sku).to.eql('BT-' + pm.collectionVariables.get('RUN') + '-01');",
                   "    pm.expect(b.oemCodes.length).to.eql(2);",
-                  "    pm.expect(b.barcodes.length).to.eql(0);",
                   "    pm.expect(b.imageUrls.length).to.eql(0);",
                   "});"
                 ]

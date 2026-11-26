@@ -174,8 +174,7 @@ public class TransferPreparationServiceImpl implements TransferPreparationServic
             int needed = line.getPreparedQty() != null ? line.getPreparedQty() : line.getPlannedQty();
             Integer shortQty = line.getPreparedQty() == null ? null : line.getPlannedQty() - line.getPreparedQty();
             return new TransferPreparationResponse.Line(line.getId(), part.getId(), part.getSku(), part.getPartName(),
-                    part.getBaseUnit(), held == null ? List.of() : held.barcodes(),
-                    held == null ? null : held.storageArea(), held == null ? null : held.binLocation(),
+                    part.getBaseUnit(), held == null ? null : held.storageArea(), held == null ? null : held.binLocation(),
                     line.getPlannedQty(), line.getPreparedQty(), shortQty,
                     shortQty != null && shortQty > 0 ? reasons.get(line.getProductId()) : null,
                     held == null ? 0 : held.sellableQty(), held == null ? List.of() : held.pickFirst(needed));

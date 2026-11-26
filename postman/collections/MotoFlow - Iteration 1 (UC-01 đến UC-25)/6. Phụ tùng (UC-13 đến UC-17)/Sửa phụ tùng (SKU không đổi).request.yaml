@@ -18,7 +18,6 @@ body:
         "06455-{{run}}",
         "06455-{{run}}-B"
       ],
-      "barcodes": [],
       "vehicleModelIds": [
         {{vmId}}
       ],
@@ -33,10 +32,9 @@ scripts:
     code: |-
       pm.test('HTTP 200', () => pm.response.to.have.status(200));
       const b = pm.response.json();
-      pm.test('SKU giữ nguyên, mã OEM và mã vạch được thay', () => {
+      pm.test('SKU giữ nguyên, mã OEM được thay', () => {
           pm.expect(b.sku).to.eql('BT-' + pm.collectionVariables.get('RUN') + '-01');
           pm.expect(b.oemCodes.length).to.eql(2);
-          pm.expect(b.barcodes.length).to.eql(0);
           pm.expect(b.imageUrls.length).to.eql(0);
       });
     language: text/javascript

@@ -168,39 +168,39 @@ BEGIN
 
     -- qty_* = opening count per store; NULL means the store does not stock the product.
     CREATE TEMP TABLE demo_product (sku text, part_name text, category text, brand text, origin text, unit text,
-        cost bigint, retail bigint, models text, oem text, barcode text, qty_c int, qty_cg int, qty_hd int,
+        cost bigint, retail bigint, models text, oem text, qty_c int, qty_cg int, qty_hd int,
         expiry_months int) ON COMMIT DROP;
     INSERT INTO demo_product VALUES
-        ('BUG-NGK-CPR8', 'Bugi NGK CPR8EA-9', 'Bugi', 'NGK', 'Nhật Bản', 'Cái', 42000, 65000, 'WAVE,SIR,EXC', '31916-KRM-841', '8936012340011', 60, 25, 20, NULL),
-        ('BUG-NGK-CPR9', 'Bugi NGK CPR9EA-9', 'Bugi', 'NGK', 'Nhật Bản', 'Cái', 45000, 70000, 'VISION,AB,LEAD', '31926-KZR-601', '8936012340028', 50, 20, 18, NULL),
-        ('LGI-WAVE', 'Lọc gió Wave Alpha', 'Lọc gió', 'Honda', 'Việt Nam', 'Cái', 38000, 60000, 'WAVE', '17210-KWW-640', '8936012340035', 40, 15, 12, NULL),
-        ('LGI-VISION', 'Lọc gió Vision', 'Lọc gió', 'Honda', 'Việt Nam', 'Cái', 55000, 85000, 'VISION', '17210-K44-V00', '8936012340042', 35, 12, 10, NULL),
-        ('LGI-AB125', 'Lọc gió Air Blade 125', 'Lọc gió', 'Honda', 'Việt Nam', 'Cái', 62000, 95000, 'AB', '17210-K66-V00', '8936012340059', 30, 10, 8, NULL),
-        ('PIS-WAVE-STD', 'Bộ piston xéc măng Wave 110 (cos STD)', 'Piston - xéc măng', 'Honda', 'Việt Nam', 'Bộ', 210000, 320000, 'WAVE', '13101-KWW-740', '8936012340066', 15, 5, 4, NULL),
-        ('XEC-SIR', 'Bộ xéc măng Sirius', 'Piston - xéc măng', 'Yamaha', 'Việt Nam', 'Bộ', 95000, 150000, 'SIR', '5C6-E1603-00', '8936012340073', 15, 6, 5, NULL),
-        ('MPH-VISION', 'Má phanh trước Vision', 'Má phanh', 'Honda', 'Việt Nam', 'Cặp', 75000, 120000, 'VISION,LEAD', '06455-K44-V01', '8936012340080', 40, 15, 12, NULL),
-        ('MPH-AB', 'Má phanh đĩa trước Air Blade', 'Má phanh', 'Honda', 'Việt Nam', 'Cặp', 85000, 135000, 'AB,SH', '06455-KVG-V01', '8936012340097', 35, 12, 10, NULL),
-        ('MPH-EXC', 'Má phanh trước Exciter 150', 'Má phanh', 'Yamaha', 'Việt Nam', 'Cặp', 90000, 140000, 'EXC', '2PH-F5805-00', '8936012340103', 30, 10, 8, NULL),
-        ('DPH-WAVE', 'Dây phanh sau Wave', 'Dây phanh', 'Honda', 'Việt Nam', 'Cái', 32000, 50000, 'WAVE', '43450-KWW-640', '8936012340110', 30, 10, 10, NULL),
-        ('NX-WAVE', 'Bộ nhông xích Wave (DID)', 'Nhông xích', 'DID', 'Thái Lan', 'Bộ', 240000, 350000, 'WAVE', '06401-KWW-900', '8936012340127', 20, 8, 6, NULL),
-        ('NX-EXC', 'Bộ nhông xích Exciter 150', 'Nhông xích', 'DID', 'Thái Lan', 'Bộ', 380000, 550000, 'EXC', '2ND-F5450-00', '8936012340134', 15, 6, 5, NULL),
-        ('CUROA-VISION', 'Dây curoa Vision', 'Dây curoa', 'Bando', 'Nhật Bản', 'Cái', 185000, 280000, 'VISION', '23100-K44-V01', '8936012340141', 25, 8, 6, NULL),
-        ('CUROA-AB', 'Dây curoa Air Blade 125', 'Dây curoa', 'Bando', 'Nhật Bản', 'Cái', 210000, 320000, 'AB,LEAD', '23100-K35-V01', '8936012340158', 20, 8, 6, NULL),
-        ('CUROA-JAN', 'Dây curoa Janus', 'Dây curoa', 'Yamaha', 'Việt Nam', 'Cái', 175000, 260000, 'JAN', '2BM-E7641-00', '8936012340165', 15, 6, 5, NULL),
-        ('AQ-GS-5', 'Ắc quy GS GTZ5S 12V-3.5Ah', 'Ắc quy', 'GS', 'Việt Nam', 'Chiếc', 290000, 420000, 'WAVE,VISION,SIR,JAN', 'GTZ5S-E', '8936012340172', 20, 6, 6, 24),
-        ('AQ-GS-7', 'Ắc quy GS GTZ7V 12V-6.3Ah', 'Ắc quy', 'GS', 'Việt Nam', 'Chiếc', 420000, 600000, 'AB,SH,EXC', 'GTZ7V', '8936012340189', 15, 5, 4, 24),
-        ('BD-HS1-PH', 'Bóng đèn pha Philips HS1 12V 35/35W', 'Bóng đèn', 'Philips', 'Trung Quốc', 'Cái', 48000, 75000, 'WAVE,SIR', '12636', '8936012340196', 40, 15, 10, NULL),
-        ('BD-LED-T10', 'Bóng đèn xi-nhan LED T10', 'Bóng đèn', 'Osram', 'Trung Quốc', 'Cái', 15000, 25000, NULL, NULL, '8936012340202', 100, 30, 30, NULL),
-        ('NHOT-MOTUL-08', 'Nhớt Motul 3100 Gold 10W40 0.8L', 'Dầu nhớt', 'Motul', 'Pháp', 'Chai', 95000, 130000, 'WAVE,SIR,EXC', NULL, '8936012340219', 120, 40, 35, 36),
-        ('NHOT-CASTROL-1L', 'Nhớt Castrol Power1 10W40 1L', 'Dầu nhớt', 'Castrol', 'Singapore', 'Chai', 115000, 160000, 'EXC,WAVE', NULL, '8936012340226', 100, 35, 30, 36),
-        ('NHOT-HONDA-HS', 'Nhớt hộp số Honda tay ga 120ml', 'Dầu nhớt', 'Honda', 'Việt Nam', 'Chai', 22000, 35000, 'VISION,AB,LEAD,SH', '08294-M99-K8LN9', '8936012340233', 80, 30, 25, 36),
-        ('NHOT-YAMALUBE', 'Nhớt Yamalube tay ga 0.8L', 'Dầu nhớt', 'Yamaha', 'Việt Nam', 'Chai', 85000, 120000, 'JAN', '90793-AT415', '8936012340240', 60, 20, 20, 36),
-        ('LOP-IRC-80', 'Lốp IRC 80/90-17 NR73', 'Lốp - săm', 'IRC', 'Indonesia', 'Chiếc', 280000, 390000, 'WAVE,SIR', 'NR73-80/90-17', '8936012340257', 20, 8, 6, NULL),
-        ('LOP-MICH-90', 'Lốp Michelin City Grip 90/90-14', 'Lốp - săm', 'Michelin', 'Thái Lan', 'Chiếc', 520000, 720000, 'VISION,AB,LEAD', NULL, '8936012340264', 12, 5, 4, NULL),
-        ('SAM-CS-17', 'Săm Chengshin 2.50-17', 'Lốp - săm', 'Chengshin', 'Việt Nam', 'Chiếc', 55000, 85000, 'WAVE,SIR', NULL, '8936012340271', 50, 20, 15, NULL),
-        ('GUONG-VISION', 'Gương chiếu hậu Vision (cặp)', 'Thân vỏ - phụ kiện', 'Honda', 'Việt Nam', 'Cặp', 95000, 150000, 'VISION', '88110-K44-V00', '8936012340288', 15, 5, 5, NULL),
-        ('CDI-WAVE', 'IC (CDI) Wave Alpha', 'IC - CDI', 'Honda', 'Việt Nam', 'Cái', 260000, 380000, 'WAVE', '30410-KWW-641', '8936012340295', 8, 3, NULL, NULL),
-        ('MPH-VF-FELIZ', 'Má phanh xe điện VinFast Feliz S', 'Phanh xe điện', 'VinFast', 'Việt Nam', 'Cặp', 110000, 165000, 'VF', NULL, '8936012340301', 10, NULL, NULL, NULL);
+        ('BUG-NGK-CPR8', 'Bugi NGK CPR8EA-9', 'Bugi', 'NGK', 'Nhật Bản', 'Cái', 42000, 65000, 'WAVE,SIR,EXC', '31916-KRM-841', 60, 25, 20, NULL),
+        ('BUG-NGK-CPR9', 'Bugi NGK CPR9EA-9', 'Bugi', 'NGK', 'Nhật Bản', 'Cái', 45000, 70000, 'VISION,AB,LEAD', '31926-KZR-601', 50, 20, 18, NULL),
+        ('LGI-WAVE', 'Lọc gió Wave Alpha', 'Lọc gió', 'Honda', 'Việt Nam', 'Cái', 38000, 60000, 'WAVE', '17210-KWW-640', 40, 15, 12, NULL),
+        ('LGI-VISION', 'Lọc gió Vision', 'Lọc gió', 'Honda', 'Việt Nam', 'Cái', 55000, 85000, 'VISION', '17210-K44-V00', 35, 12, 10, NULL),
+        ('LGI-AB125', 'Lọc gió Air Blade 125', 'Lọc gió', 'Honda', 'Việt Nam', 'Cái', 62000, 95000, 'AB', '17210-K66-V00', 30, 10, 8, NULL),
+        ('PIS-WAVE-STD', 'Bộ piston xéc măng Wave 110 (cos STD)', 'Piston - xéc măng', 'Honda', 'Việt Nam', 'Bộ', 210000, 320000, 'WAVE', '13101-KWW-740', 15, 5, 4, NULL),
+        ('XEC-SIR', 'Bộ xéc măng Sirius', 'Piston - xéc măng', 'Yamaha', 'Việt Nam', 'Bộ', 95000, 150000, 'SIR', '5C6-E1603-00', 15, 6, 5, NULL),
+        ('MPH-VISION', 'Má phanh trước Vision', 'Má phanh', 'Honda', 'Việt Nam', 'Cặp', 75000, 120000, 'VISION,LEAD', '06455-K44-V01', 40, 15, 12, NULL),
+        ('MPH-AB', 'Má phanh đĩa trước Air Blade', 'Má phanh', 'Honda', 'Việt Nam', 'Cặp', 85000, 135000, 'AB,SH', '06455-KVG-V01', 35, 12, 10, NULL),
+        ('MPH-EXC', 'Má phanh trước Exciter 150', 'Má phanh', 'Yamaha', 'Việt Nam', 'Cặp', 90000, 140000, 'EXC', '2PH-F5805-00', 30, 10, 8, NULL),
+        ('DPH-WAVE', 'Dây phanh sau Wave', 'Dây phanh', 'Honda', 'Việt Nam', 'Cái', 32000, 50000, 'WAVE', '43450-KWW-640', 30, 10, 10, NULL),
+        ('NX-WAVE', 'Bộ nhông xích Wave (DID)', 'Nhông xích', 'DID', 'Thái Lan', 'Bộ', 240000, 350000, 'WAVE', '06401-KWW-900', 20, 8, 6, NULL),
+        ('NX-EXC', 'Bộ nhông xích Exciter 150', 'Nhông xích', 'DID', 'Thái Lan', 'Bộ', 380000, 550000, 'EXC', '2ND-F5450-00', 15, 6, 5, NULL),
+        ('CUROA-VISION', 'Dây curoa Vision', 'Dây curoa', 'Bando', 'Nhật Bản', 'Cái', 185000, 280000, 'VISION', '23100-K44-V01', 25, 8, 6, NULL),
+        ('CUROA-AB', 'Dây curoa Air Blade 125', 'Dây curoa', 'Bando', 'Nhật Bản', 'Cái', 210000, 320000, 'AB,LEAD', '23100-K35-V01', 20, 8, 6, NULL),
+        ('CUROA-JAN', 'Dây curoa Janus', 'Dây curoa', 'Yamaha', 'Việt Nam', 'Cái', 175000, 260000, 'JAN', '2BM-E7641-00', 15, 6, 5, NULL),
+        ('AQ-GS-5', 'Ắc quy GS GTZ5S 12V-3.5Ah', 'Ắc quy', 'GS', 'Việt Nam', 'Chiếc', 290000, 420000, 'WAVE,VISION,SIR,JAN', 'GTZ5S-E', 20, 6, 6, 24),
+        ('AQ-GS-7', 'Ắc quy GS GTZ7V 12V-6.3Ah', 'Ắc quy', 'GS', 'Việt Nam', 'Chiếc', 420000, 600000, 'AB,SH,EXC', 'GTZ7V', 15, 5, 4, 24),
+        ('BD-HS1-PH', 'Bóng đèn pha Philips HS1 12V 35/35W', 'Bóng đèn', 'Philips', 'Trung Quốc', 'Cái', 48000, 75000, 'WAVE,SIR', '12636', 40, 15, 10, NULL),
+        ('BD-LED-T10', 'Bóng đèn xi-nhan LED T10', 'Bóng đèn', 'Osram', 'Trung Quốc', 'Cái', 15000, 25000, NULL, NULL, 100, 30, 30, NULL),
+        ('NHOT-MOTUL-08', 'Nhớt Motul 3100 Gold 10W40 0.8L', 'Dầu nhớt', 'Motul', 'Pháp', 'Chai', 95000, 130000, 'WAVE,SIR,EXC', NULL, 120, 40, 35, 36),
+        ('NHOT-CASTROL-1L', 'Nhớt Castrol Power1 10W40 1L', 'Dầu nhớt', 'Castrol', 'Singapore', 'Chai', 115000, 160000, 'EXC,WAVE', NULL, 100, 35, 30, 36),
+        ('NHOT-HONDA-HS', 'Nhớt hộp số Honda tay ga 120ml', 'Dầu nhớt', 'Honda', 'Việt Nam', 'Chai', 22000, 35000, 'VISION,AB,LEAD,SH', '08294-M99-K8LN9', 80, 30, 25, 36),
+        ('NHOT-YAMALUBE', 'Nhớt Yamalube tay ga 0.8L', 'Dầu nhớt', 'Yamaha', 'Việt Nam', 'Chai', 85000, 120000, 'JAN', '90793-AT415', 60, 20, 20, 36),
+        ('LOP-IRC-80', 'Lốp IRC 80/90-17 NR73', 'Lốp - săm', 'IRC', 'Indonesia', 'Chiếc', 280000, 390000, 'WAVE,SIR', 'NR73-80/90-17', 20, 8, 6, NULL),
+        ('LOP-MICH-90', 'Lốp Michelin City Grip 90/90-14', 'Lốp - săm', 'Michelin', 'Thái Lan', 'Chiếc', 520000, 720000, 'VISION,AB,LEAD', NULL, 12, 5, 4, NULL),
+        ('SAM-CS-17', 'Săm Chengshin 2.50-17', 'Lốp - săm', 'Chengshin', 'Việt Nam', 'Chiếc', 55000, 85000, 'WAVE,SIR', NULL, 50, 20, 15, NULL),
+        ('GUONG-VISION', 'Gương chiếu hậu Vision (cặp)', 'Thân vỏ - phụ kiện', 'Honda', 'Việt Nam', 'Cặp', 95000, 150000, 'VISION', '88110-K44-V00', 15, 5, 5, NULL),
+        ('CDI-WAVE', 'IC (CDI) Wave Alpha', 'IC - CDI', 'Honda', 'Việt Nam', 'Cái', 260000, 380000, 'WAVE', '30410-KWW-641', 8, 3, NULL, NULL),
+        ('MPH-VF-FELIZ', 'Má phanh xe điện VinFast Feliz S', 'Phanh xe điện', 'VinFast', 'Việt Nam', 'Cặp', 110000, 165000, 'VF', NULL, 10, NULL, NULL, NULL);
 
     INSERT INTO product (sku, part_name, category_id, brand, country_of_origin, base_unit, created_by, initial_unit_cost,
                          created_at, updated_at)
@@ -208,10 +208,8 @@ BEGIN
            opening_at - interval '2 days', opening_at - interval '2 days'
     FROM demo_product d JOIN part_category c ON c.category_name = d.category;
 
-    INSERT INTO product_identifier (product_id, identifier_type, identifier_value)
-    SELECT pg_temp.pid(sku), 'OEM', oem FROM demo_product WHERE oem IS NOT NULL
-    UNION ALL
-    SELECT pg_temp.pid(sku), 'BARCODE', barcode FROM demo_product WHERE barcode IS NOT NULL;
+    INSERT INTO product_oem_code (product_id, oem_code)
+    SELECT pg_temp.pid(sku), oem FROM demo_product WHERE oem IS NOT NULL;
 
     INSERT INTO product_vehicle_model (product_id, vehicle_model_id)
     SELECT pg_temp.pid(d.sku), vm.id

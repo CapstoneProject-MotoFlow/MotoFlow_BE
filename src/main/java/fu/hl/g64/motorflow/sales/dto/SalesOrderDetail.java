@@ -98,7 +98,7 @@ public record SalesOrderDetail(
      * GVHD 20/11: {@code sellableQty} leaves out what other open orders hold ({@code heldByOthersQty}).
      */
     public record Line(long id, int lineNo, long productId, String sku, String partName, String baseUnit,
-                       ProductStatus productStatus, List<String> barcodes, String storageArea, String binLocation,
+                       ProductStatus productStatus, String storageArea, String binLocation,
                        int requestedQty, Integer pickedQty, Integer shortQty, String shortReason, Integer deliveredQty,
                        Long referencePrice, Long actualUnitPrice, Long lineTotal, int sellableQty, int stockShortQty,
                        List<LotToPick> pickFirst, int heldByOthersQty) {
