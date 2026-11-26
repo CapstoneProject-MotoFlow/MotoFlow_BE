@@ -27,19 +27,27 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Baseline executed-SQL measurements (via {@link QueryCounter#executed()}, backed by {@code datasource-proxy}) for
- * the heaviest write and common read flows. Every ceiling is {@code ceil(baseline * 1.1)} to prevent regressions.
+ * Baseline executed-SQL and JDBC round-trip measurements (via {@link QueryCounter#executed()} and
+ * {@link QueryCounter#roundTrips()}, backed by {@code datasource-proxy}) for the heaviest write and common read flows.
+ * Every ceiling is {@code ceil(baseline * 1.1)} to prevent regressions.
  */
 class SqlBaselineTest {
 
-    private static void assertBudget(String flow, QueryCounter queries, long baseline) {
+    private static void assertBudget(String flow, QueryCounter queries, long executedBaseline,
+                                     long roundTripsBaseline) {
         long executed = queries.executed();
-        long ceiling = (long) Math.ceil(baseline * 1.1);
-        System.out.printf("[SQL] %-32s: %s (total=%d, baseline=%d, ceiling=%d)%n",
-                flow, queries.summary(), executed, baseline, ceiling);
-        assertThat(executed).as("SQL count for %s (%s)", flow, queries.summary())
+        long roundTrips = queries.roundTrips();
+        long executedCeiling = (long) Math.ceil(executedBaseline * 1.1);
+        long roundTripsCeiling = (long) Math.ceil(roundTripsBaseline * 1.1);
+        System.out.printf("[SQL] %-32s: %s (executed=%d/%d/%d, roundTrips=%d/%d/%d)%n",
+                flow, queries.summary(), executed, executedBaseline, executedCeiling,
+                roundTrips, roundTripsBaseline, roundTripsCeiling);
+        assertThat(executed).as("Executed SQL count for %s (%s)", flow, queries.summary())
                 .isPositive()
-                .isLessThanOrEqualTo(ceiling);
+                .isLessThanOrEqualTo(executedCeiling);
+        assertThat(roundTrips).as("Round-trip count for %s (%s)", flow, queries.summary())
+                .isPositive()
+                .isLessThanOrEqualTo(roundTripsCeiling);
     }
 
     @Nested
@@ -77,7 +85,7 @@ class SqlBaselineTest {
 
             queries.reset();
             confirm(managerToken, receiptId).andExpect(status().isOk());
-            assertBudget("grn-confirm-20-lines", queries, 185);
+            assertBudget("grn-confirm-20-lines", queries, 185, 185);
         }
 
         private long createdReceipt(long poId) throws Exception {
@@ -132,7 +140,7 @@ class SqlBaselineTest {
 
             queries.reset();
             postAs(ownerToken, COUNTS + "/" + countId + "/approve", null).andExpect(status().isOk());
-            assertBudget("opening-count-approve-50-lines", queries, 424);
+            assertBudget("opening-count-approve-50-lines", queries, 424, 424);
         }
     }
 
@@ -175,7 +183,7 @@ class SqlBaselineTest {
                                     "expectedPayable", payable))))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.completed").value(true));
-            assertBudget("sales-complete-10-lines", queries, 94);
+            assertBudget("sales-complete-10-lines", queries, 94, 91);
         }
 
         @Test
@@ -199,7 +207,7 @@ class SqlBaselineTest {
                             .content(json(createBody)))
                     .andExpect(status().isCreated())
                     .andReturn().getResponse().getContentAsString();
-            assertBudget("sales-draft-create-10-lines", queries, 25);
+            assertBudget("sales-draft-create-10-lines", queries, 25, 25);
             long draftId = ((Number) JsonPath.read(created, "$.id")).longValue();
 
             queries.reset();
@@ -208,7 +216,7 @@ class SqlBaselineTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(updateBody)))
                     .andExpect(status().isOk());
-            assertBudget("sales-draft-update-10-lines", queries, 25);
+            assertBudget("sales-draft-update-10-lines", queries, 25, 25);
         }
 
         @Test
@@ -219,12 +227,12 @@ class SqlBaselineTest {
             queries.reset();
             mvc.perform(get("/api/v1/home").header(HttpHeaders.AUTHORIZATION, managerToken))
                     .andExpect(status().isOk());
-            assertBudget("home-bm", queries, 10);
+            assertBudget("home-bm", queries, 10, 10);
 
             queries.reset();
             mvc.perform(get("/api/v1/home").header(HttpHeaders.AUTHORIZATION, adminToken))
                     .andExpect(status().isOk());
-            assertBudget("home-admin", queries, 3);
+            assertBudget("home-admin", queries, 3, 3);
         }
 
         @Test
@@ -247,7 +255,7 @@ class SqlBaselineTest {
             mvc.perform(get("/api/v1/documents").header(HttpHeaders.AUTHORIZATION, managerToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalItems").value(2));
-            assertBudget("documents-page-0", queries, 2);
+            assertBudget("documents-page-0", queries, 2, 2);
         }
 
         @Test
@@ -267,7 +275,7 @@ class SqlBaselineTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(body)))
                     .andExpect(status().isCreated());
-            assertBudget("product-create-2-oem", queries, 12);
+            assertBudget("product-create-2-oem", queries, 12, 12);
         }
 
         private long[] tenPricedParts() {
@@ -325,7 +333,7 @@ class SqlBaselineTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(Map.of("lines", dispatchLines))))
                     .andExpect(status().isOk());
-            assertBudget("transfer-dispatch-10-lines", queries, 169);
+            assertBudget("transfer-dispatch-10-lines", queries, 169, 169);
         }
     }
 }
