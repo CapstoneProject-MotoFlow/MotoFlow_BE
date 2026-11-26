@@ -367,6 +367,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
 
         boolean anyExcess = false;
         List<DiscrepancyCase> opened = new ArrayList<>();
+        List<NewLotPosting> lotPostings = new ArrayList<>();
         Map<Long, Integer> toStockByProduct = new HashMap<>();
         for (GoodsReceiptNoteLine line : lines) {
             // BR-67: passed goods above what is still expected are excess and wait for Owner.
@@ -382,7 +383,7 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
             putPositive(quantities, StockStatus.DAMAGED, line.getDamagedQty());
             if (!quantities.isEmpty()) {
                 // BR-73: one lot per line, at the purchase price Owner agreed on the PO.
-                posting.receiveNewLot(new NewLotPosting(order.getStoreId(), line.getProductId(),
+                lotPostings.add(new NewLotPosting(order.getStoreId(), line.getProductId(),
                         LotSourceType.RECEIPT, line.getId(), order.getSupplierId(), receipt.getArrivedAt().toLocalDate(),
                         line.getUnitPrice(), line.getManufacturerLotNo(), line.getManufactureDate(),
                         line.getExpiryDate(), quantities, MovementType.RECEIPT_CONFIRMED,
@@ -398,6 +399,9 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 opened.add(DiscrepancyCase.supplier(id, line.getProductId(), shortQty, line.getWrongItemQty(),
                         line.getDamagedQty(), limit, now));
             }
+        }
+        if (!lotPostings.isEmpty()) {
+            posting.receiveNewLotsAll(lotPostings);
         }
         discrepancies.saveAll(opened);
 
