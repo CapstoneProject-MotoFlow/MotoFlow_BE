@@ -189,6 +189,27 @@ class DocumentApiTest extends SalesOrderTestData {
     }
 
     @Test
+    void paginationBoundariesComputeTotalItemsAcrossFullPartialAndEmptyPages() throws Exception {
+        // Page 0 with exact pageSize rows must still run count: 5 total for BM, 6 total for Owner.
+        search(managerToken, "page", "0", "size", "5").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(5))
+                .andExpect(jsonPath("$.items.length()").value(5));
+        search(ownerToken, "page", "0", "size", "5").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(6))
+                .andExpect(jsonPath("$.items.length()").value(5));
+
+        // Last partial page (page > 0, non-empty, < size): total = page * size + rows.size().
+        search(managerToken, "page", "1", "size", "3").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(5))
+                .andExpect(jsonPath("$.items[*].id").value(contains((int) salePayment, (int) sale)));
+
+        // Page beyond the end (page > 0, empty rows): must run count and match actual totalItems.
+        search(managerToken, "page", "2", "size", "5").andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalItems").value(5))
+                .andExpect(jsonPath("$.items").isEmpty());
+    }
+
+    @Test
     void searchesByNumberOrByPartOfTheCustomerOrSupplierName() throws Exception {
         search(managerToken, "q", "#" + sale, "type", "SALES_ORDER").andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[*].id").value(contains((int) sale)));
