@@ -32,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * A transfer from the Cầu Giấy warehouse to Long Biên, coordinated by the central warehouse Branch Manager, with real
  * lots at the source. Steps of the flow go through the API so each test starts from what the previous step posted.
  */
-abstract class TransferFlowTestData extends ApiTestUsers {
+public abstract class TransferFlowTestData extends ApiTestUsers {
 
     protected static final String ORDERS = "/api/v1/transfer-orders";
 
@@ -57,7 +57,7 @@ abstract class TransferFlowTestData extends ApiTestUsers {
     private long purchaseOrder;
 
     @BeforeEach
-    void setUpStoresAndParts() {
+    protected void setUpStoresAndParts() {
         resetDatabaseAndClock();
         today = LocalDate.now(clock);
         central = createStore("Kho tổng");
@@ -270,7 +270,7 @@ abstract class TransferFlowTestData extends ApiTestUsers {
                 + "AND store_id = ? AND stock_status = ?", Integer.class, lot, store, status);
     }
 
-    private long product(String sku, String name, long category) {
+    protected long product(String sku, String name, long category) {
         return jdbc.queryForObject("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) "
                 + "VALUES (?, ?, ?, 'cái', ?) RETURNING id", Long.class, sku, name, category, owner.getId());
     }

@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * A purchase order from Honda to Gia Lâm for 10 pads at 120 000 and 24 oils at 85 000, with the calls of the GRN and
  * discrepancy APIs, shared by the receiving tests.
  */
-abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
+public abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
 
     protected static final String[] STATUSES = {"AVAILABLE", "AWAITING_INSPECTION", "WRONG_ITEM", "DAMAGED",
             "AWAITING_SUPPLIER_RETURN", "IN_TRANSIT"};
@@ -33,7 +33,7 @@ abstract class GoodsReceiptTestData extends PurchaseOrderTestData {
     protected long order;
 
     @BeforeEach
-    void createOrderToReceive() throws Exception {
+    protected void createOrderToReceive() throws Exception {
         order = created(order(honda, giaLam, TODAY, null, line(pad, 10, 120_000), line(oil, 24, 85_000)));
     }
 
