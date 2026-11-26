@@ -312,6 +312,37 @@ class OpeningBalanceApiTest extends StockCountTestData {
         assertThat(availableOf(otherStore, seqPart)).isEqualTo(18);
     }
 
+    @Test
+    void receiveNewLotsAllIgnoresNullStatusQuantities() {
+        long batchPart = part("NUL-01", "Phụ tùng null qty", categoryA, null);
+        long completedCount = id("INSERT INTO stock_count (store_id, count_type, count_date, scope_type, status, "
+                + "created_by) VALUES (?, 'OPENING', ?, 'WHOLE', 'COMPLETED', ?) RETURNING id",
+                otherStore, TODAY, otherManager.getId());
+
+        Map<StockStatus, Integer> firstQuantities = new HashMap<>();
+        firstQuantities.put(StockStatus.AVAILABLE, 5);
+        firstQuantities.put(StockStatus.AWAITING_INSPECTION, null);
+        firstQuantities.put(StockStatus.IN_TRANSIT, null);
+
+        Map<StockStatus, Integer> secondQuantities = new HashMap<>();
+        secondQuantities.put(StockStatus.AVAILABLE, null);
+        secondQuantities.put(StockStatus.DAMAGED, 2);
+
+        tx.execute(s -> posting.receiveNewLotsAll(List.of(
+                new NewLotPosting(otherStore, batchPart, LotSourceType.OPENING, null, null, TODAY, 80_000, null, null,
+                        LocalDate.of(2027, 1, 31), firstQuantities, MovementType.OPENING_BALANCE,
+                        SourceRef.stockCount(completedCount), owner.getId(), null, period, TODAY.atTime(23, 59, 59)),
+                new NewLotPosting(otherStore, batchPart, LotSourceType.OPENING, null, null, TODAY, 90_000, null, null,
+                        LocalDate.of(2027, 6, 30), secondQuantities, MovementType.OPENING_BALANCE,
+                        SourceRef.stockCount(completedCount), owner.getId(), null, period, TODAY.atTime(23, 59, 59)))));
+
+        assertThat(availableOf(otherStore, batchPart)).isEqualTo(5);
+        assertThat(jdbc.queryForObject("SELECT damaged_qty FROM stock_balance WHERE store_id = ? AND product_id = ?",
+                Integer.class, otherStore, batchPart)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT moving_avg_cost FROM product WHERE id = ?", BigDecimal.class, batchPart))
+                .isEqualByComparingTo("80000");
+    }
+
     private NewLotPosting surplusInto(long storeId, long count) {
         return new NewLotPosting(storeId, pad, LotSourceType.COUNT_SURPLUS, null, null, TODAY, 10_000, null, null,
                 null, Map.of(StockStatus.AVAILABLE, 1), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(count),

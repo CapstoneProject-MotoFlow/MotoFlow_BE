@@ -135,7 +135,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             StockBalance balance = balances.get(new StoreProduct(p.storeId(), p.productId()));
             Product product = lockedProducts.get(p.productId());
 
-            int available = p.quantities().getOrDefault(StockStatus.AVAILABLE, 0);
+            int available = quantityOf(p.quantities(), StockStatus.AVAILABLE);
             // A count surplus comes in at the average (BR-74), so it leaves the average alone.
             boolean surplus = p.sourceType() == LotSourceType.COUNT_SURPLUS;
             if (!surplus) {
@@ -171,8 +171,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 depleted.add(lot);
             }
             long addedValued = (long) available
-                    + p.quantities().getOrDefault(StockStatus.AWAITING_INSPECTION, 0)
-                    + p.quantities().getOrDefault(StockStatus.IN_TRANSIT, 0);
+                    + quantityOf(p.quantities(), StockStatus.AWAITING_INSPECTION)
+                    + quantityOf(p.quantities(), StockStatus.IN_TRANSIT);
             if (addedValued != 0) {
                 valuedQtyByProduct.merge(p.productId(), addedValued, Long::sum);
             }
@@ -390,7 +390,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         Product product = fresh(products.findByIdForUpdate(lot.getProductId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
 
-        int available = p.quantities().getOrDefault(StockStatus.AVAILABLE, 0);
+        int available = quantityOf(p.quantities(), StockStatus.AVAILABLE);
         product.receiveIntoAverage(stockBalances.sumValuedQuantity(lot.getProductId()), available,
                 lot.getPurchaseUnitPrice());
 
@@ -720,6 +720,11 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private Product product(Long productId) {
         return fresh(products.findById(productId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
+    }
+
+    private static int quantityOf(Map<StockStatus, Integer> quantities, StockStatus status) {
+        Integer qty = quantities.get(status);
+        return qty == null ? 0 : qty;
     }
 
     /** Outgoing and moved stock is valued at the moving average; a part with no average yet uses the lot's price. */
