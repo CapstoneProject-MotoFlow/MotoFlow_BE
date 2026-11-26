@@ -31,8 +31,6 @@ import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
 import fu.hl.g64.motorflow.sales.helper.OrderPricing;
 import fu.hl.g64.motorflow.sales.helper.PickingGuide;
 import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositApplicationRepository;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderLineRepository;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -104,8 +102,6 @@ abstract class SettlementUnitTestBase {
     @Mock TransactionTemplate transactions;
     @Mock MessageSource messages;
     @Mock PlatformTransactionManager transactionManager;
-    @Mock SalesDepositApplicationRepository depositApplications;
-    @Mock SalesDepositExpiryChangeRepository depositExpiry;
     @Mock WaitingOrderReadiness readiness;
 
     SalesOrderSettlementServiceImpl service;
@@ -126,8 +122,8 @@ abstract class SettlementUnitTestBase {
 
     @BeforeEach
     void baseData() {
-        collections = new OrderCollections(payments, depositApplications);
-        OrderDeposits deposits = new OrderDeposits(depositApplications, depositExpiry, CLOCK);
+        collections = new OrderCollections(payments, orders);
+        OrderDeposits deposits = new OrderDeposits(orders, auditLog, CLOCK);
         service = new SalesOrderSettlementServiceImpl(orders, orderLines, products, customers, payments,
                 new TransactionReferences(payments, transactionManager), receivables, auditLog, tasks,
                 warehouseTasks, notifications, attachments, inventory, collections, deposits, pricing, guide,
@@ -140,6 +136,16 @@ abstract class SettlementUnitTestBase {
 
         when(orders.findByIdForUpdate(anyLong())).thenAnswer(inv -> Optional.ofNullable(saved.get(
                 inv.<Long>getArgument(0))));
+        // The deposit columns of the orders saved: what a waiting order gave, as the repository query adds it up.
+        when(orders.sumDepositAppliedFrom(anyLong())).thenAnswer(inv -> {
+            long id = inv.<Long>getArgument(0);
+            return Optional.ofNullable(saved.get(id)).map(SalesOrder::getDepositAppliedAmount).orElse(0L)
+                    + saved.values().stream().filter(child -> Objects.equals(child.getSplitFromOrderId(), id)
+                            && child.getDepositExpiresOn() == null)
+                    .mapToLong(SalesOrder::getDepositAppliedAmount).sum();
+        });
+        when(orders.depositAppliedTo(anyLong())).thenAnswer(inv -> Optional.ofNullable(saved.get(
+                inv.<Long>getArgument(0))).map(SalesOrder::getDepositAppliedAmount).orElse(0L));
         when(orderLines.findBySalesOrderIdOrderByLineNoAsc(anyLong())).thenAnswer(inv -> lines.stream()
                 .filter(line -> line.getSalesOrderId() == inv.<Long>getArgument(0))
                 .sorted(Comparator.comparing(SalesOrderLine::getLineNo)).toList());

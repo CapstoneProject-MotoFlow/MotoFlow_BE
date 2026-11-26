@@ -28,6 +28,12 @@ public final class SalesOrderHistory {
     public static final String CANCELLED = "SALES_ORDER_CANCELLED";
     /** GVHD 24/11: the expected ready date of a waiting order changed; not a version, not in the history list. */
     public static final String EXPECTED_READY_DATE_CHANGED = "SALES_ORDER_EXPECTED_DATE_CHANGED";
+    /**
+     * PM 21/11 (BE-4): the deposit's expiry date changed, {"deposit_expires_on": "yyyy-MM-dd"} before and after; not
+     * a version, not in the history list.
+     */
+    public static final String DEPOSIT_EXPIRY_CHANGED = "SALES_ORDER_DEPOSIT_EXPIRY_CHANGED";
+    public static final String DEPOSIT_EXPIRES_ON = "deposit_expires_on";
     public static final List<String> ACTIONS = List.of(CREATED, VERSIONED, PICKED, CONFIRMED, PAYMENT_REJECTED,
             COMPLETED, CANCELLED);
     public static final List<String> VERSION_ACTIONS = List.of(CREATED, VERSIONED);
@@ -38,7 +44,7 @@ public final class SalesOrderHistory {
     /** GVHD 20/11: part or all of a waiting order was released to picking, at the prices in effect. */
     public static final String CAUSE_RELEASE = "RELEASE";
     /**
-     * GVHD 20/11, kept in audit_log instead of columns: version 1 of an order split from another names that order.
+     * GVHD 20/11: version 1 of an order split from another names that order, as sales_order.split_from_order_id does.
      * (Confirmations made before góp ý UI 21/11 may also carry waiting_order_id and requested_before.)
      */
     public static final String SPLIT_FROM = "split_from_order_id";

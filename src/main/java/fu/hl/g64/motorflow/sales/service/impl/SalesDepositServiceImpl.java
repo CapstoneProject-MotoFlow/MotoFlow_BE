@@ -1,6 +1,8 @@
 package fu.hl.g64.motorflow.sales.service.impl;
 
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.common.audit.AuditLog;
+import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.operation.entity.enums.OwnerType;
 import fu.hl.g64.motorflow.operation.service.AttachmentService;
@@ -13,13 +15,12 @@ import fu.hl.g64.motorflow.sales.dto.DepositPaymentRequest;
 import fu.hl.g64.motorflow.sales.dto.DepositSplitRequest;
 import fu.hl.g64.motorflow.sales.dto.SalesOrderDetail;
 import fu.hl.g64.motorflow.sales.dto.SettlementResult;
-import fu.hl.g64.motorflow.sales.entity.SalesDepositExpiryChange;
 import fu.hl.g64.motorflow.sales.entity.SalesOrder;
 import fu.hl.g64.motorflow.sales.entity.enums.DepositStatus;
 import fu.hl.g64.motorflow.sales.entity.enums.PriceType;
 import fu.hl.g64.motorflow.sales.helper.OrderCollections;
 import fu.hl.g64.motorflow.sales.helper.OrderDeposits;
-import fu.hl.g64.motorflow.sales.repository.SalesDepositExpiryChangeRepository;
+import fu.hl.g64.motorflow.sales.helper.SalesOrderHistory;
 import fu.hl.g64.motorflow.sales.repository.SalesOrderRepository;
 import fu.hl.g64.motorflow.sales.service.SalesDepositService;
 import fu.hl.g64.motorflow.sales.service.SalesOrderService;
@@ -37,6 +38,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -49,7 +51,7 @@ public class SalesDepositServiceImpl implements SalesDepositService {
     private final SalesOrderRepository orders;
     private final TransactionReferences references;
     private final AttachmentService attachments;
-    private final SalesDepositExpiryChangeRepository expiryChanges;
+    private final AuditLogRepository auditLog;
     private final OrderCollections collections;
     private final OrderDeposits deposits;
     private final SalesOrderService salesOrders;
@@ -176,7 +178,9 @@ public class SalesDepositServiceImpl implements SalesDepositService {
         if (!next.equals(old)) {
             LocalDateTime now = LocalDateTime.now(clock);
             order.setDepositExpiry(next, now);
-            expiryChanges.save(SalesDepositExpiryChange.of(orderId, old, next, manager.id(), now));
+            auditLog.save(AuditLog.record(SalesOrderHistory.ENTITY, orderId, SalesOrderHistory.DEPOSIT_EXPIRY_CHANGED,
+                    manager.id(), null, Map.of(SalesOrderHistory.DEPOSIT_EXPIRES_ON, old.toString()),
+                    Map.of(SalesOrderHistory.DEPOSIT_EXPIRES_ON, next.toString()), now));
         }
         return salesOrders.get(manager, orderId);
     }

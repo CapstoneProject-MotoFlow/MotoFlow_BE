@@ -138,6 +138,20 @@ public class SalesOrder {
     @Column(name = "ready_notified_at")
     private LocalDateTime readyNotifiedAt;
 
+    /** GVHD 20/11: the order this one was split from ("tách từ BH-xxx"); null for an order opened on its own. */
+    @Column(name = "split_from_order_id")
+    private Long splitFromOrderId;
+
+    /**
+     * PM 21/11 (BE-6): the deposit of a waiting order put into this order, which pays for it like a verified payment.
+     * An order takes it once: when a partial release opens it, or at the whole release of its own deposit.
+     */
+    @Column(name = "deposit_applied_amount", nullable = false)
+    private long depositAppliedAmount;
+
+    @Column(name = "deposit_applied_at")
+    private LocalDateTime depositAppliedAt;
+
     /**
      * UC-53: a new order of the store, waiting for picking (version 1). {@code customerId} is null for a walk-in sale;
      * the snapshot keeps what the customer was called when the order was taken.
@@ -166,6 +180,25 @@ public class SalesOrder {
         SalesOrder order = create(storeId, customer, priceType, discountRate, note, createdBy, now);
         order.status = SalesOrderStatus.DRAFT;
         return order;
+    }
+
+    /** GVHD 20/11: this new order is split from {@code parentId}; set before it is first saved. */
+    public SalesOrder splitFrom(long parentId) {
+        if (id != null || splitFromOrderId != null) {
+            throw new IllegalStateException("order " + id + " is already saved or split");
+        }
+        splitFromOrderId = parentId;
+        return this;
+    }
+
+    /** PM 21/11 (BE-5): a release puts {@code amount} of a waiting order's deposit into this order, once. */
+    public void takeDeposit(long amount, LocalDateTime now) {
+        if (amount <= 0 || depositAppliedAt != null) {
+            throw new IllegalStateException("order " + id + " cannot take a deposit of " + amount);
+        }
+        depositAppliedAmount = amount;
+        depositAppliedAt = now;
+        updatedAt = now;
     }
 
     /** The creator rewrites the whole draft. */

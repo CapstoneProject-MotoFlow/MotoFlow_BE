@@ -28,7 +28,7 @@ import java.util.List;
  * {@code closing} its completion or cancellation; both are null for Staff. {@code note} is the seller's note on the
  * order, shown to the picker too.
  *
- * <p>GVHD 20/11: {@code splitFromOrderId} is the order this one came from ("tách từ BH-xxx"), read from audit_log.
+ * <p>GVHD 20/11: {@code splitFromOrderId} is the order this one came from ("tách từ BH-xxx").
  * {@code split} is filled only in the answer of the call that split the request: the order sold now, the waiting
  * order and the units the customer declined.</p>
  *

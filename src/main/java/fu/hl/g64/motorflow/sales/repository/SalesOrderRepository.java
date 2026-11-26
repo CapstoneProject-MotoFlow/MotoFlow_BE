@@ -18,6 +18,23 @@ import java.util.Optional;
 
 public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, JpaSpecificationExecutor<SalesOrder> {
 
+    /**
+     * PM 21/11: what the releases of waiting order {@code id} took of its deposit: its own share (taken at its whole
+     * release) plus what the orders split from it took. An order split from a waiting order is either one a partial
+     * release sold, which holds only deposit taken from it, or a waiting order made from a short picking (GVHD 24/11),
+     * which may hold a deposit of its own; the latter always has a deposit expiry date and is left out.
+     */
+    @Query("""
+            select coalesce(sum(o.depositAppliedAmount), 0)
+                   + coalesce((select sum(c.depositAppliedAmount) from SalesOrder c
+                               where c.splitFromOrderId = :id and c.depositExpiresOn is null), 0)
+            from SalesOrder o where o.id = :id""")
+    long sumDepositAppliedFrom(long id);
+
+    /** PM 21/11 (BE-6): the deposit a release put into order {@code id}; 0 for none or no such order. */
+    @Query("select coalesce(sum(o.depositAppliedAmount), 0) from SalesOrder o where o.id = :id")
+    long depositAppliedTo(long id);
+
     /** Row lock: updating, picking and confirming one order happen one after another (UC-55, UC-57, UC-58). */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select o from SalesOrder o where o.id = :id")
@@ -44,7 +61,7 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
                    coalesce(sum(t.total), 0),
                    count(*) FILTER (WHERE o.completion_type = 'CREDIT'),
                    coalesce(sum(r.original_amount), 0),
-                   coalesce(sum(m.net), 0) + coalesce(sum(d.applied), 0)
+                   coalesce(sum(m.net), 0) + sum(o.deposit_applied_amount)
             FROM sales_order o
             JOIN (SELECT l.sales_order_id, sum(CAST(coalesce(l.delivered_qty, 0) AS BIGINT) * l.actual_unit_price) AS total
                   FROM sales_order_line l GROUP BY l.sales_order_id) t ON t.sales_order_id = o.id
@@ -60,8 +77,6 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
                                   GROUP BY a.payment_id) c ON c.payment_id = p.id
                        WHERE p.status = 'VERIFIED' AND p.payment_type IN ('ORDER_PAYMENT', 'REFUND')
                        GROUP BY p.sales_order_id) m ON m.sales_order_id = o.id
-            LEFT JOIN (SELECT a.sales_order_id, sum(a.amount) AS applied
-                       FROM sales_deposit_application a GROUP BY a.sales_order_id) d ON d.sales_order_id = o.id
             WHERE o.status = 'COMPLETED' AND o.completed_at >= :from AND o.completed_at < :to
               AND (CAST(:storeId AS BIGINT) IS NULL OR o.store_id = :storeId)
             GROUP BY o.store_id""", nativeQuery = true)
@@ -99,7 +114,8 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
                       AND p.payment_type = 'DEPOSIT' AND p.status = 'VERIFIED'),
                    (SELECT coalesce(sum(p.amount), 0) FROM payment p WHERE p.sales_order_id = o.id
                       AND p.payment_type = 'DEPOSIT_REFUND' AND p.status = 'VERIFIED'),
-                   (SELECT coalesce(sum(a.amount), 0) FROM sales_deposit_application a WHERE a.waiting_order_id = o.id)
+                   o.deposit_applied_amount + (SELECT coalesce(sum(c.deposit_applied_amount), 0) FROM sales_order c
+                      WHERE c.split_from_order_id = o.id AND c.deposit_expires_on IS NULL)
             FROM sales_order o
             WHERE o.deposit_expires_on IS NOT NULL""";
 
