@@ -208,7 +208,7 @@ class SqlBaselineTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(json(updateBody)))
                     .andExpect(status().isOk());
-            assertBudget("sales-draft-update-10-lines", queries, 35);
+            assertBudget("sales-draft-update-10-lines", queries, 25);
         }
 
         @Test
