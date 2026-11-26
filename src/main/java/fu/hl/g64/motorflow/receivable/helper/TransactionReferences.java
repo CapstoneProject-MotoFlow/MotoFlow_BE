@@ -1,6 +1,7 @@
 package fu.hl.g64.motorflow.receivable.helper;
 
 import fu.hl.g64.motorflow.common.error.BusinessException;
+import fu.hl.g64.motorflow.common.error.DataIntegrityExceptions;
 import fu.hl.g64.motorflow.receivable.entity.Payment;
 import fu.hl.g64.motorflow.receivable.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
@@ -49,7 +50,7 @@ public class TransactionReferences {
             return payments.saveAndFlush(payment);
         } catch (DataIntegrityViolationException e) {
             String reference = payment.getTransactionReference();
-            if (reference == null || !String.valueOf(e.getMostSpecificCause().getMessage()).contains(UNIQUE_INDEX)) {
+            if (reference == null || !DataIntegrityExceptions.mentionsConstraint(e, UNIQUE_INDEX)) {
                 throw e;
             }
             // This transaction can no longer read, and the other request has committed: find its payment in a new one.
