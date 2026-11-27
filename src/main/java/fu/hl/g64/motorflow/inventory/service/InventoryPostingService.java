@@ -101,4 +101,11 @@ public interface InventoryPostingService {
      * moving average (BR-74), and the other statuses keep the goods out of it.
      */
     void receiveIntoLot(LotReceiptPosting posting);
+
+    /**
+     * {@link #receiveIntoLot} for every excess line of one document, with the same results as calling it for each
+     * posting in list order. Locks the warehouse stock rows, then the parts, then the lot balances in key order, before
+     * any posting. Each part's moving average is recalculated in list order, so two lots of one part see each other.
+     */
+    void receiveIntoLotsAll(List<LotReceiptPosting> postings);
 }

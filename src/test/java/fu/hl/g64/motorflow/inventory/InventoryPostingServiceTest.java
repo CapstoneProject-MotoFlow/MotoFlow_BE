@@ -3,6 +3,7 @@ package fu.hl.g64.motorflow.inventory;
 import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.inventory.dto.LotAdjustPosting;
 import fu.hl.g64.motorflow.inventory.dto.LotQuantity;
+import fu.hl.g64.motorflow.inventory.dto.LotReceiptPosting;
 import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
@@ -25,6 +26,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -402,8 +404,13 @@ class InventoryPostingServiceTest extends IntegrationTest {
         });
         assertConsistent();
         assertThat(lotStatus(lotA)).isEqualTo("DEPLETED");
+        return snapshot();
+    }
+
+    /** What the database holds for this test's stock. Ids are left out, since a second run must match the first. */
+    private Map<String, Object> snapshot() {
         return Map.of(
-                "balances", jdbc.queryForList("SELECT st.store_name, p.sku, b.available_qty, b.awaiting_inspection_qty, "
+                "balances",jdbc.queryForList("SELECT st.store_name, p.sku, b.available_qty, b.awaiting_inspection_qty, "
                         + "b.wrong_item_qty, b.damaged_qty, b.awaiting_supplier_return_qty, b.in_transit_qty "
                         + "FROM stock_balance b JOIN store st ON st.id = b.store_id JOIN product p ON p.id = b.product_id "
                         + "ORDER BY p.sku, st.store_name"),
@@ -417,7 +424,70 @@ class InventoryPostingServiceTest extends IntegrationTest {
                         + "THEN 'GOODS_RECEIPT' WHEN m.stock_count_id IS NOT NULL THEN 'STOCK_COUNT' ELSE 'OTHER' END AS source_type, "
                         + "(SELECT count(*) FROM stock_count c WHERE c.id < m.stock_count_id) AS count_no "
                         + "FROM stock_movement m JOIN store st ON st.id = m.store_id JOIN product p ON p.id = m.product_id "
-                        + "JOIN lot l ON l.id = m.lot_id ORDER BY m.id"));
+                        + "JOIN lot l ON l.id = m.lot_id ORDER BY m.id"),
+                "products", jdbc.queryForList("SELECT sku, moving_avg_cost FROM product ORDER BY sku"));
+    }
+
+    @Test
+    void receiveIntoLotsAllLeavesTheSameAverageAndRowsAsOneReceiveIntoLotPerPosting() {
+        Map<String, Object> batched = receiveScenario(true);
+        Map<String, Object> sequential = receiveScenario(false);
+
+        assertThat(batched).isEqualTo(sequential);
+    }
+
+    /**
+     * Receives into three receipt lots of one part, at three purchase prices, batched or one by one in one transaction.
+     * Later postings see the valued quantity that earlier ones added, including AWAITING_INSPECTION.
+     */
+    private Map<String, Object> receiveScenario(boolean batched) {
+        setUp();
+        receive(grn, 10, 0, 100_000, null);
+        long lotR1 = receive(newGrn("PX-2"), 1, 0, 120_000, null).getId();
+        long lotR2 = receive(newGrn("PX-3"), 1, 0, 130_000, null).getId();
+        List<LotReceiptPosting> list = List.of(
+                excess("EX-1", lotR1, new EnumMap<>(Map.of(StockStatus.AVAILABLE, 5))),
+                excess("EX-2", lotR2, new EnumMap<>(Map.of(StockStatus.AVAILABLE, 7, StockStatus.DAMAGED, 2))),
+                excess("EX-3", lotR1, new EnumMap<>(Map.of(StockStatus.AWAITING_INSPECTION, 4,
+                        StockStatus.AWAITING_SUPPLIER_RETURN, 3))),
+                excess("EX-4", lotR2, new EnumMap<>(Map.of(StockStatus.AVAILABLE, 2))));
+        inTx(() -> {
+            if (batched) {
+                posting.receiveIntoLotsAll(list);
+            } else {
+                list.forEach(posting::receiveIntoLot);
+            }
+            return null;
+        });
+        assertConsistent();
+        return snapshot();
+    }
+
+    @Test
+    void receiveIntoLotsAllRefusesALotThatDidNotComeFromAReceipt() {
+        setUp();
+        receive(grn, 10, 0, 100_000, null);
+        Lot surplus = inTx(() -> posting.receiveNewLot(new NewLotPosting(store, product, LotSourceType.COUNT_SURPLUS,
+                null, null, TODAY, 100_000, null, null, null, Map.of(StockStatus.AVAILABLE, 2),
+                MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(newCount()), owner, null)));
+        LotReceiptPosting p = excess("EX-1", surplus.getId(), new EnumMap<>(Map.of(StockStatus.AVAILABLE, 1)));
+        String message = "lot " + surplus.getId() + " did not come from a supplier receipt";
+
+        assertThatThrownBy(() -> inTx(() -> {
+            posting.receiveIntoLot(p);
+            return null;
+        })).isInstanceOf(IllegalArgumentException.class).hasMessage(message);
+        assertThatThrownBy(() -> inTx(() -> {
+            posting.receiveIntoLotsAll(List.of(p));
+            return null;
+        })).isInstanceOf(IllegalArgumentException.class).hasMessage(message);
+        assertThat(balance(store, "available_qty")).isEqualTo(12);
+        assertConsistent();
+    }
+
+    private LotReceiptPosting excess(String documentNo, long lotId, Map<StockStatus, Integer> quantities) {
+        return new LotReceiptPosting(store, lotId, quantities, MovementType.EXCESS_ACCEPTED,
+                SourceRef.goodsReceiptNote(newGrn(documentNo)), owner, null);
     }
 
     private LotAdjustPosting adjust(long lotId, StockStatus status, int change) {

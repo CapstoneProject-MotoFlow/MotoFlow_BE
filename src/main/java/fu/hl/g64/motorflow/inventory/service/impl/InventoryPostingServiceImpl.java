@@ -500,6 +500,93 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         refreshDepletion(lot);
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void receiveIntoLotsAll(List<LotReceiptPosting> postings) {
+        if (postings.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
+        // A lot that does not exist or did not come from a receipt is refused in list order below, so only the
+        // receipt lots are locked here.
+        Map<Long, Lot> loaded = loadLots(postings.stream().map(LotReceiptPosting::lotId).toList());
+        List<LotReceiptPosting> valid = postings.stream()
+                .filter(p -> loaded.containsKey(p.lotId()) && loaded.get(p.lotId()).getSourceType() == LotSourceType.RECEIPT)
+                .toList();
+        List<Long> productIds = valid.stream().map(p -> loaded.get(p.lotId()).getProductId()).distinct().sorted().toList();
+        // Same lock order as receiveIntoLot: stock_balance, then product, then lot_balance.
+        Map<StoreProduct, StockBalance> balances = lockBalances(valid.stream()
+                .map(p -> new StoreProduct(p.storeId(), loaded.get(p.lotId()).getProductId())).toList(), now);
+        Map<Long, Product> lockedProducts = productIds.isEmpty() ? Map.of() : products.findAllByIdForUpdate(productIds)
+                .stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        if (lockedProducts.size() != productIds.size()) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
+        }
+        Set<Object> managedProductIds = managedIds(Product.class);
+        List<Product> toRefresh = productIds.stream()
+                .filter(managedProductIds::contains)
+                .map(lockedProducts::get)
+                .toList();
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
+        }
+        // Read once, then kept up to date below: the query counts what each earlier posting put into those statuses.
+        Map<Long, Long> valuedQtyByProduct = new HashMap<>();
+        if (!productIds.isEmpty()) {
+            for (Object[] row : stockBalances.sumValuedQuantityByProductIdIn(productIds)) {
+                valuedQtyByProduct.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+            }
+        }
+        Map<LotKey, LotBalance> locked = new HashMap<>();
+        lockDestinationLotBalances(valid.stream()
+                .flatMap(p -> p.quantities().entrySet().stream()
+                        .filter(e -> e.getValue() != null && e.getValue() > 0)
+                        .map(e -> new LotKey(p.lotId(), p.storeId(), e.getKey())))
+                .toList(), locked, now);
+
+        Set<Long> checkedStores = new HashSet<>();
+        Map<Long, Lot> changed = new LinkedHashMap<>();
+        for (LotReceiptPosting p : postings) {
+            Lot lot = loaded.get(p.lotId());
+            if (lot == null) {
+                throw new IllegalArgumentException("unknown lot " + p.lotId());
+            }
+            if (lot.getSourceType() != LotSourceType.RECEIPT) {
+                throw new IllegalArgumentException("lot " + lot.getId() + " did not come from a supplier receipt");
+            }
+            long productId = lot.getProductId();
+            StockBalance balance = balances.get(new StoreProduct(p.storeId(), productId));
+            Product product = lockedProducts.get(productId);
+
+            int available = quantityOf(p.quantities(), StockStatus.AVAILABLE);
+            product.receiveIntoAverage(valuedQtyByProduct.getOrDefault(productId, 0L), available,
+                    lot.getPurchaseUnitPrice());
+
+            BigDecimal unitCost = BigDecimal.valueOf(lot.getPurchaseUnitPrice());
+            long added = 0;
+            for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
+                if (e.getValue() == null || e.getValue() == 0) {
+                    continue;
+                }
+                if (e.getValue() < 0) {
+                    throw new IllegalArgumentException("received quantity must be positive");
+                }
+                post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
+                        p.performedBy(), period, now, now, checkedStores, locked);
+                if (isValued(e.getKey())) {
+                    added += e.getValue();
+                }
+            }
+            if (added != 0) {
+                valuedQtyByProduct.merge(productId, added, Long::sum);
+            }
+            changed.putIfAbsent(lot.getId(), lot);
+        }
+        refreshDepletions(changed.values());
+    }
+
     // ------------------------------------------------------------------------------------------------------------
 
     private record Pick(Lot lot, int quantity) {
@@ -942,6 +1029,12 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private static int quantityOf(Map<StockStatus, Integer> quantities, StockStatus status) {
         Integer qty = quantities.get(status);
         return qty == null ? 0 : qty;
+    }
+
+    /** The statuses that make up the valued quantity of sumValuedQuantityByProductIdIn (BR-74). */
+    private static boolean isValued(StockStatus status) {
+        return status == StockStatus.AVAILABLE || status == StockStatus.AWAITING_INSPECTION
+                || status == StockStatus.IN_TRANSIT;
     }
 
     /** Outgoing and moved stock is valued at the moving average; a part with no average yet uses the lot's price. */
