@@ -2,6 +2,8 @@ package fu.hl.g64.motorflow.perf;
 
 import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
+import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
 import fu.hl.g64.motorflow.receiving.GoodsReceiptTestData;
 import fu.hl.g64.motorflow.sales.SalesOrderTestData;
 import fu.hl.g64.motorflow.stockcount.StockCountTestData;
@@ -14,6 +16,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -107,6 +110,41 @@ class SqlBaselineTest {
             assertBudget("discrepancy-save-handling-3-cases", queries, 142, 136);
         }
 
+        @Test
+        void grnDecideExcess10Lines() throws Exception {
+            long category = id("SELECT min(id) FROM part_category");
+            List<Map<String, Object>> poLines = new ArrayList<>();
+            for (int i = 1; i <= 10; i++) {
+                long productId = part("GRN-X-" + i, "Phụ tùng thừa " + i, category);
+                poLines.add(line(productId, 5, 50_000 + i * 1_000L));
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object>[] poLineArray = poLines.toArray(Map[]::new);
+            long poId = created(order(honda, giaLam, TODAY, null, poLineArray));
+            long receiptId = createdReceipt(poId);
+            assign(receiptId, staff);
+
+            List<Long> lineIds = jdbc.queryForList(
+                    "SELECT id FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? ORDER BY id",
+                    Long.class, receiptId);
+            @SuppressWarnings("unchecked")
+            Map<String, Object>[] findingLines = lineIds.stream()
+                    .map(id -> counted(id, 6, 6, 0, 0))
+                    .toArray(Map[]::new);
+            record(staffToken, receiptId, findings(findingLines)).andExpect(status().isOk());
+            confirm(managerToken, receiptId).andExpect(status().isOk());
+
+            // Each line has 1 excess, all accepted: ten lot postings of excess.
+            List<Object> decisions = new ArrayList<>();
+            for (long lineId : lineIds) {
+                decisions.add(lineId);
+                decisions.add("ACCEPTED");
+            }
+            queries.reset();
+            decide(ownerToken, receiptId, decisions.toArray()).andExpect(status().isOk());
+            assertBudget("grn-decide-excess-10-lines", queries, 171, 171);
+        }
+
         private long createdReceipt(long poId) throws Exception {
             String response = createReceipt(managerToken, poId, deliveryNote("PX-20"))
                     .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
@@ -160,6 +198,26 @@ class SqlBaselineTest {
             queries.reset();
             postAs(ownerToken, COUNTS + "/" + countId + "/approve", null).andExpect(status().isOk());
             assertBudget("opening-count-approve-50-lines", queries, 325, 227);
+        }
+
+        @Test
+        void stockCountApprove10Lines() throws Exception {
+            // Six lot lines alternating -2 and +2, then four lines without a lot: two surpluses and two write-offs.
+            CountSeed seed = count(StockCountStatus.AWAITING_APPROVAL);
+            for (int i = 1; i <= 10; i++) {
+                long productId = part("CNT-" + i, "Phụ tùng kiểm " + i, categoryA, 40_000 + i * 1_000);
+                long lotId = lot(store, productId, LocalDate.of(2026, 10, 1), null, 10, 40_000 + i * 1_000L, "Kệ D");
+                if (i <= 6) {
+                    seed.line(SeedLine.of(productId, lotId, null, 10, i % 2 == 0 ? 8 : 12));
+                } else {
+                    seed.line(SeedLine.of(productId, null, null, 10, i == 7 || i == 9 ? 12 : 8));
+                }
+            }
+            long count = seed.task(staff, WarehouseTaskStatus.DONE).insert();
+
+            queries.reset();
+            postAs(ownerToken, COUNTS + "/" + count + "/approve", Map.of()).andExpect(status().isOk());
+            assertBudget("stock-count-approve-10-lines", queries, 141, 141);
         }
     }
 
