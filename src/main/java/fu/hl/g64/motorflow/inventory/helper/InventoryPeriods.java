@@ -23,13 +23,21 @@ public class InventoryPeriods {
      * transaction, so that it cannot be closed under a posting (UC-100); MSG85 if it is closed.
      */
     public InventoryPeriod openFor(LocalDate date) {
-        openIfMissing(date);
-        InventoryPeriod period = periods.findForPostingByPeriodMonth(date.withDayOfMonth(1)).orElseThrow();
+        InventoryPeriod period = lockFor(date);
         if (!period.isOpen()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
                     period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));
         }
         return period;
+    }
+
+    /**
+     * The period of {@code date}'s month, opened if needed and share-locked like {@link #openFor}, but without the open
+     * check. For a caller that must take this lock before its stock rows and report MSG85 later, in its own order.
+     */
+    public InventoryPeriod lockFor(LocalDate date) {
+        openIfMissing(date);
+        return periods.findForPostingByPeriodMonth(date.withDayOfMonth(1)).orElseThrow();
     }
 
     /** Opens {@code date}'s month as a period if it does not exist yet; safe when two transactions do it at once. */

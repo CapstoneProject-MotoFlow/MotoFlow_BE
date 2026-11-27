@@ -418,6 +418,13 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             return;
         }
         LocalDateTime now = LocalDateTime.now(clock);
+        // Periods are share-locked before any stock row, as on the other posting paths: a new month's period is inserted
+        // here and must not wait on another posting while this one holds stock rows. The checks still run in list order.
+        InventoryPeriod month = changing.stream().anyMatch(p -> p.periodId() == null && p.occurredAt() == null)
+                ? inventoryPeriods.lockFor(now.toLocalDate()) : null;
+        Map<Long, InventoryPeriod> periodCache = new HashMap<>();
+        changing.stream().map(LotAdjustPosting::periodId).filter(id -> id != null).distinct().sorted()
+                .forEach(id -> periods.findForPostingById(id).ifPresent(found -> periodCache.put(id, found)));
         // A lot that does not exist is refused in list order below, like adjustLot, so only known lots are locked here.
         Map<Long, Lot> loaded = loadLots(changing.stream().map(LotAdjustPosting::lotId).toList());
         List<LotAdjustPosting> known = changing.stream().filter(p -> loaded.containsKey(p.lotId())).toList();
@@ -433,16 +440,16 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
 
         Set<Long> checkedStores = new HashSet<>();
         Map<Long, Lot> changed = new LinkedHashMap<>();
-        Map<Long, InventoryPeriod> periodCache = new HashMap<>();
-        PostingTime currentMonth = null;
+        boolean monthChecked = false;
         for (LotAdjustPosting p : changing) {
             // Same order as adjustLot: the period and time are resolved before the lot is looked up.
             PostingTime when;
             if (p.periodId() == null && p.occurredAt() == null) {
-                if (currentMonth == null) {
-                    currentMonth = postingTime(p.movementType(), null, null, now);
+                if (!monthChecked) {
+                    requireOpen(month);
+                    monthChecked = true;
                 }
-                when = currentMonth;
+                when = new PostingTime(month, now);
             } else {
                 when = postingTime(p.movementType(), p.periodId(), p.occurredAt(), now, periodCache);
             }
@@ -925,16 +932,21 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             period = periods.findForPostingById(periodId)
                     .orElseThrow(() -> new IllegalArgumentException("unknown period " + periodId));
         }
-        if (!period.isOpen()) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
-                    period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));
-        }
+        requireOpen(period);
         // A period's opening adds up the movements before its first day (PeriodTotals), so the time must fall in it.
         LocalDate day = occurredAt.toLocalDate();
         if (day.isBefore(period.getFromDate()) || day.isAfter(period.getToDate())) {
             throw new IllegalArgumentException("occurredAt " + occurredAt + " is outside period " + periodId);
         }
         return new PostingTime(period, occurredAt);
+    }
+
+    /** MSG85 when the period is closed. The one place in this class that formats the month for it. */
+    private static void requireOpen(InventoryPeriod period) {
+        if (!period.isOpen()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
+                    period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));
+        }
     }
 
     private StockBalance lockBalance(Long storeId, Long productId, LocalDateTime now) {

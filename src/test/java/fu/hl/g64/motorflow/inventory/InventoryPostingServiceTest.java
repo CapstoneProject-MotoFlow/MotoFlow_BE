@@ -13,6 +13,7 @@ import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
+import fu.hl.g64.motorflow.inventory.helper.InventoryPeriods;
 import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.inventory.repository.LotBalanceRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
@@ -26,6 +27,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +51,9 @@ class InventoryPostingServiceTest extends IntegrationTest {
 
     @Autowired
     private TransactionTemplate tx;
+
+    @Autowired
+    private InventoryPeriods inventoryPeriods;
 
     @Autowired
     private StockBalanceRepository stockBalances;
@@ -420,12 +425,94 @@ class InventoryPostingServiceTest extends IntegrationTest {
                 "lots", jdbc.queryForList("SELECT purchase_unit_price, status FROM lot ORDER BY purchase_unit_price"),
                 "movements", jdbc.queryForList("SELECT st.store_name, p.sku, l.purchase_unit_price, m.stock_status, "
                         + "m.quantity_change, m.unit_cost, m.value, m.movement_type, m.reason, m.performed_by, "
+                        + "m.occurred_at, ip.period_month, "
                         + "CASE WHEN m.sales_order_id IS NOT NULL THEN 'SALES_ORDER' WHEN m.goods_receipt_note_id IS NOT NULL "
                         + "THEN 'GOODS_RECEIPT' WHEN m.stock_count_id IS NOT NULL THEN 'STOCK_COUNT' ELSE 'OTHER' END AS source_type, "
                         + "(SELECT count(*) FROM stock_count c WHERE c.id < m.stock_count_id) AS count_no "
                         + "FROM stock_movement m JOIN store st ON st.id = m.store_id JOIN product p ON p.id = m.product_id "
+                        + "JOIN inventory_period ip ON ip.id = m.inventory_period_id "
                         + "JOIN lot l ON l.id = m.lot_id ORDER BY m.id"),
                 "products", jdbc.queryForList("SELECT sku, moving_avg_cost FROM product ORDER BY sku"));
+    }
+
+    @Test
+    void adjustLotsAllNamingAnOpenPeriodAndTimeLeavesTheSameRowsAsOnePostingEach() {
+        Map<String, Object> batched = periodScenario(true);
+        Map<String, Object> sequential = periodScenario(false);
+
+        assertThat(batched).isEqualTo(sequential);
+    }
+
+    /**
+     * Two warehouses. Each posting names October, the open period, and a time inside it (BR-83). Batched or one by one.
+     */
+    private Map<String, Object> periodScenario(boolean batched) {
+        setUp();
+        long lotA = inTx(() -> receiveAt(store, product, grn, 10, 0, 100_000, null)).getId();
+        long lotO = inTx(() -> receiveAt(otherStore, product, grn, 10, 0, 130_000, null)).getId();
+        long october = id("SELECT id FROM inventory_period WHERE period_month = '2026-10-01'");
+        List<LotAdjustPosting> list = List.of(
+                adjustAt(store, lotA, StockStatus.AVAILABLE, -4, october, LocalDateTime.of(2026, 10, 13, 18, 0)),
+                adjustAt(otherStore, lotO, StockStatus.AVAILABLE, 3, october, LocalDateTime.of(2026, 10, 13, 18, 30)),
+                adjustAt(otherStore, lotO, StockStatus.AVAILABLE, -2, october, LocalDateTime.of(2026, 10, 13, 19, 0)),
+                adjustAt(store, lotA, StockStatus.AVAILABLE, -5, october, LocalDateTime.of(2026, 10, 13, 20, 0)));
+        inTx(() -> {
+            if (batched) {
+                posting.adjustLotsAll(list);
+            } else {
+                list.forEach(posting::adjustLot);
+            }
+            return null;
+        });
+        assertConsistent();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM stock_movement WHERE movement_type = 'COUNT_ADJUSTMENT' "
+                + "AND inventory_period_id = ? AND occurred_at IN (TIMESTAMP '2026-10-13 18:00', "
+                + "TIMESTAMP '2026-10-13 18:30', TIMESTAMP '2026-10-13 19:00', TIMESTAMP '2026-10-13 20:00')",
+                Integer.class, october)).isEqualTo(4);
+        return snapshot();
+    }
+
+    @Test
+    void periodAndStockRefusalsFollowListOrder() {
+        Lot lot = receive(grn, 10, 0, 100_000, null);
+        long september = closedSeptember();
+        LotAdjustPosting shortage = adjust(lot.getId(), StockStatus.AVAILABLE, -20);
+        LotAdjustPosting closed = adjustAt(store, lot.getId(), StockStatus.AVAILABLE, -1, september,
+                LocalDateTime.of(2026, 9, 13, 12, 0));
+
+        // Shortage first: MSG84, not the MSG85 of the later posting. Moving the period checks ahead would change this.
+        BusinessException loopShortage = refusal(() -> List.of(shortage, closed).forEach(posting::adjustLot));
+        BusinessException batchShortage = refusal(() -> posting.adjustLotsAll(List.of(shortage, closed)));
+        assertThat(loopShortage.getCode()).isEqualTo("MSG84");
+        assertThat(batchShortage.getCode()).isEqualTo("MSG84");
+        assertThat(batchShortage.getArgs()).containsExactly("MA-PHANH", 20, 10);
+        assertThat(batchShortage.getArgs()).containsExactly(loopShortage.getArgs());
+
+        // Closed period first: MSG85 with the month; the shortage after it is never reached.
+        BusinessException loopClosed = refusal(() -> List.of(closed, shortage).forEach(posting::adjustLot));
+        BusinessException batchClosed = refusal(() -> posting.adjustLotsAll(List.of(closed, shortage)));
+        assertThat(loopClosed.getCode()).isEqualTo("MSG85");
+        assertThat(batchClosed.getCode()).isEqualTo("MSG85");
+        assertThat(batchClosed.getArgs()).containsExactly("09/2026");
+        assertThat(batchClosed.getArgs()).containsExactly(loopClosed.getArgs());
+        assertThat(balance(store, "available_qty")).isEqualTo(10);
+        assertConsistent();
+    }
+
+    /** A September period that is closed, next to the open October one. */
+    private long closedSeptember() {
+        inTx(() -> {
+            inventoryPeriods.openIfMissing(LocalDate.of(2026, 9, 13));
+            return null;
+        });
+        jdbc.update("UPDATE inventory_period SET status = 'CLOSED', closed_at = now() WHERE period_month = '2026-09-01'");
+        return id("SELECT id FROM inventory_period WHERE period_month = '2026-09-01'");
+    }
+
+    private LotAdjustPosting adjustAt(long storeId, long lotId, StockStatus status, int change, long periodId,
+                                      LocalDateTime occurredAt) {
+        return new LotAdjustPosting(storeId, lotId, status, change, MovementType.COUNT_ADJUSTMENT,
+                SourceRef.stockCount(newCount()), owner, "đếm", periodId, occurredAt);
     }
 
     @Test
@@ -498,7 +585,8 @@ class InventoryPostingServiceTest extends IntegrationTest {
     /** A stock count row of its own: stock_movement allows one row per count, lot and status. */
     private long newCount() {
         return id("INSERT INTO stock_count (store_id, inventory_period_id, count_type, count_date, scope_type, "
-                + "created_by) VALUES (" + store + ", (SELECT id FROM inventory_period), 'CYCLE', '2026-10-13', 'WHOLE', "
+                + "created_by) VALUES (" + store + ", (SELECT id FROM inventory_period WHERE period_month = '2026-10-01'), "
+                + "'CYCLE', '2026-10-13', 'WHOLE', "
                 + owner + ") RETURNING id");
     }
 
@@ -570,10 +658,15 @@ class InventoryPostingServiceTest extends IntegrationTest {
     }
 
     private Lot receiveOf(long productId, long grnId, int passed, int damaged, long price, LocalDate expiry) {
+        return receiveAt(store, productId, grnId, passed, damaged, price, expiry);
+    }
+
+    private Lot receiveAt(long storeId, long productId, long grnId, int passed, int damaged, long price,
+                          LocalDate expiry) {
         long line = id("INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, "
                 + "delivered_qty, passed_qty, damaged_qty) VALUES (" + grnId + ", " + productId + ", " + (passed + damaged)
                 + ", " + (passed + damaged) + ", " + passed + ", " + damaged + ") RETURNING id");
-        return posting.receiveNewLot(new NewLotPosting(store, productId, LotSourceType.RECEIPT, line,
+        return posting.receiveNewLot(new NewLotPosting(storeId, productId, LotSourceType.RECEIPT, line,
                 supplier, TODAY, price, null, null, expiry,
                 Map.of(StockStatus.AVAILABLE, passed, StockStatus.DAMAGED, damaged),
                 MovementType.RECEIPT_CONFIRMED, SourceRef.goodsReceiptNote(grnId), owner, null));
