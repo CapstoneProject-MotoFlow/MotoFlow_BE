@@ -319,9 +319,10 @@ class StockLossApiTest extends AdjustmentTestData {
 
         queries.reset();
         act(ownerToken, id, "approve").andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
-        // Statements of the approval: 142 executed / 142 round trips measured, with SqlBaselineTest's 10% headroom.
-        assertThat(queries.executed()).isLessThanOrEqualTo(157);
-        assertThat(queries.roundTrips()).isLessThanOrEqualTo(157);
+        // Statements of the approval, posted in three runs: 93 executed / 84 round trips measured (142 / 142 before the
+        // lines were batched), with SqlBaselineTest's 10% headroom.
+        assertThat(queries.executed()).isLessThanOrEqualTo(103);
+        assertThat(queries.roundTrips()).isLessThanOrEqualTo(93);
 
         assertThat(available(oil)).isEqualTo(10);
         assertThat(lotQty(oilLot1)).isEqualTo(3);
