@@ -302,6 +302,28 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
     }
 
+    /** C.1: closing returns each part's pending NO_REPLACEMENT decision once, on its own lots. */
+    @Test
+    void closingReturnsEachPartsNoReplacementOnce() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 10, 50_000, null, "B");
+        long order = dispatchedOrder(brake, 4, chain, 4);
+        confirm("bmlb", order, inspected(order, brake, 1, 0, chain, 1, 0)).andExpect(status().isOk());
+        decide("bmlb", order, brake, "NO_REPLACEMENT", 3, null).andExpect(status().isOk());
+        decide("bmlb", order, chain, "NO_REPLACEMENT", 3, null).andExpect(status().isOk());
+
+        mvc.perform(post(ORDERS + "/" + order + "/close").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
+
+        assertThat(stock(source, brake, "available_qty")).isEqualTo(9);
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(9);
+        assertThat(stock(dest, brake, "in_transit_qty")).isZero();
+        assertThat(stock(dest, chain, "in_transit_qty")).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event e JOIN discrepancy_case c "
+                + "ON c.id = e.discrepancy_case_id WHERE c.transfer_order_id = ? AND e.confirmed_at IS NULL",
+                Long.class, order)).isZero();
+    }
+
     /** Dispatched {@code sent} brakes, {@code received} confirmed at the destination: the rest is missing. */
     private long shortOrder(int sent, int received) throws Exception {
         lot(source, brake, 10, 100_000, null, "A");
