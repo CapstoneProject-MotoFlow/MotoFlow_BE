@@ -782,6 +782,86 @@ class DiscrepancyApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.items", hasSize(0)));
     }
 
+    /** Two parts in one GRN: 2 wrong pads and 3 damaged oils held at the store, confirmed. */
+    private long twoPartsHeld() throws Exception {
+        long grn = receive("PX-001");
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 2, 0),
+                counted(lineOf(grn, oil), 24, 24, 0, 3))).andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        return grn;
+    }
+
+    /** The part's movements that point to a resolution event: type, status, quantity and the event's type. */
+    private List<String> sourcedMovements(long product) {
+        return jdbc.queryForList("SELECT concat_ws(',', m.movement_type, m.stock_status, m.quantity_change, "
+                + "e.resolution_type) FROM stock_movement m JOIN discrepancy_resolution_event e "
+                + "ON e.id = m.discrepancy_resolution_event_id WHERE m.product_id = ? ORDER BY m.id",
+                String.class, product);
+    }
+
+    /** The 2 wrong pads and 3 damaged oils agreed to go back, all of them moved to awaiting return. */
+    private void assertHeldBack() {
+        assertThat(stock(giaLam, pad, "WRONG_ITEM")).isZero();
+        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isEqualTo(2);
+        assertThat(stock(giaLam, oil, "DAMAGED")).isZero();
+        assertThat(stock(giaLam, oil, "AWAITING_SUPPLIER_RETURN")).isEqualTo(3);
+        assertThat(sourcedMovements(pad)).containsExactly(
+                "RETURN_HOLD,WRONG_ITEM,-2,MOVED_TO_AWAITING_RETURN",
+                "RETURN_HOLD,AWAITING_SUPPLIER_RETURN,2,MOVED_TO_AWAITING_RETURN");
+        assertThat(sourcedMovements(oil)).containsExactly(
+                "RETURN_HOLD,DAMAGED,-3,MOVED_TO_AWAITING_RETURN",
+                "RETURN_HOLD,AWAITING_SUPPLIER_RETURN,3,MOVED_TO_AWAITING_RETURN");
+        assertStockAgrees(giaLam, pad);
+        assertStockAgrees(giaLam, oil);
+    }
+
+    @Test
+    void severalPartsAreHeldAndReleasedInOneHandling() throws Exception {
+        long grn = twoPartsHeld();
+        long padCase = caseOf(grn, pad);
+        long oilCase = caseOf(grn, oil);
+
+        // One handling for both parts: the Branch Manager returns what the wrong pads and damaged oils make up.
+        handle(managerToken, grn, List.of(handling(padCase, 2, 2), handling(oilCase, 3, 3)))
+                .andExpect(status().isOk());
+        assertHeldBack();
+
+        // Lowering the agreed return on both parts releases the difference back to the stock it came from.
+        handle(managerToken, grn, List.of(handling(padCase, 1, 1), handling(oilCase, 1, 1)))
+                .andExpect(status().isOk());
+        assertThat(stock(giaLam, pad, "WRONG_ITEM")).isEqualTo(1);
+        assertThat(stock(giaLam, pad, "AWAITING_SUPPLIER_RETURN")).isEqualTo(1);
+        assertThat(stock(giaLam, oil, "DAMAGED")).isEqualTo(2);
+        assertThat(stock(giaLam, oil, "AWAITING_SUPPLIER_RETURN")).isEqualTo(1);
+        assertThat(sourcedMovements(pad)).endsWith(
+                "RETURN_RELEASE,AWAITING_SUPPLIER_RETURN,-1,RELEASED_FROM_AWAITING_RETURN",
+                "RETURN_RELEASE,WRONG_ITEM,1,RELEASED_FROM_AWAITING_RETURN");
+        assertThat(sourcedMovements(oil)).endsWith(
+                "RETURN_RELEASE,AWAITING_SUPPLIER_RETURN,-2,RELEASED_FROM_AWAITING_RETURN",
+                "RETURN_RELEASE,DAMAGED,2,RELEASED_FROM_AWAITING_RETURN");
+        assertStockAgrees(giaLam, pad);
+        assertStockAgrees(giaLam, oil);
+    }
+
+    @Test
+    void ownerApprovalHoldsSeveralPartsAsTheBranchManagerProposed() throws Exception {
+        long grn = twoPartsHeld();
+        long padCase = caseOf(grn, pad);
+        long oilCase = caseOf(grn, oil);
+
+        // A replacement of 0 is not the standard one, so the handling is only a proposal for the Owner: nothing moves.
+        handle(managerToken, grn, List.of(handling(padCase, 2, 0), handling(oilCase, 3, 0)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].decisionStatus", contains("AWAITING_OWNER", "AWAITING_OWNER")));
+        assertThat(stock(giaLam, pad, "WRONG_ITEM")).isEqualTo(2);
+        assertThat(stock(giaLam, oil, "DAMAGED")).isEqualTo(3);
+        assertThat(sourcedMovements(pad)).isEmpty();
+
+        approveDecisions(grn).andExpect(status().isOk());
+        assertHeldBack();
+    }
+
     /** [actor, return before, replacement before, return after, replacement after, note] of each saved handling. */
     private List<String> handlingAudit(long found) {
         return jdbc.queryForList("SELECT concat_ws(',', actor_id, old_data ->> 'return_required_qty', "
