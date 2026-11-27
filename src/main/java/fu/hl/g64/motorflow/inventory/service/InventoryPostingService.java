@@ -69,6 +69,9 @@ public interface InventoryPostingService {
     /**
      * {@link #move} for every line of one document. Stock rows are locked in store id then product id order before
      * any lot is chosen. The returned lists follow {@code postings}.
+     * <p>Every line's lots are chosen before any is posted. A line sees what earlier lines took out of a lot, but not
+     * what they moved into one: it can take only what the lot and status held before the call, less those earlier
+     * takes.
      */
     List<List<LotQuantity>> moveAll(List<MovePosting> postings);
 
