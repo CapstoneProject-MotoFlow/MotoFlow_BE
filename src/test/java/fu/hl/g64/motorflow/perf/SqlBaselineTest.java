@@ -88,6 +88,25 @@ class SqlBaselineTest {
             assertBudget("grn-confirm-20-lines", queries, 145, 107);
         }
 
+        @Test
+        void discrepancyHandling3Cases() throws Exception {
+            long poId = created(order(honda, giaLam, TODAY, null, line(pad, 5, 120_000), line(oil, 5, 85_000),
+                    line(lamp, 5, 95_000)));
+            long receiptId = createdReceipt(poId);
+            assign(receiptId, staff);
+            record(staffToken, receiptId, findings(counted(lineOf(receiptId, pad), 5, 5, 2, 1),
+                    counted(lineOf(receiptId, oil), 5, 5, 2, 1), counted(lineOf(receiptId, lamp), 5, 5, 2, 1)))
+                    .andExpect(status().isOk());
+            confirm(managerToken, receiptId).andExpect(status().isOk());
+            // Each case: 2 wrong items and 1 damaged part go back to the supplier, and 3 are replaced.
+            List<Map<String, Object>> handling = List.of(handling(caseOf(receiptId, pad), 3, 3),
+                    handling(caseOf(receiptId, oil), 3, 3), handling(caseOf(receiptId, lamp), 3, 3));
+
+            queries.reset();
+            handle(managerToken, receiptId, handling).andExpect(status().isOk());
+            assertBudget("discrepancy-save-handling-3-cases", queries, 146, 140);
+        }
+
         private long createdReceipt(long poId) throws Exception {
             String response = createReceipt(managerToken, poId, deliveryNote("PX-20"))
                     .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
