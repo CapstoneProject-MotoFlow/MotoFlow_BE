@@ -412,6 +412,62 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
+    public void adjustLotsAll(List<LotAdjustPosting> postings) {
+        List<LotAdjustPosting> changing = postings.stream().filter(p -> p.quantityChange() != 0).toList();
+        if (changing.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        // A lot that does not exist is refused in list order below, like adjustLot, so only known lots are locked here.
+        Map<Long, Lot> loaded = loadLots(changing.stream().map(LotAdjustPosting::lotId).toList());
+        List<LotAdjustPosting> known = changing.stream().filter(p -> loaded.containsKey(p.lotId())).toList();
+        // Same lock order as adjustLot: stock_balance, then product, then lot_balance.
+        Map<StoreProduct, StockBalance> balances = lockBalances(known.stream()
+                .map(p -> new StoreProduct(p.storeId(), loaded.get(p.lotId()).getProductId())).toList(), now);
+        Map<Long, Product> parts = readProducts(known.stream()
+                .map(p -> loaded.get(p.lotId()).getProductId()).distinct().toList());
+        // Increases are locked too: post() would lock them one by one, and here every row is locked in key order.
+        Map<LotKey, LotBalance> locked = new HashMap<>();
+        lockDestinationLotBalances(known.stream().map(p -> new LotKey(p.lotId(), p.storeId(), p.status())).toList(),
+                locked, now);
+
+        Set<Long> checkedStores = new HashSet<>();
+        Map<Long, Lot> changed = new LinkedHashMap<>();
+        Map<Long, InventoryPeriod> periodCache = new HashMap<>();
+        PostingTime currentMonth = null;
+        for (LotAdjustPosting p : changing) {
+            // Same order as adjustLot: the period and time are resolved before the lot is looked up.
+            PostingTime when;
+            if (p.periodId() == null && p.occurredAt() == null) {
+                if (currentMonth == null) {
+                    currentMonth = postingTime(p.movementType(), null, null, now);
+                }
+                when = currentMonth;
+            } else {
+                when = postingTime(p.movementType(), p.periodId(), p.occurredAt(), now, periodCache);
+            }
+            Lot lot = loaded.get(p.lotId());
+            if (lot == null) {
+                throw new IllegalArgumentException("unknown lot " + p.lotId());
+            }
+            Product product = productOf(parts, lot.getProductId());
+            if (p.quantityChange() < 0) {
+                // The row is the one posted into earlier in this loop, so held already counts those changes.
+                int held = locked.get(new LotKey(lot.getId(), p.storeId(), p.status())).getQuantity();
+                if (held + p.quantityChange() < 0) {
+                    throw notEnough(product, -p.quantityChange(), held);
+                }
+            }
+            post(balances.get(new StoreProduct(p.storeId(), lot.getProductId())), lot, p.status(), p.quantityChange(),
+                    costOf(product, lot), p.movementType(), p.source(), p.reason(), p.performedBy(), when.period(), now,
+                    when.at(), checkedStores, locked);
+            changed.putIfAbsent(lot.getId(), lot);
+        }
+        refreshDepletions(changed.values());
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
     public void receiveIntoLot(LotReceiptPosting p) {
         LocalDateTime now = LocalDateTime.now(clock);
         InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
@@ -834,6 +890,48 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private void refreshDepletion(Lot lot) {
         lotBalances.flush();
         lot.refreshDepletion((int) lotBalances.sumQuantityOfLot(lot.getId()));
+    }
+
+    /** {@link #refreshDepletion} for several lots, with one read of their totals. */
+    private void refreshDepletions(Collection<Lot> changed) {
+        if (changed.isEmpty()) {
+            return;
+        }
+        lotBalances.flush();
+        Map<Long, Integer> totals = new HashMap<>();
+        for (Object[] row : lotBalances.sumQuantityByLotIdIn(changed.stream().map(Lot::getId).toList())) {
+            totals.put(((Number) row[0]).longValue(), ((Number) row[1]).intValue());
+        }
+        for (Lot lot : changed) {
+            lot.refreshDepletion(totals.getOrDefault(lot.getId(), 0));
+        }
+    }
+
+    private Map<Long, Lot> loadLots(Collection<Long> lotIds) {
+        Set<Long> ids = new HashSet<>(lotIds);
+        return ids.isEmpty() ? Map.of() : lots.findAllById(ids).stream()
+                .collect(Collectors.toMap(Lot::getId, Function.identity()));
+    }
+
+    /** Reads the parts without a lock, as {@link #product} does: a part this transaction already holds is read again. */
+    private Map<Long, Product> readProducts(Collection<Long> productIds) {
+        Set<Object> managed = managedIds(Product.class);
+        Map<Long, Product> found = products.findAllById(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        List<Product> toRefresh = found.values().stream().filter(p -> managed.contains(p.getId())).toList();
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
+        }
+        return found;
+    }
+
+    private static Product productOf(Map<Long, Product> parts, Long productId) {
+        Product product = parts.get(productId);
+        if (product == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
+        }
+        return product;
     }
 
     private Product product(Long productId) {

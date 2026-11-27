@@ -323,6 +323,131 @@ class InventoryPostingServiceTest extends IntegrationTest {
         assertConsistent();
     }
 
+    @Test
+    void adjustLotsAllLeavesTheSameRowsAsOneAdjustLotPerPosting() {
+        Map<String, Object> batched = adjustScenario(true);
+        Map<String, Object> sequential = adjustScenario(false);
+
+        assertThat(batched).isEqualTo(sequential);
+    }
+
+    @Test
+    void adjustLotsAllCountsWhatEarlierPostingsOfTheSameLotAndStatusLeft() {
+        Lot lot = receive(grn, 10, 0, 100_000, null);
+        LotAdjustPosting first = adjust(lot.getId(), StockStatus.AVAILABLE, -6);
+        LotAdjustPosting second = adjust(lot.getId(), StockStatus.AVAILABLE, -6);
+
+        BusinessException sequential = refusal(() -> {
+            posting.adjustLot(first);
+            posting.adjustLot(second);
+        });
+        BusinessException batched = refusal(() -> posting.adjustLotsAll(List.of(first, second)));
+
+        assertThat(batched.getCode()).isEqualTo("MSG84");
+        assertThat(batched.getArgs()).containsExactly("MA-PHANH", 6, 4);
+        assertThat(batched.getCode()).isEqualTo(sequential.getCode());
+        assertThat(batched.getArgs()).containsExactly(sequential.getArgs());
+        assertThat(balance(store, "available_qty")).isEqualTo(10);
+        assertConsistent();
+    }
+
+    @Test
+    void adjustLotsAllReportsTheFirstRefusedPostingInListOrder() {
+        Lot lot = receive(grn, 10, 0, 100_000, null);
+
+        BusinessException refused = refusal(() -> posting.adjustLotsAll(List.of(
+                adjust(lot.getId(), StockStatus.AVAILABLE, -20), adjust(lot.getId(), StockStatus.AVAILABLE, -30))));
+        assertThat(refused.getCode()).isEqualTo("MSG84");
+        assertThat(refused.getArgs()).containsExactly("MA-PHANH", 20, 10);
+
+        assertThatThrownBy(() -> inTx(() -> {
+            posting.adjustLotsAll(List.of(adjust(999_999L, StockStatus.AVAILABLE, -1),
+                    adjust(lot.getId(), StockStatus.AVAILABLE, -20)));
+            return null;
+        })).isInstanceOf(IllegalArgumentException.class).hasMessage("unknown lot 999999");
+        assertThatThrownBy(() -> inTx(() -> {
+            posting.adjustLotsAll(List.of(adjust(lot.getId(), StockStatus.AVAILABLE, -20),
+                    adjust(999_999L, StockStatus.AVAILABLE, -1)));
+            return null;
+        })).isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getCode()).isEqualTo("MSG84"));
+        assertThat(balance(store, "available_qty")).isEqualTo(10);
+    }
+
+    /**
+     * Builds the same stock, runs one mixed list of adjustments either batched or one by one in one transaction, and
+     * returns what the database holds. Ids are left out: the batch and the loop must agree on every value.
+     */
+    private Map<String, Object> adjustScenario(boolean batched) {
+        setUp();
+        long product2 = id("INSERT INTO product (sku, part_name, category_id, base_unit, created_by) VALUES ('MA-LOC', "
+                + "'Lọc gió', (SELECT min(id) FROM part_category), 'cái', " + owner + ") RETURNING id");
+        long lotA = receive(grn, 10, 0, 100_000, null).getId();
+        long lotB = receive(newGrn("PX-2"), 10, 2, 130_000, null).getId();
+        long lotC = inTx(() -> receiveOf(product2, grn, 5, 0, 50_000, null)).getId();
+        List<LotAdjustPosting> list = List.of(
+                adjust(lotA, StockStatus.AVAILABLE, -4),
+                adjust(lotB, StockStatus.DAMAGED, -1),
+                adjust(lotB, StockStatus.AVAILABLE, 3),
+                adjust(lotB, StockStatus.AVAILABLE, -5),
+                adjust(lotC, StockStatus.AVAILABLE, -2),
+                adjust(lotA, StockStatus.AVAILABLE, 0),
+                adjust(lotA, StockStatus.AVAILABLE, -6));
+        inTx(() -> {
+            if (batched) {
+                posting.adjustLotsAll(list);
+            } else {
+                list.forEach(posting::adjustLot);
+            }
+            return null;
+        });
+        assertConsistent();
+        assertThat(lotStatus(lotA)).isEqualTo("DEPLETED");
+        return Map.of(
+                "balances", jdbc.queryForList("SELECT st.store_name, p.sku, b.available_qty, b.awaiting_inspection_qty, "
+                        + "b.wrong_item_qty, b.damaged_qty, b.awaiting_supplier_return_qty, b.in_transit_qty "
+                        + "FROM stock_balance b JOIN store st ON st.id = b.store_id JOIN product p ON p.id = b.product_id "
+                        + "ORDER BY p.sku, st.store_name"),
+                "lotBalances", jdbc.queryForList("SELECT l.purchase_unit_price, s.store_name, b.stock_status, b.quantity "
+                        + "FROM lot_balance b JOIN lot l ON l.id = b.lot_id JOIN store s ON s.id = b.store_id "
+                        + "ORDER BY l.purchase_unit_price, s.store_name, b.stock_status"),
+                "lots", jdbc.queryForList("SELECT purchase_unit_price, status FROM lot ORDER BY purchase_unit_price"),
+                "movements", jdbc.queryForList("SELECT st.store_name, p.sku, l.purchase_unit_price, m.stock_status, "
+                        + "m.quantity_change, m.unit_cost, m.value, m.movement_type, m.reason, m.performed_by, "
+                        + "CASE WHEN m.sales_order_id IS NOT NULL THEN 'SALES_ORDER' WHEN m.goods_receipt_note_id IS NOT NULL "
+                        + "THEN 'GOODS_RECEIPT' WHEN m.stock_count_id IS NOT NULL THEN 'STOCK_COUNT' ELSE 'OTHER' END AS source_type, "
+                        + "(SELECT count(*) FROM stock_count c WHERE c.id < m.stock_count_id) AS count_no "
+                        + "FROM stock_movement m JOIN store st ON st.id = m.store_id JOIN product p ON p.id = m.product_id "
+                        + "JOIN lot l ON l.id = m.lot_id ORDER BY m.id"));
+    }
+
+    private LotAdjustPosting adjust(long lotId, StockStatus status, int change) {
+        return new LotAdjustPosting(store, lotId, status, change, MovementType.COUNT_ADJUSTMENT,
+                SourceRef.stockCount(newCount()), owner, "đếm");
+    }
+
+    /** A stock count row of its own: stock_movement allows one row per count, lot and status. */
+    private long newCount() {
+        return id("INSERT INTO stock_count (store_id, inventory_period_id, count_type, count_date, scope_type, "
+                + "created_by) VALUES (" + store + ", (SELECT id FROM inventory_period), 'CYCLE', '2026-10-13', 'WHOLE', "
+                + owner + ") RETURNING id");
+    }
+
+    private BusinessException refusal(Runnable work) {
+        try {
+            inTx(() -> {
+                work.run();
+                return null;
+            });
+        } catch (BusinessException e) {
+            return e;
+        }
+        throw new AssertionError("expected a BusinessException");
+    }
+
+    private String lotStatus(long lotId) {
+        return jdbc.queryForObject("SELECT status FROM lot WHERE id = ?", String.class, lotId);
+    }
+
     /** Tx A runs {@code preload} first, waits while another sale of 3 commits, then sells 2 itself. 10 - 3 - 2 = 5. */
     private void runWhileOtherSaleCommits(Runnable preload) throws Exception {
         long otherSale = id("INSERT INTO sales_order (store_id, price_type, created_by) VALUES (" + store
@@ -371,10 +496,14 @@ class InventoryPostingServiceTest extends IntegrationTest {
     }
 
     private Lot newLot(long grnId, int passed, int damaged, long price, LocalDate expiry) {
+        return receiveOf(product, grnId, passed, damaged, price, expiry);
+    }
+
+    private Lot receiveOf(long productId, long grnId, int passed, int damaged, long price, LocalDate expiry) {
         long line = id("INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, "
-                + "delivered_qty, passed_qty, damaged_qty) VALUES (" + grnId + ", " + product + ", " + (passed + damaged)
+                + "delivered_qty, passed_qty, damaged_qty) VALUES (" + grnId + ", " + productId + ", " + (passed + damaged)
                 + ", " + (passed + damaged) + ", " + passed + ", " + damaged + ") RETURNING id");
-        return posting.receiveNewLot(new NewLotPosting(store, product, LotSourceType.RECEIPT, line,
+        return posting.receiveNewLot(new NewLotPosting(store, productId, LotSourceType.RECEIPT, line,
                 supplier, TODAY, price, null, null, expiry,
                 Map.of(StockStatus.AVAILABLE, passed, StockStatus.DAMAGED, damaged),
                 MovementType.RECEIPT_CONFIRMED, SourceRef.goodsReceiptNote(grnId), owner, null));
