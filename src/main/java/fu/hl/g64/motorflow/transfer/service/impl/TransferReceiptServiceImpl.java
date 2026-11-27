@@ -59,14 +59,18 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -380,6 +384,26 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
         // UC-76: what a later receipt or a return brought settles the part's case (BR-59, BR-61).
         ResolutionType settled = receipt.getReceiptType() == ReceiptType.TRANSFER_IN
                 ? ResolutionType.LATE_DELIVERY_RECEIVED : ResolutionType.RECEIVED_BACK_AT_SOURCE;
+        // C.2: the parts that will consume decisions. Their pending decisions are locked and read once, oldest first
+        // per part, instead of once per receipt line.
+        Set<Long> consuming = new LinkedHashSet<>();
+        for (GoodsReceiptNoteLine line : lines) {
+            if (opened.containsKey(line.getProductId()) && arrivedOfPart(line) > 0) {
+                consuming.add(line.getProductId());
+            }
+        }
+        Map<Long, Deque<DiscrepancyResolutionEvent>> pendingByPart = new HashMap<>();
+        if (!consuming.isEmpty()) {
+            Map<Long, Long> productOfCase = opened.values().stream()
+                    .collect(Collectors.toMap(DiscrepancyCase::getId, DiscrepancyCase::getProductId));
+            List<DiscrepancyResolutionEvent> decisions = settled == ResolutionType.RECEIVED_BACK_AT_SOURCE
+                    ? events.findPendingReturnDecisionsForUpdateOfParts(id, consuming)
+                    : events.findPendingForUpdateOfParts(id, consuming, settled);
+            for (DiscrepancyResolutionEvent decision : decisions) {
+                pendingByPart.computeIfAbsent(productOfCase.get(decision.getDiscrepancyCaseId()),
+                        productId -> new ArrayDeque<>()).add(decision);
+            }
+        }
         for (GoodsReceiptNoteLine line : lines) {
             DiscrepancyCase shortage = opened.get(line.getProductId());
             int arrived = arrivedOfPart(line);
@@ -389,16 +413,18 @@ public class TransferReceiptServiceImpl implements TransferReceiptService {
             int remaining = arrived;
             {
                 // R-06, PM 23/11: the pending return or late-delivery decisions are consumed, oldest first; a partial
-                // arrival splits one.
-                for (DiscrepancyResolutionEvent decision : settled == ResolutionType.RECEIVED_BACK_AT_SOURCE
-                        ? events.findPendingReturnDecisionsForUpdate(id, line.getProductId())
-                        : events.findPendingForUpdate(id, line.getProductId(), settled)) {
+                // arrival splits one. A line of the same part shares what the earlier lines left pending.
+                Deque<DiscrepancyResolutionEvent> pending = pendingByPart.getOrDefault(line.getProductId(),
+                        new ArrayDeque<>());
+                while (!pending.isEmpty()) {
                     if (remaining == 0) {
                         break;
                     }
+                    DiscrepancyResolutionEvent decision = pending.peekFirst();
                     if (decision.getQuantity() <= remaining) {
                         remaining -= decision.getQuantity();
                         decision.settle(receipt.getId(), user.id(), now);
+                        pending.pollFirst();
                     } else {
                         decision.reduceTo(decision.getQuantity() - remaining);
                         events.save(confirmed(decision.getDiscrepancyCaseId(), settled, remaining, receipt, user, now));
