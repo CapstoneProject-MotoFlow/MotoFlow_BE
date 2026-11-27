@@ -150,6 +150,33 @@ class StockCountApprovalApiTest extends StockCountTestData {
     }
 
     @Test
+    void aPartWithLotAdjustmentsAndASurplusPostsInStepOrderAtTheAverage() throws Exception {
+        // Filter: lot A 4 counted 3 (-1), lot B 3 counted 4 (+1), and its lot without expiry 2 counted 3 (+1 surplus).
+        long count = awaiting().line(filterLotALine(4, 3).because("Hỏng"))
+                .line(filterLotBLine(3, 4).because("Đếm thiếu"))
+                .line(filterPlainLine(2, 3).because("Đếm thừa")).insert();
+
+        postAs(ownerToken, url(count), Map.of()).andExpect(status().isOk());
+
+        long surplus = id("SELECT id FROM lot WHERE stock_count_id = ? AND source_type = 'COUNT_SURPLUS'", count);
+        assertThat(availableOfLot(filterLotA)).isEqualTo(3);
+        assertThat(availableOfLot(filterLotB)).isEqualTo(4);
+        assertThat(availableOfLot(filterLotPlain)).isEqualTo(2);
+        assertThat(availableOfLot(surplus)).isEqualTo(1);
+        assertThat(availableOf(store, filter)).isEqualTo(10);
+        List<Map<String, Object>> movements = movementsOf(count);
+        assertThat(movements).hasSize(3);
+        assertThat(movements.get(0)).containsEntry("lot_id", filterLotA).containsEntry("quantity_change", -1);
+        assertThat(movements.get(1)).containsEntry("lot_id", filterLotB).containsEntry("quantity_change", 1);
+        assertThat(movements.get(2)).containsEntry("lot_id", surplus).containsEntry("quantity_change", 1);
+        assertThat(jdbc.queryForObject("SELECT unit_cost FROM stock_movement WHERE stock_count_id = ? AND lot_id = ?",
+                BigDecimal.class, count, filterLotA)).isEqualByComparingTo("50000");
+        assertThat(jdbc.queryForObject("SELECT purchase_unit_price FROM lot WHERE id = ?", Long.class, surplus))
+                .isEqualTo(50_000L);
+        assertThat(movingAverage(filter)).isEqualByComparingTo("50000.0000");
+    }
+
+    @Test
     void aSaleAfterTheBookQuantityIsKeptOnlyTheDifferenceIsPosted() throws Exception {
         // Book 12, counted 10 (short by 2). Meanwhile 2 oil were sold from the newer lot: the book is 10 by now.
         long count = awaiting().line(oilLine(12, 10).because("Hao hụt")).insert();
