@@ -516,6 +516,97 @@ class InventoryPostingServiceTest extends IntegrationTest {
     }
 
     @Test
+    void moveAllNamingTheSameLotTwiceWithinTheStockMatchesTwoMoves() {
+        Map<String, Object> batched = sameLotMoves(true, 4, 3);
+        Map<String, Object> sequential = sameLotMoves(false, 4, 3);
+
+        assertThat(batched).isEqualTo(sequential);
+    }
+
+    @Test
+    void moveAllNamingTheSameLotTwiceAboveTheStockRefusesLikeTwoMoves() {
+        setUp();
+        Lot lot = receive(grn, 10, 0, 100_000, null);
+        MovePosting first = dispatch(newTransfer(), lot.getId(), 6);
+        MovePosting second = dispatch(newTransfer(), lot.getId(), 6);
+
+        BusinessException loop = refusal(() -> {
+            posting.move(first);
+            posting.move(second);
+        });
+        BusinessException batch = refusal(() -> posting.moveAll(List.of(first, second)));
+
+        assertThat(loop.getCode()).isEqualTo("MSG84");
+        assertThat(batch.getCode()).isEqualTo("MSG84");
+        assertThat(batch.getArgs()).containsExactly("MA-PHANH", 6, 4);
+        assertThat(batch.getArgs()).containsExactly(loop.getArgs());
+        assertThat(balance(store, "available_qty")).isEqualTo(10);
+        assertConsistent();
+    }
+
+    /** Two moves of one lot and status in one batch, batched or one by one. Their total is {@code first + second}. */
+    private Map<String, Object> sameLotMoves(boolean batched, int first, int second) {
+        setUp();
+        Lot lot = receive(grn, 10, 0, 100_000, null);
+        List<MovePosting> list = List.of(dispatch(newTransfer(), lot.getId(), first),
+                dispatch(newTransfer(), lot.getId(), second));
+        inTx(() -> {
+            if (batched) {
+                posting.moveAll(list);
+            } else {
+                list.forEach(posting::move);
+            }
+            return null;
+        });
+        assertConsistent();
+        return snapshot();
+    }
+
+    @Test
+    void takeOutAllNamingALotThenTakingFefoMatchesTwoTakeOuts() {
+        Map<String, Object> batched = namedThenFefo(true);
+        Map<String, Object> sequential = namedThenFefo(false);
+
+        assertThat(batched).isEqualTo(sequential);
+    }
+
+    /** A named line takes 4 of the first lot; a FEFO line of 8 then takes what is left of it, so the first lot empties. */
+    private Map<String, Object> namedThenFefo(boolean batched) {
+        setUp();
+        long first = receive(grn, 10, 0, 100_000, null).getId();
+        receive(newGrn("PX-2"), 10, 0, 130_000, null);
+        long otherSale = id("INSERT INTO sales_order (store_id, price_type, created_by) VALUES (" + store
+                + ", 'RETAIL', " + owner + ") RETURNING id");
+        List<OutPosting> list = List.of(
+                new OutPosting(store, product, StockStatus.AVAILABLE, 4, List.of(new LotQuantity(first, 4)),
+                        MovementType.SALE_ISSUE, SourceRef.salesOrder(sale), owner, null),
+                new OutPosting(store, product, StockStatus.AVAILABLE, 8, null, MovementType.SALE_ISSUE,
+                        SourceRef.salesOrder(otherSale), owner, null));
+        inTx(() -> {
+            if (batched) {
+                posting.takeOutAll(list);
+            } else {
+                list.forEach(posting::takeOut);
+            }
+            return null;
+        });
+        assertConsistent();
+        assertThat(lotQty(first, store, "AVAILABLE")).isZero();
+        return snapshot();
+    }
+
+    private long newTransfer() {
+        return id("INSERT INTO transfer_order (source_store_id, dest_store_id, created_by) VALUES (" + store + ", "
+                + otherStore + ", " + owner + ") RETURNING id");
+    }
+
+    private MovePosting dispatch(long transferId, long lotId, int quantity) {
+        return new MovePosting(product, store, StockStatus.AVAILABLE, otherStore, StockStatus.IN_TRANSIT, quantity,
+                List.of(new LotQuantity(lotId, quantity)), MovementType.TRANSFER_DISPATCH,
+                SourceRef.transferOrder(transferId), owner, null);
+    }
+
+    @Test
     void receiveIntoLotsAllLeavesTheSameAverageAndRowsAsOneReceiveIntoLotPerPosting() {
         Map<String, Object> batched = receiveScenario(true);
         Map<String, Object> sequential = receiveScenario(false);

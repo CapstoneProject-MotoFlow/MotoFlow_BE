@@ -227,6 +227,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             for (Pick pick : picks) {
                 post(balance, pick.lot, p.fromStatus(), -pick.quantity, costOf(product, pick.lot), p.movementType(),
                         p.source(), p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
+                batch.posted(new LotKey(pick.lot.getId(), p.storeId(), p.fromStatus()), pick.quantity);
                 touchedLots.putIfAbsent(pick.lot.getId(), pick.lot);
                 line.add(new LotQuantity(pick.lot.getId(), pick.quantity));
             }
@@ -639,6 +640,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         private final Map<Long, Lot> lots;
         private final Map<PoolKey, List<Held>> open;
         private final Map<LotKey, LotBalance> locked;
+        /** Quantity chosen from each lot so far and not yet posted: lot_balance does not show it until post(). */
+        private final Map<LotKey, Integer> chosen = new HashMap<>();
 
         private Batch(Map<Long, Product> products, Map<Long, Lot> lots, Map<PoolKey, List<Held>> open,
                       Map<LotKey, LotBalance> locked) {
@@ -646,6 +649,11 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             this.lots = lots;
             this.open = open;
             this.locked = locked;
+        }
+
+        /** A chosen quantity has been posted, so lot_balance shows it and it no longer counts as chosen. */
+        private void posted(LotKey key, int quantity) {
+            chosen.merge(key, -quantity, Integer::sum);
         }
 
         private Product product(long productId) {
@@ -816,9 +824,15 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                     lb = lotBalance(lot.getId(), storeId, status, now);
                     batch.locked.put(key, lb);
                 }
-                int held = lb.getQuantity();
+                int held = lb.getQuantity() - batch.chosen.getOrDefault(key, 0);
                 if (w.quantity() > held) {
                     throw notEnough(product, w.quantity(), held);
+                }
+                batch.chosen.merge(key, w.quantity(), Integer::sum);
+                for (Held open : batch.open.getOrDefault(new PoolKey(storeId, status, product.getId()), List.of())) {
+                    if (open.lot.getId().equals(lot.getId())) {
+                        open.remaining -= w.quantity();
+                    }
                 }
                 picks.add(new Pick(lot, w.quantity()));
                 total += w.quantity();
@@ -838,6 +852,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             if (left > 0 && held.remaining > 0) {
                 int take = Math.min(left, held.remaining);
                 held.remaining -= take;
+                batch.chosen.merge(new LotKey(held.lot.getId(), storeId, status), take, Integer::sum);
                 picks.add(new Pick(held.lot, take));
                 left -= take;
             }
