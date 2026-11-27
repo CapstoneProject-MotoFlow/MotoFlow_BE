@@ -62,7 +62,8 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 + "AND status <> 'CANCELLED'",
                 String.class, receipt)).isEqualTo("DONE");
 
-        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedByName").value("Test bmlb"));
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(5);
         arrive(order).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("MSG210"));
     }
@@ -73,7 +74,8 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         long order = dispatchedOrder(brake, 5);
 
         long receipt = inspected(order, brake, 3, 0);
-        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedByName").value("Test bmlb"));
 
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(3);
         assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(2);
@@ -99,7 +101,8 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         long order = dispatchedOrder(brake, 3);
 
         long receipt = inspected(order, brake, 2, 1);
-        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedByName").value("Test bmlb"));
 
         assertThat(lotStock(only, dest, "AVAILABLE")).isEqualTo(2);
         assertThat(lotStock(only, dest, "DAMAGED")).isZero();
@@ -128,7 +131,8 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.lines[0].damagedQty").value(5))
                 .andExpect(jsonPath("$.lines[0].damagedBeyondQty").value(15))
                 .andExpect(jsonPath("$.lines[0].excessQty").value(3));
-        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedByName").value("Test bmlb"));
 
         assertThat(lotStock(only, dest, "IN_TRANSIT")).isZero();
         assertThat(lotStock(only, dest, "AVAILABLE")).isZero();
@@ -163,7 +167,8 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .containsEntry("delivered_qty", 9).containsEntry("wrong_item_qty", 1);
         receiptView("nvlb", order, receipt).andExpect(jsonPath("$.lines[0].wrongItemQty").value(1));
 
-        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedByName").value("Test bmlb"));
 
         // Only the part itself leaves transit; the wrong item is another part, so 2 brakes stay unresolved.
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(7);
@@ -199,13 +204,17 @@ class TransferReceiptApiTest extends TransferFlowTestData {
 
         result("nvlb", order, receipt, brake, 3, 0).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].excessQty").value(1));
-        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedByName").value("Test bmlb"));
 
         assertThat(stock(dest, brake, "available_qty")).isEqualTo(2);
         assertThat(stock(source, brake, "available_qty")).isEqualTo(8);
         view("owner", "/" + order).andExpect(jsonPath("$.lines[0].receivedQty").value(2))
                 .andExpect(jsonPath("$.lines[0].extraReceivedQty").value(1))
+                .andExpect(jsonPath("$.lines[0].legacyExcessQty").value(0))
                 .andExpect(jsonPath("$.lines[0].unresolvedQty").value(0));
+        view("nvlb", "/" + order).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].legacyExcessQty").isEmpty());
         assertThat(recipients("TRANSFER_EXCESS_RECEIVED")).containsExactly(owner.getId());
     }
 
@@ -337,6 +346,7 @@ class TransferReceiptApiTest extends TransferFlowTestData {
                 .andExpect(jsonPath("$.createdBy").value(staffId))
                 .andExpect(jsonPath("$.recordedBy").isEmpty())
                 .andExpect(jsonPath("$.recordedByName").isEmpty())
+                .andExpect(jsonPath("$.confirmedByName").isEmpty())
                 .andExpect(jsonPath("$.documents.length()").value(1))
                 .andExpect(jsonPath("$.lines[0].documentQty").value(2))
                 .andReturn().getResponse().getContentAsString();
@@ -352,6 +362,7 @@ class TransferReceiptApiTest extends TransferFlowTestData {
         result("nvlb", order, receipt, brake, 2, 0).andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordedBy").value(staffId))
                 .andExpect(jsonPath("$.recordedByName").value("Test nvlb"));
-        confirm("bmlb", order, receipt).andExpect(status().isOk());
+        confirm("bmlb", order, receipt).andExpect(status().isOk())
+                .andExpect(jsonPath("$.confirmedByName").value("Test bmlb"));
     }
 }
