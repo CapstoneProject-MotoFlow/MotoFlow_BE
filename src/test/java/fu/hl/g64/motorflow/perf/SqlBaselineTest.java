@@ -217,7 +217,7 @@ class SqlBaselineTest {
 
             queries.reset();
             postAs(ownerToken, COUNTS + "/" + count + "/approve", Map.of()).andExpect(status().isOk());
-            assertBudget("stock-count-approve-10-lines", queries, 141, 141);
+            assertBudget("stock-count-approve-10-lines", queries, 99, 89);
         }
     }
 

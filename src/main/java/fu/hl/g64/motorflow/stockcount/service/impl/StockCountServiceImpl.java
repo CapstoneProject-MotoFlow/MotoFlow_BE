@@ -569,21 +569,34 @@ public class StockCountServiceImpl implements StockCountService {
         Map<Long, Product> surplusParts = products.findAllById(steps.stream().filter(step -> step.lotId() == null)
                 .map(CountPosting::productId).collect(Collectors.toSet())).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
-        for (CountPosting step : steps) {
-            if (step.lotId() != null) {
-                posting.adjustLot(new LotAdjustPosting(count.getStoreId(), step.lotId(), step.status(),
-                        step.quantity(), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(),
-                        step.reason(), count.getInventoryPeriodId(), occurredAt));
-            } else {
-                // Surplus with no lot: a new lot at the moving average, so the average does not move (BR-74, BR-81).
-                Product part = surplusParts.get(step.productId());
-                BigDecimal average = part == null ? null : part.getMovingAvgCost();
-                long price = average == null ? 0 : average.setScale(0, RoundingMode.HALF_UP).longValueExact();
-                posting.receiveNewLot(new NewLotPosting(count.getStoreId(), step.productId(),
-                        LotSourceType.COUNT_SURPLUS, null, null, count.getCountDate(), price, null, null, null,
-                        step.quantities(), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(),
-                        step.reason(), count.getInventoryPeriodId(), occurredAt));
+        // Runs of one kind (a lot adjustment, or a surplus with no lot) are posted together, each in step order, so
+        // every part sees its postings in the order this loop always used. The surplus price is read when its run is
+        // built; a surplus never moves the average, so it is the same price the one-by-one loop read.
+        int start = 0;
+        while (start < steps.size()) {
+            boolean withLot = steps.get(start).lotId() != null;
+            int end = start;
+            while (end < steps.size() && (steps.get(end).lotId() != null) == withLot) {
+                end++;
             }
+            List<CountPosting> run = steps.subList(start, end);
+            if (withLot) {
+                posting.adjustLotsAll(run.stream().map(step -> new LotAdjustPosting(count.getStoreId(), step.lotId(),
+                        step.status(), step.quantity(), MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id),
+                        user.id(), step.reason(), count.getInventoryPeriodId(), occurredAt)).toList());
+            } else {
+                posting.receiveNewLotsAll(run.stream().map(step -> {
+                    // Surplus with no lot: a new lot at the moving average, so the average does not move (BR-74, BR-81).
+                    Product part = surplusParts.get(step.productId());
+                    BigDecimal average = part == null ? null : part.getMovingAvgCost();
+                    long price = average == null ? 0 : average.setScale(0, RoundingMode.HALF_UP).longValueExact();
+                    return new NewLotPosting(count.getStoreId(), step.productId(), LotSourceType.COUNT_SURPLUS, null,
+                            null, count.getCountDate(), price, null, null, null, step.quantities(),
+                            MovementType.COUNT_ADJUSTMENT, SourceRef.stockCount(id), user.id(), step.reason(),
+                            count.getInventoryPeriodId(), occurredAt);
+                }).toList());
+            }
+            start = end;
         }
 
         return finishApproval(user, count, request);

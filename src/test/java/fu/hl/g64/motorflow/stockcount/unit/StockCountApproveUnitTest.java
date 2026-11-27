@@ -82,10 +82,17 @@ class StockCountApproveUnitTest extends StockCountUnitTestBase {
         return new StockCountApproveRequest(reason);
     }
 
+    /** The one adjustment of a run: approve posts its lot steps as one adjustLotsAll call. */
     private LotAdjustPosting adjusted() {
-        ArgumentCaptor<LotAdjustPosting> posted = ArgumentCaptor.forClass(LotAdjustPosting.class);
-        verify(posting).adjustLot(posted.capture());
-        return posted.getValue();
+        ArgumentCaptor<List<LotAdjustPosting>> posted = listCaptor();
+        verify(posting).adjustLotsAll(posted.capture());
+        assertThat(posted.getValue()).hasSize(1);
+        return posted.getValue().getFirst();
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static <T> ArgumentCaptor<List<T>> listCaptor() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
     }
 
     private void assertApproved() {
@@ -102,8 +109,8 @@ class StockCountApproveUnitTest extends StockCountUnitTestBase {
     }
 
     private void assertNothingPosted() {
-        verify(posting, never()).adjustLot(any());
-        verify(posting, never()).receiveNewLot(any());
+        verify(posting, never()).adjustLotsAll(any());
+        verify(posting, never()).receiveNewLotsAll(any());
     }
 
     @Test
@@ -129,14 +136,15 @@ class StockCountApproveUnitTest extends StockCountUnitTestBase {
         with(parts.get(P2), "movingAvgCost", new BigDecimal("50000"));
         service.approve(owner, 1, body(null));
         assertApproved();
-        ArgumentCaptor<NewLotPosting> posted = ArgumentCaptor.forClass(NewLotPosting.class);
-        verify(posting).receiveNewLot(posted.capture());
-        NewLotPosting lot = posted.getValue();
+        ArgumentCaptor<List<NewLotPosting>> posted = listCaptor();
+        verify(posting).receiveNewLotsAll(posted.capture());
+        assertThat(posted.getValue()).hasSize(1);
+        NewLotPosting lot = posted.getValue().getFirst();
         assertThat(lot.productId()).isEqualTo(P2);
         assertThat(lot.sourceType()).isEqualTo(LotSourceType.COUNT_SURPLUS);
         assertThat(lot.purchaseUnitPrice()).isEqualTo(50_000L);
         assertThat(lot.quantities()).isEqualTo(Map.of(StockStatus.AVAILABLE, 2));
-        verify(posting, never()).adjustLot(any());
+        verify(posting, never()).adjustLotsAll(any());
     }
 
     @Test
