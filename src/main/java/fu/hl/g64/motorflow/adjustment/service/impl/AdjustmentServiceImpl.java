@@ -602,13 +602,20 @@ public class AdjustmentServiceImpl implements AdjustmentService {
         Map<Long, Integer> byPart = new LinkedHashMap<>();
         lines.forEach(l -> byPart.merge(l.getProductId(), -l.getQuantityChange(), Integer::sum));
         Map<Long, DiscrepancyCase> caseByPart = cases(request.getGoodsReceiptNoteId());
+        // Every case is locked at once, in id order; all events are saved and flushed once, then each case closes.
+        Map<Long, DiscrepancyCase> locked = discrepancies.findAllByIdForUpdate(byPart.keySet().stream()
+                        .map(part -> caseByPart.get(part).getId()).toList()).stream()
+                .collect(Collectors.toMap(DiscrepancyCase::getId, Function.identity()));
+        List<DiscrepancyCase> settling = new ArrayList<>();
         for (Map.Entry<Long, Integer> e : byPart.entrySet()) {
-            DiscrepancyCase found = discrepancies.findByIdForUpdate(caseByPart.get(e.getKey()).getId()).orElseThrow();
+            DiscrepancyCase found = locked.get(caseByPart.get(e.getKey()).getId());
             discrepancyEvents.save(DiscrepancyResolutionEvent.heldWriteOff(found.getId(), e.getValue(),
                     request.getId(), request.getReason(), ownerId, now));
-            discrepancyEvents.flush();
-            settlement.closeIfSettled(found, ownerId, now);
+            settling.add(found);
         }
+        discrepancyEvents.flush();
+        // A case's standing reads only its own events, so the closing order does not matter; it keeps the parts' order.
+        settling.forEach(found -> settlement.closeIfSettled(found, ownerId, now));
     }
 
     @Transactional
