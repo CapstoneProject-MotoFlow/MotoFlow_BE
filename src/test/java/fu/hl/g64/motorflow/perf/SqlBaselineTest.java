@@ -142,7 +142,7 @@ class SqlBaselineTest {
             }
             queries.reset();
             decide(ownerToken, receiptId, decisions.toArray()).andExpect(status().isOk());
-            assertBudget("grn-decide-excess-10-lines", queries, 171, 171);
+            assertBudget("grn-decide-excess-10-lines", queries, 83, 56);
         }
 
         private long createdReceipt(long poId) throws Exception {

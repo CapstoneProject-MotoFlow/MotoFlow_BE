@@ -508,23 +508,21 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
                 .collect(Collectors.toMap(DiscrepancyCase::getProductId, Function.identity()));
         Map<Long, Lot> lotByLine = byLine(lots.findByGoodsReceiptNoteLineIdIn(waiting.stream()
                 .map(GoodsReceiptNoteLine::getId).toList()));
+        // A rejected line whose case is already closed fails in the loop below (addRejectedExcess). The old loop posted
+        // that line before failing, so the postings run through it and no further. Case status does not change inside
+        // the loop (a case closes only after it), so the state read here is the state the loop sees.
+        int postedThrough = waiting.size();
+        for (int i = 0; i < waiting.size(); i++) {
+            GoodsReceiptNoteLine line = waiting.get(i);
+            DiscrepancyCase existing = caseByProduct.get(line.getProductId());
+            if (decisions.get(line.getId()) != Choice.ACCEPTED && existing != null && !existing.isOpen()) {
+                postedThrough = i + 1;
+                break;
+            }
+        }
+        postExcess(owner, id, order, receipt, waiting.subList(0, postedThrough), lotByLine, decisions);
         for (GoodsReceiptNoteLine line : waiting) {
             boolean accepted = decisions.get(line.getId()) == Choice.ACCEPTED;
-            // BR-73: accepted excess joins the lot of its line; BR-67: rejected excess waits to go back.
-            StockStatus status = accepted ? StockStatus.AVAILABLE : StockStatus.AWAITING_SUPPLIER_RETURN;
-            MovementType type = accepted ? MovementType.EXCESS_ACCEPTED : MovementType.EXCESS_REJECTED;
-            Map<StockStatus, Integer> quantities = Map.of(status, line.getExcessQty());
-            Lot lot = lotByLine.get(line.getId());
-            if (lot != null) {
-                posting.receiveIntoLot(new LotReceiptPosting(order.getStoreId(), lot.getId(), quantities, type,
-                        SourceRef.goodsReceiptNote(id), owner.id(), null));
-            } else {
-                // Every passed unit of the line was excess, so the confirmation created no lot for it.
-                posting.receiveNewLot(new NewLotPosting(order.getStoreId(), line.getProductId(), LotSourceType.RECEIPT,
-                        line.getId(), order.getSupplierId(), receipt.getArrivedAt().toLocalDate(), line.getUnitPrice(),
-                        line.getManufacturerLotNo(), line.getManufactureDate(), line.getExpiryDate(), quantities, type,
-                        SourceRef.goodsReceiptNote(id), owner.id(), null));
-            }
             line.decideExcess(accepted ? ExcessDecision.ACCEPTED : ExcessDecision.REJECTED);
             if (!accepted) {
                 DiscrepancyCase found = caseByProduct.computeIfAbsent(line.getProductId(), productId ->
@@ -542,6 +540,50 @@ public class GoodsReceiptServiceImpl implements GoodsReceiptService {
         notifications.notifyStoreManagers(order.getStoreId(), "EXCESS_DECIDED",
                 "Owner đã quyết định phần hàng thừa của phiếu nhận hàng %s.".formatted(label(receipt)), REF_TYPE, id);
         return views.detail(owner, receipt, order);
+    }
+
+    /**
+     * The excess postings of {@link #decideExcess}, in line order. A run of lines with a lot is one receiveIntoLotsAll,
+     * a run without one is one receiveNewLotsAll, so every part gets the same postings in the same order as one call
+     * per line, and its average (BR-74) is unchanged.
+     */
+    private void postExcess(AuthenticatedUser owner, long receiptId, PurchaseOrder order, GoodsReceiptNote receipt,
+                            List<GoodsReceiptNoteLine> lines, Map<Long, Lot> lotByLine,
+                            Map<Long, ExcessDecisionRequest.Choice> decisions) {
+        int start = 0;
+        while (start < lines.size()) {
+            boolean withLot = lotByLine.containsKey(lines.get(start).getId());
+            int end = start;
+            while (end < lines.size() && lotByLine.containsKey(lines.get(end).getId()) == withLot) {
+                end++;
+            }
+            List<GoodsReceiptNoteLine> run = lines.subList(start, end);
+            if (withLot) {
+                posting.receiveIntoLotsAll(run.stream().map(line -> {
+                    // BR-73: accepted excess joins the lot of its line; BR-67: rejected excess waits to go back.
+                    boolean accepted = decisions.get(line.getId()) == Choice.ACCEPTED;
+                    StockStatus status = accepted ? StockStatus.AVAILABLE : StockStatus.AWAITING_SUPPLIER_RETURN;
+                    MovementType type = accepted ? MovementType.EXCESS_ACCEPTED : MovementType.EXCESS_REJECTED;
+                    return new LotReceiptPosting(order.getStoreId(), lotByLine.get(line.getId()).getId(),
+                            Map.of(status, line.getExcessQty()), type, SourceRef.goodsReceiptNote(receiptId),
+                            owner.id(), null);
+                }).toList());
+            } else {
+                posting.receiveNewLotsAll(run.stream().map(line -> {
+                    // BR-73 and BR-67 as above. Every passed unit of the line was excess, so the confirmation created
+                    // no lot for it.
+                    boolean accepted = decisions.get(line.getId()) == Choice.ACCEPTED;
+                    StockStatus status = accepted ? StockStatus.AVAILABLE : StockStatus.AWAITING_SUPPLIER_RETURN;
+                    MovementType type = accepted ? MovementType.EXCESS_ACCEPTED : MovementType.EXCESS_REJECTED;
+                    return new NewLotPosting(order.getStoreId(), line.getProductId(), LotSourceType.RECEIPT,
+                            line.getId(), order.getSupplierId(), receipt.getArrivedAt().toLocalDate(),
+                            line.getUnitPrice(), line.getManufacturerLotNo(), line.getManufactureDate(),
+                            line.getExpiryDate(), Map.of(status, line.getExcessQty()), type,
+                            SourceRef.goodsReceiptNote(receiptId), owner.id(), null);
+                }).toList());
+            }
+            start = end;
+        }
     }
 
     /** The supplier delivery, locked until the end of the transaction (MSG132 if there is none). */
