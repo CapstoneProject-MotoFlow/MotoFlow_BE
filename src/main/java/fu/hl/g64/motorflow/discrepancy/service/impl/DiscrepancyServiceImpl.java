@@ -292,6 +292,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         LocalDateTime now = LocalDateTime.now(clock);
         List<DiscrepancyCase> handled = cases.stream().filter(found -> wanted.containsKey(found.getId()))
                 .sorted(Comparator.comparing(DiscrepancyCase::getProductId)).toList();
+        ReceiptLots receiptLots = new ReceiptLots(receiptId);
         int proposed = 0;
         for (DiscrepancyCase found : handled) {
             Agreed agreed = wanted.get(found.getId());
@@ -300,7 +301,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
             Map<String, Object> old = obligations(found);
             if (agreed.decides()) {
-                carryOut(found, agreed, receiptId, order.getStoreId(), handler.id(), note, now);
+                carryOut(found, agreed, receiptLots, order.getStoreId(), handler.id(), note, now);
                 found.decide(agreed.type(), handler.id(), now);
             } else {
                 // Review 25/11: what was decided before stays in force (goods held as agreed) until the Owner answers;
@@ -334,6 +335,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         List<DiscrepancyCase> chosen = awaitingOwner(cases, request.caseIds());
         Map<Long, Standing> standings = settlement.standings(chosen);
         LocalDateTime now = LocalDateTime.now(clock);
+        ReceiptLots receiptLots = new ReceiptLots(receiptId);
         for (DiscrepancyCase found : chosen) {
             Agreed agreed = new Agreed(found.getDecisionType(), found.getProposedWrongReturnQty(),
                     found.getProposedDamagedReturnQty(), found.getProposedReplacementQty(), true, false);
@@ -345,7 +347,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
             Map<String, Object> old = obligations(found);
             found.approve(owner.id(), now);
-            carryOut(found, agreed, receiptId, order.getStoreId(), owner.id(), null, now);
+            carryOut(found, agreed, receiptLots, order.getStoreId(), owner.id(), null, now);
             auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), DECISION_APPROVED, owner.id(), null, old,
                     decision(found), now));
         }
@@ -408,21 +410,23 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
      * supplier (or back from it), and the case agrees them. (1) and (3) keep the least replacement the case allows
      * and waive what of it no delivery is bringing, as the Owner's waiver does (UC-46 Step 3).
      */
-    private void carryOut(DiscrepancyCase found, Agreed agreed, long receiptId, long storeId, long by, String note,
-                          LocalDateTime now) {
+    private void carryOut(DiscrepancyCase found, Agreed agreed, ReceiptLots receiptLots, long storeId, long by,
+                          String note, LocalDateTime now) {
         int wrongMove = agreed.wrongQty() - found.getWrongReturnRequiredQty();
         int damagedMove = agreed.damagedQty() - found.getDamagedReturnRequiredQty();
         if (wrongMove != 0 || damagedMove != 0) {
             // Rejected excess is already awaiting return (UC-45); góp ý UI 21/11: each kind moves as agreed for it.
-            long lotId = lotOf(receiptId, found.getProductId());
+            long lotId = receiptLots.of(found.getProductId());
             hold(found, StockStatus.WRONG_ITEM, wrongMove, lotId, storeId, by, note, now);
             hold(found, StockStatus.DAMAGED, damagedMove, lotId, storeId, by, note, now);
         }
         boolean replaced = agreed.type() == DecisionType.RETURN_AND_REPLACE;
+        // Read after the holds, which leave the progress as it was; the record reads the case as agree() sets it.
+        Standing standing = replaced ? null : settlement.standing(found);
         found.agree(agreed.wrongQty(), agreed.damagedQty(), replaced ? agreed.replacementQty()
-                : replacementFloor(found, settlement.standing(found).progress()));
+                : replacementFloor(found, standing.progress()));
         if (!replaced) {
-            int open = settlement.standing(found).openReplacement();
+            int open = standing.openReplacement();
             if (open > 0) {
                 events.save(DiscrepancyResolutionEvent.done(found.getId(), ResolutionType.CLOSED_BY_AGREEMENT, open,
                         note != null ? note : agreed.type() == DecisionType.ACCEPT_NO_REPLACEMENT
@@ -943,6 +947,52 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
                 .filter(line -> line.getProductId() == productId).map(GoodsReceiptNoteLine::getId).toList();
         return lots.findByGoodsReceiptNoteLineIdIn(lineIds).stream().map(Lot::getId).findFirst()
                 .orElseThrow(() -> new IllegalStateException("no lot for part " + productId + " on GRN " + receiptId));
+    }
+
+    /**
+     * The lot of each part of one GRN, read at most once per request. A part takes the lot of its lowest line id: the
+     * first of its receipt lines, in id order, that has a lot. Nothing is read until a part needs its lot.
+     */
+    private final class ReceiptLots {
+
+        private final long receiptId;
+        private Map<Long, Long> lotByProduct;
+
+        ReceiptLots(long receiptId) {
+            this.receiptId = receiptId;
+        }
+
+        long of(long productId) {
+            if (lotByProduct == null) {
+                lotByProduct = lotsByProduct(receiptId);
+            }
+            Long lotId = lotByProduct.get(productId);
+            if (lotId == null) {
+                throw new IllegalStateException("no lot for part " + productId + " on GRN " + receiptId);
+            }
+            return lotId;
+        }
+    }
+
+    /**
+     * Two reads for the whole GRN: its lines, then their lots (one lot per line, unique). Walking the lines in id order,
+     * each part takes the lot of its first line that has one.
+     */
+    private Map<Long, Long> lotsByProduct(long receiptId) {
+        List<GoodsReceiptNoteLine> receiptLineList = receiptLines.findByGoodsReceiptNoteIdOrderByIdAsc(receiptId);
+        List<Long> lineIds = receiptLineList.stream().map(GoodsReceiptNoteLine::getId).toList();
+        Map<Long, Long> lotByLine = new HashMap<>();
+        for (Lot lot : lots.findByGoodsReceiptNoteLineIdIn(lineIds)) {
+            lotByLine.put(lot.getGoodsReceiptNoteLineId(), lot.getId());
+        }
+        Map<Long, Long> lotByProduct = new HashMap<>();
+        for (GoodsReceiptNoteLine line : receiptLineList) {
+            Long lotId = lotByLine.get(line.getId());
+            if (lotId != null) {
+                lotByProduct.putIfAbsent(line.getProductId(), lotId);
+            }
+        }
+        return lotByProduct;
     }
 
     private PurchaseOrder orderOf(long receiptId) {
