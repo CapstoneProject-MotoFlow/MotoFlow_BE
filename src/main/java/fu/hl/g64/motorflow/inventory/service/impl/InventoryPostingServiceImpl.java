@@ -35,6 +35,8 @@ import fu.hl.g64.motorflow.inventory.repository.StockCountRepository;
 import fu.hl.g64.motorflow.store.entity.Store;
 import fu.hl.g64.motorflow.store.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
+import org.hibernate.Session;
+import org.hibernate.engine.spi.EntityKey;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -58,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @Service
@@ -103,14 +106,19 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 .map(p -> new StoreProduct(p.storeId(), p.productId())).toList(), now);
 
         List<Long> productIds = postings.stream().map(NewLotPosting::productId).distinct().sorted().toList();
+        Set<Object> managedProductIds = managedIds(Product.class);
         Map<Long, Product> lockedProducts = products.findAllByIdForUpdate(productIds).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
         if (lockedProducts.size() != productIds.size()) {
             throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
         }
-        em.flush();
-        for (Long productId : productIds) {
-            em.refresh(lockedProducts.get(productId));
+        List<Product> toRefresh = productIds.stream()
+                .filter(managedProductIds::contains)
+                .map(lockedProducts::get)
+                .toList();
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
         }
 
         List<Long> avgProductIds = postings.stream()
@@ -267,16 +275,26 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                 .map(p -> new PoolKey(p.fromStoreId(), p.fromStatus(), p.productId())).toList(),
                 namedLots(postings.stream().map(MovePosting::lots).toList()), now);
         Set<Long> checkedStores = new HashSet<>();
-        List<List<LotQuantity>> moved = new ArrayList<>();
+        List<ChosenMove> chosen = new ArrayList<>(postings.size());
+        Set<LotKey> destKeys = new HashSet<>();
         for (MovePosting p : postings) {
             Product product = batch.product(p.productId());
             List<Pick> picks = choose(p.fromStoreId(), product, p.fromStatus(), p.quantity(), p.lots(),
                     p.movementType(), batch, now);
+            for (Pick pick : picks) {
+                destKeys.add(new LotKey(pick.lot.getId(), p.toStoreId(), p.toStatus()));
+            }
+            chosen.add(new ChosenMove(p, product, picks));
+        }
+        lockDestinationLotBalances(destKeys, batch.locked, now);
+        List<List<LotQuantity>> moved = new ArrayList<>(chosen.size());
+        for (ChosenMove item : chosen) {
+            MovePosting p = item.posting;
             StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
             StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
             List<LotQuantity> line = new ArrayList<>();
-            for (Pick pick : picks) {
-                BigDecimal unitCost = costOf(product, pick.lot);
+            for (Pick pick : item.picks) {
+                BigDecimal unitCost = costOf(item.product, pick.lot);
                 post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
                         p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
                 post(to, pick.lot, p.toStatus(), pick.quantity, unitCost, p.movementType(), p.source(), p.reason(),
@@ -319,32 +337,48 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         Batch batch = batch(postings.stream().map(SplitMovePosting::productId).toList(), List.of(),
                 namedLots(postings.stream().map(SplitMovePosting::lots).toList()), now);
         Set<Long> checkedStores = new HashSet<>();
+        List<ChosenSplit> chosen = new ArrayList<>(prepared.size());
+        Set<LotKey> destKeys = new HashSet<>();
         for (PreparedSplit row : prepared) {
             SplitMovePosting p = row.posting;
             Product product = batch.product(p.productId());
             int total = row.wanted.values().stream().mapToInt(Integer::intValue).sum();
             List<Pick> picks = choose(p.fromStoreId(), product, p.fromStatus(), total, p.lots(), p.movementType(),
                     batch, now);
-            StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
-            StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
             Iterator<Map.Entry<StockStatus, Integer>> statuses = row.wanted.entrySet().iterator();
             Map.Entry<StockStatus, Integer> filling = statuses.next();
             int left = filling.getValue();
+            List<SplitPick> splitPicks = new ArrayList<>(picks.size());
             for (Pick pick : picks) {
-                BigDecimal unitCost = costOf(product, pick.lot);
-                post(from, pick.lot, p.fromStatus(), -pick.quantity, unitCost, p.movementType(), p.source(),
-                        p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
                 int lotLeft = pick.quantity;
+                List<StatusShare> shares = new ArrayList<>();
                 while (lotLeft > 0) {
                     if (left == 0) {
                         filling = statuses.next();
                         left = filling.getValue();
                     }
                     int part = Math.min(lotLeft, left);
-                    post(to, pick.lot, filling.getKey(), part, unitCost, p.movementType(), p.source(), p.reason(),
-                            p.performedBy(), period, now, now, checkedStores, batch.locked);
+                    shares.add(new StatusShare(filling.getKey(), part));
+                    destKeys.add(new LotKey(pick.lot.getId(), p.toStoreId(), filling.getKey()));
                     lotLeft -= part;
                     left -= part;
+                }
+                splitPicks.add(new SplitPick(pick, shares));
+            }
+            chosen.add(new ChosenSplit(p, product, splitPicks));
+        }
+        lockDestinationLotBalances(destKeys, batch.locked, now);
+        for (ChosenSplit row : chosen) {
+            SplitMovePosting p = row.posting;
+            StockBalance from = balances.get(new StoreProduct(p.fromStoreId(), p.productId()));
+            StockBalance to = balances.get(new StoreProduct(p.toStoreId(), p.productId()));
+            for (SplitPick sp : row.picks) {
+                BigDecimal unitCost = costOf(row.product, sp.pick.lot);
+                post(from, sp.pick.lot, p.fromStatus(), -sp.pick.quantity, unitCost, p.movementType(), p.source(),
+                        p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
+                for (StatusShare share : sp.shares) {
+                    post(to, sp.pick.lot, share.status, share.quantity, unitCost, p.movementType(), p.source(),
+                            p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
                 }
             }
         }
@@ -387,7 +421,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         }
         // Same lock order as receiveNewLot: stock_balance, then product, then lot_balance.
         StockBalance balance = lockBalance(p.storeId(), lot.getProductId(), now);
-        Product product = fresh(products.findByIdForUpdate(lot.getProductId())
+        Product product = fresh(Product.class, Product::getId, () -> products.findByIdForUpdate(lot.getProductId())
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
 
         int available = quantityOf(p.quantities(), StockStatus.AVAILABLE);
@@ -425,6 +459,18 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     }
 
     private record PreparedSplit(SplitMovePosting posting, Map<StockStatus, Integer> wanted) {
+    }
+
+    private record ChosenMove(MovePosting posting, Product product, List<Pick> picks) {
+    }
+
+    private record StatusShare(StockStatus status, int quantity) {
+    }
+
+    private record SplitPick(Pick pick, List<StatusShare> shares) {
+    }
+
+    private record ChosenSplit(SplitMovePosting posting, Product product, List<SplitPick> picks) {
     }
 
     /** Lots still available to a later line of the same part in this document. */
@@ -474,15 +520,64 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         stockBalances.insertIfMissingBatch(storeIds, productIds, now);
         Map<Long, List<Long>> byStore = ordered.stream().collect(Collectors.groupingBy(StoreProduct::storeId,
                 LinkedHashMap::new, Collectors.mapping(StoreProduct::productId, Collectors.toList())));
+        Set<Object> managedBalanceIds = managedIds(StockBalance.class);
         Map<StoreProduct, StockBalance> locked = new HashMap<>();
-        em.flush();
+        List<StockBalance> toRefresh = new ArrayList<>();
         for (Map.Entry<Long, List<Long>> store : byStore.entrySet()) {
             for (StockBalance balance : stockBalances.findByStoreForUpdate(store.getKey(), store.getValue())) {
-                em.refresh(balance);
+                if (managedBalanceIds.contains(balance.getId())) {
+                    toRefresh.add(balance);
+                }
                 locked.put(new StoreProduct(balance.getStoreId(), balance.getProductId()), balance);
             }
         }
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
+        }
         return locked;
+    }
+
+    /** Bulk-creates and locks every missing destination lot balance in {@code (lotId, storeId, stockStatus)} order. */
+    private void lockDestinationLotBalances(Collection<LotKey> destKeys, Map<LotKey, LotBalance> locked,
+                                            LocalDateTime now) {
+        List<LotKey> ordered = destKeys.stream()
+                .filter(key -> !locked.containsKey(key))
+                .distinct()
+                .sorted(Comparator.comparingLong(LotKey::lotId)
+                        .thenComparingLong(LotKey::storeId)
+                        .thenComparing(key -> key.status().name()))
+                .toList();
+        if (ordered.isEmpty()) {
+            return;
+        }
+        Long[] lotIds = ordered.stream().map(LotKey::lotId).toArray(Long[]::new);
+        Long[] storeIds = ordered.stream().map(LotKey::storeId).toArray(Long[]::new);
+        String[] statuses = ordered.stream().map(key -> key.status().name()).toArray(String[]::new);
+        lotBalances.insertIfMissingBatch(lotIds, storeIds, statuses, now);
+
+        Set<Long> distinctLotIds = ordered.stream().map(LotKey::lotId).collect(Collectors.toSet());
+        Set<Long> distinctStoreIds = ordered.stream().map(LotKey::storeId).collect(Collectors.toSet());
+        Set<StockStatus> distinctStatuses = ordered.stream().map(LotKey::status)
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(StockStatus.class)));
+        List<String> exactKeys = ordered.stream()
+                .map(key -> key.lotId() + ":" + key.storeId() + ":" + key.status().name())
+                .toList();
+
+        Set<Object> managedIds = managedIds(LotBalance.class);
+        List<LotBalance> rows = lotBalances.findAllByKeysForUpdate(distinctLotIds, distinctStoreIds, distinctStatuses,
+                exactKeys);
+        List<LotBalance> toRefresh = new ArrayList<>();
+        for (LotBalance row : rows) {
+            if (managedIds.contains(row.getId())) {
+                toRefresh.add(row);
+            }
+            locked.put(new LotKey(row.getLotId(), row.getStoreId(), row.getStockStatus()), row);
+        }
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
+        }
     }
 
     private static List<Long> namedLots(List<List<LotQuantity>> lines) {
@@ -502,6 +597,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         Set<Long> lotIds = new HashSet<>(namedLotIds);
         List<LotBalance> picked = new ArrayList<>();
         Map<LotKey, LotBalance> locked = new HashMap<>();
+        Set<Object> managedLotBalanceIds = managedIds(LotBalance.class);
+        List<LotBalance> toRefresh = new ArrayList<>();
         for (Map.Entry<PoolKey, List<Long>> pool : productsByPool.entrySet()) {
             List<Long> ids = pool.getValue().stream().distinct().toList();
             if (ids.isEmpty()) {
@@ -509,12 +606,18 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             }
             List<LotBalance> rows = lotBalances.findPickableForUpdate(pool.getKey().storeId(), ids,
                     pool.getKey().status());
-            rows.forEach(em::refresh);
             for (LotBalance row : rows) {
+                if (managedLotBalanceIds.contains(row.getId())) {
+                    toRefresh.add(row);
+                }
                 lotIds.add(row.getLotId());
                 locked.put(new LotKey(row.getLotId(), row.getStoreId(), row.getStockStatus()), row);
             }
             picked.addAll(rows);
+        }
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
         }
         Map<Long, Lot> loaded = lotIds.isEmpty() ? Map.of() : lots.findAllById(lotIds).stream()
                 .collect(Collectors.toMap(Lot::getId, Function.identity()));
@@ -693,23 +796,39 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
 
     private StockBalance lockBalance(Long storeId, Long productId, LocalDateTime now) {
         stockBalances.insertIfMissing(storeId, productId, now);
-        return fresh(stockBalances.findForUpdate(storeId, productId).orElseThrow());
+        return fresh(StockBalance.class, StockBalance::getId,
+                () -> stockBalances.findForUpdate(storeId, productId).orElseThrow());
     }
 
     private LotBalance lotBalance(Long lotId, Long storeId, StockStatus status, LocalDateTime now) {
         lotBalances.insertIfMissing(lotId, storeId, status.name(), now);
-        return fresh(lotBalances.findForUpdate(lotId, storeId, status).orElseThrow());
+        return fresh(LotBalance.class, LotBalance::getId,
+                () -> lotBalances.findForUpdate(lotId, storeId, status).orElseThrow());
     }
 
     /**
      * Reads a row again from the database. A locking query returns the entity already in the persistence context
      * without its new values, so without this a caller that loaded the row earlier would post on a stale quantity
      * and overwrite another transaction's committed posting. Pending changes are flushed first so none is lost.
+     * Rows not yet in the persistence context already receive the latest committed values from {@code FOR UPDATE},
+     * so refreshing them is skipped.
      */
-    private <T> T fresh(T entity) {
-        em.flush();
-        em.refresh(entity);
+    private <T> T fresh(Class<T> type, Function<T, Object> idOf, Supplier<T> lockQuery) {
+        Set<Object> managed = managedIds(type);
+        T entity = lockQuery.get();
+        if (managed.contains(idOf.apply(entity))) {
+            em.flush();
+            em.refresh(entity);
+        }
         return entity;
+    }
+
+    private Set<Object> managedIds(Class<?> type) {
+        return em.unwrap(Session.class).getStatistics().getEntityKeys().stream()
+                .map(k -> (EntityKey) k)
+                .filter(k -> k.getEntityName().equals(type.getName()))
+                .map(EntityKey::getIdentifier)
+                .collect(Collectors.toSet());
     }
 
     private void refreshDepletion(Lot lot) {
@@ -718,7 +837,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     }
 
     private Product product(Long productId) {
-        return fresh(products.findById(productId)
+        return fresh(Product.class, Product::getId, () -> products.findById(productId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
     }
 

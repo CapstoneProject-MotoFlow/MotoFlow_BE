@@ -25,9 +25,31 @@ public interface LotBalanceRepository extends JpaRepository<LotBalance, Long> {
             on conflict (lot_id, store_id, stock_status) do nothing""", nativeQuery = true)
     void insertIfMissing(Long lotId, Long storeId, String status, LocalDateTime now);
 
+    /** Bulk-creates empty lot balance rows if missing, in paired array order; safe when two transactions do it at once. */
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            insert into lot_balance (lot_id, store_id, stock_status, quantity, updated_at)
+            select u.l, u.s, u.st, 0, :now
+            from unnest(cast(:lotIds as bigint[]), cast(:storeIds as bigint[]), cast(:statuses as varchar[])) as u(l, s, st)
+            on conflict (lot_id, store_id, stock_status) do nothing""", nativeQuery = true)
+    void insertIfMissingBatch(Long[] lotIds, Long[] storeIds, String[] statuses, LocalDateTime now);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select b from LotBalance b where b.lotId = :lotId and b.storeId = :storeId and b.stockStatus = :status")
     Optional<LotBalance> findForUpdate(Long lotId, Long storeId, StockStatus status);
+
+    /**
+     * Locks the exact {@code (lotId, storeId, stockStatus)} rows listed in {@code keys} ({@code lotId:storeId:status})
+     * in {@code (lotId, storeId, stockStatus)} order.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select b from LotBalance b
+            where b.lotId in :lotIds and b.storeId in :storeIds and b.stockStatus in :statuses
+              and concat(cast(b.lotId as string), ':', cast(b.storeId as string), ':', cast(b.stockStatus as string)) in :keys
+            order by b.lotId asc, b.storeId asc, b.stockStatus asc""")
+    List<LotBalance> findAllByKeysForUpdate(Collection<Long> lotIds, Collection<Long> storeIds,
+                                           Collection<StockStatus> statuses, Collection<String> keys);
 
     /**
      * Pickable lots of the given parts in one warehouse and status, row-locked. Ordered by product id, then earliest

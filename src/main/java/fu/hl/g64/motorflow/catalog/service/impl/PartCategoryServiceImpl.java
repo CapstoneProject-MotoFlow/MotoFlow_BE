@@ -93,10 +93,10 @@ public class PartCategoryServiceImpl implements PartCategoryService {
         }
         requireUniqueName(id, request.vehicleType(), request.parentId(), name);
 
-        LocalDateTime now = LocalDateTime.now(clock);
-        category.update(name, request.vehicleType(), request.parentId(), blankToNull(request.description()), now);
         List<PartCategory> all = categories.findAll(Sort.by("categoryName"));
         Map<Long, List<PartCategory>> childrenByParent = byParent(all);
+        LocalDateTime now = LocalDateTime.now(clock);
+        category.update(name, request.vehicleType(), request.parentId(), blankToNull(request.description()), now);
         if (request.vehicleType() != oldType) {
             descendants(id, childrenByParent).forEach(c -> c.changeVehicleType(request.vehicleType(), now));
         }

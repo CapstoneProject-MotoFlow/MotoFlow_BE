@@ -38,6 +38,11 @@ public class QueryCounter {
         return dataSource.executed();
     }
 
+    /** JDBC round-trips executed since the last {@link #reset()}. */
+    public long roundTrips() {
+        return dataSource.roundTrips();
+    }
+
     /** Executed statements of a given kind since the last {@link #reset()}. */
     public long executed(Kind kind) {
         return dataSource.executed(kind);

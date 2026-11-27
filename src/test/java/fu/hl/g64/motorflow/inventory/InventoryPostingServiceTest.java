@@ -7,6 +7,7 @@ import fu.hl.g64.motorflow.inventory.dto.MovePosting;
 import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
 import fu.hl.g64.motorflow.inventory.dto.OutPosting;
 import fu.hl.g64.motorflow.inventory.entity.Lot;
+import fu.hl.g64.motorflow.inventory.entity.StockBalance;
 import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
 import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
 import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
@@ -19,6 +20,7 @@ import fu.hl.g64.motorflow.support.IntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
@@ -236,6 +238,31 @@ class InventoryPostingServiceTest extends IntegrationTest {
     void callerThatAlreadyLoadedTheStockBalanceDoesNotLoseAConcurrentPosting() throws Exception {
         receive(grn, 10, 0, 100_000, null);
         runWhileOtherSaleCommits(() -> stockBalances.findAll());
+        assertThat(balance(store, "available_qty")).isEqualTo(5);
+        assertConsistent();
+    }
+
+    @Test
+    void unlockedStockBalanceReadEarlierIsRefreshedAfterRequiresNewUpdateCommits() {
+        receive(grn, 10, 0, 100_000, null);
+        long otherSale = id("INSERT INTO sales_order (store_id, price_type, created_by) VALUES (" + store
+                + ", 'RETAIL', " + owner + ") RETURNING id");
+        TransactionTemplate requiresNew = new TransactionTemplate(tx.getTransactionManager());
+        requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+        int afterPosting = inTx(() -> {
+            StockBalance preloaded = stockBalances.findByStoreIdAndProductId(store, product).orElseThrow();
+            assertThat(preloaded.getAvailableQty()).isEqualTo(10);
+
+            requiresNew.executeWithoutResult(status -> posting.takeOut(new OutPosting(store, product,
+                    StockStatus.AVAILABLE, 3, null, MovementType.SALE_ISSUE, SourceRef.salesOrder(otherSale), owner,
+                    null)));
+
+            posting.takeOut(sale(2));
+            return preloaded.getAvailableQty();
+        });
+
+        assertThat(afterPosting).isEqualTo(5);
         assertThat(balance(store, "available_qty")).isEqualTo(5);
         assertConsistent();
     }

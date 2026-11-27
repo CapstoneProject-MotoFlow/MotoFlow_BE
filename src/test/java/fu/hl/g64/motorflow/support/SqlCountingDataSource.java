@@ -22,6 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class SqlCountingDataSource implements BeanPostProcessor {
 
     private final Map<QueryCounter.Kind, AtomicLong> counts = new EnumMap<>(QueryCounter.Kind.class);
+    private final AtomicLong roundTrips = new AtomicLong();
 
     public SqlCountingDataSource() {
         for (QueryCounter.Kind kind : QueryCounter.Kind.values()) {
@@ -50,6 +51,7 @@ public class SqlCountingDataSource implements BeanPostProcessor {
     }
 
     private void record(ExecutionInfo execInfo, List<QueryInfo> queryInfoList) {
+        roundTrips.incrementAndGet();
         for (QueryInfo info : queryInfoList) {
             long statements = execInfo.isBatch() ? Math.max(1, info.getParametersList().size()) : 1;
             counts.get(classify(info.getQuery())).addAndGet(statements);
@@ -58,6 +60,11 @@ public class SqlCountingDataSource implements BeanPostProcessor {
 
     public void reset() {
         counts.values().forEach(counter -> counter.set(0));
+        roundTrips.set(0);
+    }
+
+    public long roundTrips() {
+        return roundTrips.get();
     }
 
     public long executed() {
@@ -79,7 +86,8 @@ public class SqlCountingDataSource implements BeanPostProcessor {
                 executed(QueryCounter.Kind.INSERT),
                 executed(QueryCounter.Kind.UPDATE),
                 executed(QueryCounter.Kind.DELETE));
-        return other > 0 ? base + ", other=" + other : base;
+        String full = other > 0 ? base + ", other=" + other : base;
+        return full + ", roundTrips=" + roundTrips();
     }
 
     static QueryCounter.Kind classify(String sql) {

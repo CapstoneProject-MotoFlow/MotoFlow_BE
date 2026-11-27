@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 public interface LotRepository extends JpaRepository<Lot, Long> {
 
@@ -53,4 +54,8 @@ public interface LotRepository extends JpaRepository<Lot, Long> {
 
     /** UC-96: whether a lot of this source exists for the part, e.g. an approved opening lot. */
     boolean existsByProductIdAndSourceType(Long productId, LotSourceType sourceType);
+
+    /** UC-96: parts among {@code productIds} that already have a lot of {@code sourceType}. */
+    @Query("select distinct l.productId from Lot l where l.productId in :productIds and l.sourceType = :sourceType")
+    Set<Long> findProductIdsWithSourceType(Collection<Long> productIds, LotSourceType sourceType);
 }
