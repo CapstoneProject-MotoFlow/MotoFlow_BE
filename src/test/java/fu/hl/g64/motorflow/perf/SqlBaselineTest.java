@@ -107,7 +107,7 @@ class SqlBaselineTest {
 
             queries.reset();
             handle(managerToken, receiptId, handling).andExpect(status().isOk());
-            assertBudget("discrepancy-save-handling-3-cases", queries, 142, 136);
+            assertBudget("discrepancy-save-handling-3-cases", queries, 80, 68);
         }
 
         @Test

@@ -12,6 +12,7 @@ import fu.hl.g64.motorflow.catalog.repository.ProductRepository;
 import fu.hl.g64.motorflow.catalog.repository.ProductVehicleModelRepository;
 import fu.hl.g64.motorflow.common.audit.AuditLog;
 import fu.hl.g64.motorflow.common.audit.AuditLogRepository;
+import fu.hl.g64.motorflow.common.error.BusinessException;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyCaseResponse;
 import fu.hl.g64.motorflow.discrepancy.dto.DiscrepancyHandlingRequest;
 import fu.hl.g64.motorflow.discrepancy.entity.DiscrepancyCase;
@@ -206,10 +207,12 @@ class DiscrepancySaveHandlingUnitTest {
         pad.decide(DecisionType.RETURN_AND_REPLACE, 1, NOW.minusDays(1));
     }
 
+    /** The movements posted, in order: a request posts its holds with one moveAll. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private List<MovePosting> moves() {
-        ArgumentCaptor<MovePosting> moved = ArgumentCaptor.forClass(MovePosting.class);
-        verify(posting, atLeast(0)).move(moved.capture());
-        return moved.getAllValues();
+        ArgumentCaptor<List> moved = ArgumentCaptor.forClass(List.class);
+        verify(posting, atLeast(0)).moveAll(moved.capture());
+        return moved.getAllValues().stream().flatMap(batch -> ((List<MovePosting>) batch).stream()).toList();
     }
 
     private List<AuditLog> logs() {
@@ -221,7 +224,7 @@ class DiscrepancySaveHandlingUnitTest {
     private void assertRefused(AuthenticatedUser user, DiscrepancyHandlingRequest request, HttpStatus status,
                                String code) {
         assertBusiness(() -> service.saveHandling(user, 40, request), status, code);
-        verify(posting, never()).move(any());
+        assertThat(moves()).isEmpty();
         verify(auditLog, never()).save(any());
     }
 
@@ -271,7 +274,7 @@ class DiscrepancySaveHandlingUnitTest {
 
         assertThat(found.returnRequiredQty()).isZero();
         assertThat(found.replacementRequiredQty()).isEqualTo(4);
-        verify(posting, never()).move(any());
+        assertThat(moves()).isEmpty();
         assertThat(logs()).hasSize(1);
     }
 
@@ -300,7 +303,7 @@ class DiscrepancySaveHandlingUnitTest {
 
         assertThat(found.returnRequiredQty()).isZero();
         assertThat(found.replacementRequiredQty()).isEqualTo(2);
-        verify(posting, never()).move(any());
+        assertThat(moves()).isEmpty();
         verify(auditLog, never()).save(any());
     }
 
@@ -416,7 +419,7 @@ class DiscrepancySaveHandlingUnitTest {
 
         assertThatThrownBy(() -> service.saveHandling(manager, 40, request(line(50, 3, null))))
                 .isInstanceOf(IllegalStateException.class).hasMessage("no lot for part 10 on GRN 40");
-        verify(posting, never()).move(any());
+        assertThat(moves()).isEmpty();
         verify(auditLog, never()).save(any());
         verify(settlement, times(0)).closeIfSettled(any(), anyLong(), any());
     }
@@ -462,7 +465,7 @@ class DiscrepancySaveHandlingUnitTest {
         assertThat(found.proposedReplacementQty()).isEqualTo(6);
         assertThat(found.returnRequiredQty()).isZero();
         assertThat(found.replacementRequiredQty()).isEqualTo(2);
-        verify(posting, never()).move(any());
+        assertThat(moves()).isEmpty();
         verify(notifications).notifyOwners(eq("DISCREPANCY_DECISION_REQUESTED"), any(), eq("GOODS_RECEIPT_NOTE"),
                 eq(40L));
         assertThat(logs()).singleElement().satisfies(log ->
@@ -481,7 +484,7 @@ class DiscrepancySaveHandlingUnitTest {
         assertThat(found.decisionStatus()).isEqualTo(DecisionStatus.AWAITING_OWNER);
         assertThat(found.decisionType()).isEqualTo(DecisionType.RETURN_NO_REPLACEMENT);
         assertThat(found.proposedReplacementQty()).isZero();
-        verify(posting, never()).move(any());
+        assertThat(moves()).isEmpty();
     }
 
     @Test
@@ -512,5 +515,16 @@ class DiscrepancySaveHandlingUnitTest {
         assertThat(moves()).hasSize(2);
         assertThat(savedEvents()).filteredOn(event -> event.getResolutionType() == ResolutionType.CLOSED_BY_AGREEMENT)
                 .singleElement().satisfies(event -> assertThat(event.getQuantity()).isEqualTo(2));
+    }
+
+    @Test
+    @DisplayName("UTCID25 E: a hold the stock cannot take is refused with its MSG84, as when it was posted one by one")
+    void utc25() {
+        when(posting.moveAll(any())).thenThrow(
+                new BusinessException(HttpStatus.CONFLICT, "MSG84", "MA-PHANH-01", 3, 0));
+
+        assertBusiness(() -> service.saveHandling(manager, 40, request(line(50, 3, null))), HttpStatus.CONFLICT,
+                "MSG84");
+        verify(posting).moveAll(any());
     }
 }

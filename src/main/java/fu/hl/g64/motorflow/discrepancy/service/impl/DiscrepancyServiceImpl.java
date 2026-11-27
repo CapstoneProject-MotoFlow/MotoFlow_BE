@@ -293,6 +293,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         List<DiscrepancyCase> handled = cases.stream().filter(found -> wanted.containsKey(found.getId()))
                 .sorted(Comparator.comparing(DiscrepancyCase::getProductId)).toList();
         ReceiptLots receiptLots = new ReceiptLots(receiptId);
+        List<MovePosting> moves = new ArrayList<>();
         int proposed = 0;
         for (DiscrepancyCase found : handled) {
             Agreed agreed = wanted.get(found.getId());
@@ -301,7 +302,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
             Map<String, Object> old = obligations(found);
             if (agreed.decides()) {
-                carryOut(found, agreed, receiptLots, order.getStoreId(), handler.id(), note, now);
+                carryOut(found, agreed, receiptLots, moves, order.getStoreId(), handler.id(), note, now);
                 found.decide(agreed.type(), handler.id(), now);
             } else {
                 // Review 25/11: what was decided before stays in force (goods held as agreed) until the Owner answers;
@@ -313,6 +314,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), agreed.decides() ? HANDLING_SAVED
                     : DECISION_PROPOSED, handler.id(), note, old, decision(found), now));
         }
+        posting.moveAll(moves);
         if (proposed > 0) {
             notifications.notifyOwners("DISCREPANCY_DECISION_REQUESTED",
                     "Phiếu nhập #%d (đơn nhập hàng %s): %d dòng sai lệch chờ Owner duyệt hướng xử lý với NCC."
@@ -336,6 +338,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         Map<Long, Standing> standings = settlement.standings(chosen);
         LocalDateTime now = LocalDateTime.now(clock);
         ReceiptLots receiptLots = new ReceiptLots(receiptId);
+        List<MovePosting> moves = new ArrayList<>();
         for (DiscrepancyCase found : chosen) {
             Agreed agreed = new Agreed(found.getDecisionType(), found.getProposedWrongReturnQty(),
                     found.getProposedDamagedReturnQty(), found.getProposedReplacementQty(), true, false);
@@ -347,10 +350,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
             }
             Map<String, Object> old = obligations(found);
             found.approve(owner.id(), now);
-            carryOut(found, agreed, receiptLots, order.getStoreId(), owner.id(), null, now);
+            carryOut(found, agreed, receiptLots, moves, order.getStoreId(), owner.id(), null, now);
             auditLog.save(AuditLog.record(AUDIT_ENTITY, found.getId(), DECISION_APPROVED, owner.id(), null, old,
                     decision(found), now));
         }
+        posting.moveAll(moves);
         notifications.notifyStoreManagers(order.getStoreId(), "DISCREPANCY_DECISION_APPROVED",
                 "Owner đã duyệt hướng xử lý %d dòng sai lệch của phiếu nhập #%d (đơn nhập hàng %s)."
                         .formatted(chosen.size(), receiptId, PurchaseOrderCode.of(order.getId())),
@@ -410,15 +414,15 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
      * supplier (or back from it), and the case agrees them. (1) and (3) keep the least replacement the case allows
      * and waive what of it no delivery is bringing, as the Owner's waiver does (UC-46 Step 3).
      */
-    private void carryOut(DiscrepancyCase found, Agreed agreed, ReceiptLots receiptLots, long storeId, long by,
-                          String note, LocalDateTime now) {
+    private void carryOut(DiscrepancyCase found, Agreed agreed, ReceiptLots receiptLots, List<MovePosting> moves,
+                          long storeId, long by, String note, LocalDateTime now) {
         int wrongMove = agreed.wrongQty() - found.getWrongReturnRequiredQty();
         int damagedMove = agreed.damagedQty() - found.getDamagedReturnRequiredQty();
         if (wrongMove != 0 || damagedMove != 0) {
             // Rejected excess is already awaiting return (UC-45); góp ý UI 21/11: each kind moves as agreed for it.
             long lotId = receiptLots.of(found.getProductId());
-            hold(found, StockStatus.WRONG_ITEM, wrongMove, lotId, storeId, by, note, now);
-            hold(found, StockStatus.DAMAGED, damagedMove, lotId, storeId, by, note, now);
+            hold(found, StockStatus.WRONG_ITEM, wrongMove, lotId, moves, storeId, by, note, now);
+            hold(found, StockStatus.DAMAGED, damagedMove, lotId, moves, storeId, by, note, now);
         }
         boolean replaced = agreed.type() == DecisionType.RETURN_AND_REPLACE;
         // Read after the holds, which leave the progress as it was; the record reads the case as agree() sets it.
@@ -917,10 +921,11 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
 
     /**
      * Moves goods of the case to awaiting return to supplier ({@code quantity} above 0), or back from it to the status
-     * they were held from (below 0), with the event the movements point to.
+     * they were held from (below 0), with the event the movements point to. The event is saved now, as its id is
+     * needed; the movement is added to {@code moves} and posted by the caller with {@code moveAll}, in the same order.
      */
-    private void hold(DiscrepancyCase found, StockStatus from, int quantity, long lotId, long storeId, long by,
-                      String note, LocalDateTime now) {
+    private void hold(DiscrepancyCase found, StockStatus from, int quantity, long lotId, List<MovePosting> moves,
+                      long storeId, long by, String note, LocalDateTime now) {
         if (quantity == 0) {
             return;
         }
@@ -929,7 +934,7 @@ public class DiscrepancyServiceImpl implements DiscrepancyService {
         DiscrepancyResolutionEvent event = events.save(DiscrepancyResolutionEvent.done(found.getId(),
                 release ? ResolutionType.RELEASED_FROM_AWAITING_RETURN : ResolutionType.MOVED_TO_AWAITING_RETURN,
                 moved, note, by, now));
-        posting.move(new MovePosting(found.getProductId(), storeId,
+        moves.add(new MovePosting(found.getProductId(), storeId,
                 release ? StockStatus.AWAITING_SUPPLIER_RETURN : from, storeId,
                 release ? from : StockStatus.AWAITING_SUPPLIER_RETURN, moved, List.of(new LotQuantity(lotId, moved)),
                 release ? MovementType.RETURN_RELEASE : MovementType.RETURN_HOLD,
