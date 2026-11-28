@@ -515,7 +515,7 @@ class SqlBaselineTest {
             priceList(ownerToken, "?suggestionDiffers=true")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalItems").value(2));
-            assertBudget("retail-prices-differing", queries, 7, 7);
+            assertBudget("retail-prices-differing", queries, 6, 6);
         }
     }
 }
