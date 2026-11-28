@@ -443,4 +443,32 @@ class SqlBaselineTest {
             assertBudget("transfer-dispatch-10-lines", queries, 111, 64);
         }
     }
+
+    @Nested
+    class StockDocumentFlows extends TransferFlowTestData {
+
+        @Autowired
+        private QueryCounter queries;
+
+        @Test
+        void stockDocumentListPage0AndDetail() throws Exception {
+            lot(source, brake, 10, 50_000, null, "SD-A");
+            long order = dispatchedOrder(brake, 2);
+            String ownerToken = signIn("owner");
+
+            queries.reset();
+            mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, ownerToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(2));
+            assertBudget("stock-documents-page-0", queries, 3, 3);
+
+            queries.reset();
+            mvc.perform(get("/api/v1/stock-documents/TRANSFER_ORDER/" + order)
+                            .header(HttpHeaders.AUTHORIZATION, ownerToken)
+                            .param("storeId", String.valueOf(source)).param("direction", "OUT"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.lines.length()").value(1));
+            assertBudget("stock-document-detail", queries, 3, 3);
+        }
+    }
 }
