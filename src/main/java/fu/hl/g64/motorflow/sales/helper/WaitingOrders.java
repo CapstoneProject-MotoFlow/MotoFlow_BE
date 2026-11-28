@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -41,12 +40,7 @@ public class WaitingOrders {
         Map<Long, Set<Long>> partsByStore = found.stream().collect(Collectors.groupingBy(
                 row -> ((SalesOrder) row[1]).getStoreId(),
                 Collectors.mapping(row -> ((SalesOrderLine) row[0]).getProductId(), Collectors.toSet())));
-        Map<Long, Map<Long, Integer>> sellable = new HashMap<>();
-        partsByStore.forEach((store, parts) -> {
-            Map<Long, Integer> quantities = new HashMap<>();
-            guide.parts(store, parts, today).forEach((part, stock) -> quantities.put(part, stock.sellableQty()));
-            sellable.put(store, quantities);
-        });
+        Map<Long, Map<Long, Integer>> sellable = guide.sellableByStore(partsByStore, today);
         List<WaitingAllocation.Need> needs = found.stream().map(row -> {
             SalesOrderLine line = (SalesOrderLine) row[0];
             SalesOrder order = (SalesOrder) row[1];

@@ -44,7 +44,7 @@ public class StockDocumentQuery {
                 LEFT JOIN goods_receipt_note r ON r.id = m.goods_receipt_note_id
                 LEFT JOIN discrepancy_resolution_event e ON e.id = m.discrepancy_resolution_event_id
                 LEFT JOIN discrepancy_case c ON c.id = e.discrepancy_case_id
-                WHERE m.store_id = COALESCE(:store, m.store_id) AND (
+                WHERE m.store_id = COALESCE(:store, m.store_id)%s AND (
                    (m.movement_type IN ('SALE_ISSUE', 'SUPPLIER_RETURN') AND m.quantity_change < 0)
                    OR (m.movement_type IN ('RECEIPT_CONFIRMED', 'EXCESS_ACCEPTED', 'EXCESS_REJECTED', 'TRANSFER_RECEIPT')
                        AND m.quantity_change > 0)
@@ -123,29 +123,45 @@ public class StockDocumentQuery {
 
     private final JdbcClient jdbc;
 
-    public List<StockDocument.Summary> page(Long storeId, StockDocument.Search search, boolean withValue, int page,
-                                            int size) {
-        return filtered(MOVEMENTS + GROUPS + " SELECT * " + FILTER + """
+    /**
+     * One page of the list and the number of rows of the whole list, from one query: {@code COUNT(*) OVER ()} counts
+     * the filtered rows before the LIMIT. {@code total} is -1 when the page has no rows, since there is then no row to
+     * read it from; the service counts in that case.
+     */
+    public record Page(List<StockDocument.Summary> rows, long total) {
+    }
+
+    public Page page(Long storeId, StockDocument.Search search, boolean withValue, int page, int size) {
+        List<Counted> found = filtered(MOVEMENTS.formatted("") + GROUPS + " SELECT *, COUNT(*) OVER () AS total_items "
+                + FILTER + """
                 ORDER BY occurred_at DESC, source_type, source_id DESC, store_id, direction
                 LIMIT :size OFFSET :offset
                 """, storeId, search).param("size", size).param("offset", (long) page * size)
-                .query((rs, row) -> summary(rs, withValue)).list();
+                .query((rs, row) -> new Counted(summary(rs, withValue), rs.getLong("total_items"))).list();
+        if (found.isEmpty()) {
+            return new Page(List.of(), -1);
+        }
+        return new Page(found.stream().map(Counted::summary).toList(), found.get(0).total());
+    }
+
+    private record Counted(StockDocument.Summary summary, long total) {
     }
 
     public long count(Long storeId, StockDocument.Search search) {
-        return filtered(MOVEMENTS + GROUPS + " SELECT COUNT(*) " + FILTER, storeId, search).query(Long.class).single();
+        return filtered(MOVEMENTS.formatted("") + GROUPS + " SELECT COUNT(*) " + FILTER, storeId, search)
+                .query(Long.class).single();
     }
 
     public Optional<StockDocument.Summary> find(long storeId, SourceType type, long sourceId, Direction direction,
                                                 boolean withValue) {
-        return jdbc.sql(MOVEMENTS + GROUPS + " SELECT * FROM documents" + ONE)
+        return jdbc.sql(movementsOf(type) + GROUPS + " SELECT * FROM documents" + ONE)
                 .param("store", storeId).param("q", "").param("type", type.name()).param("id", sourceId)
                 .param("direction", direction.name()).query((rs, row) -> summary(rs, withValue)).optional();
     }
 
     public List<StockDocument.Line> lines(long storeId, SourceType type, long sourceId, Direction direction,
                                           boolean withValue) {
-        return jdbc.sql(MOVEMENTS + " SELECT * FROM named" + ONE + " ORDER BY id")
+        return jdbc.sql(movementsOf(type) + " SELECT * FROM named" + ONE + " ORDER BY id")
                 .param("store", storeId).param("type", type.name()).param("id", sourceId)
                 .param("direction", direction.name()).query((rs, row) -> new StockDocument.Line(rs.getLong("product_id"),
                         rs.getString("sku"), rs.getString("part_name"), rs.getObject("lot_id", Long.class),
@@ -155,6 +171,25 @@ public class StockDocumentQuery {
     }
 
     private static final String ONE = " WHERE source_type = :type AND source_id = :id AND direction = :direction";
+
+    /**
+     * The movements CTE narrowed to one source. Each movement has exactly one source column set (CHECK
+     * {@code num_nonnulls(...) = 1} in V1), so {@code m.<column> = :id} keeps the same movements as
+     * {@code source_type = ... AND source_id = :id} does in {@link #ONE}, and the index on the column is used. The
+     * windows of the CTE partition by source, so each document keeps all its lines. The column name comes from this
+     * switch only, never from input.
+     */
+    private static String movementsOf(SourceType type) {
+        String column = switch (type) {
+            case SALES_ORDER -> "sales_order_id";
+            case GOODS_RECEIPT_NOTE -> "goods_receipt_note_id";
+            case TRANSFER_ORDER -> "transfer_order_id";
+            case DISCREPANCY_RESOLUTION_EVENT -> "discrepancy_resolution_event_id";
+            case ADJUSTMENT_REQUEST -> "adjustment_request_id";
+            case STOCK_COUNT -> "stock_count_id";
+        };
+        return MOVEMENTS.formatted(" AND m." + column + " = :id");
+    }
 
     private JdbcClient.StatementSpec filtered(String sql, Long storeId, StockDocument.Search search) {
         return jdbc.sql(sql).param("store", storeId).param("q", search.q())

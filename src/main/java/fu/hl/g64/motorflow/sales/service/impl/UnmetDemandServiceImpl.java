@@ -29,7 +29,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -107,8 +106,7 @@ public class UnmetDemandServiceImpl implements UnmetDemandService {
             Map<Long, Set<Long>> partsByStore = found.stream().collect(Collectors.groupingBy(
                     row -> ((SalesOrder) row[1]).getStoreId(),
                     Collectors.mapping(row -> ((SalesOrderLine) row[0]).getProductId(), Collectors.toSet())));
-            Map<Long, Map<Long, PickingGuide.Part>> stock = new HashMap<>();
-            partsByStore.forEach((store, parts) -> stock.put(store, guide.parts(store, parts, today)));
+            Map<Long, Map<Long, Integer>> stock = guide.sellableByStore(partsByStore, today);
             for (Object[] entry : found) {
                 SalesOrderLine line = (SalesOrderLine) entry[0];
                 SalesOrder order = (SalesOrder) entry[1];
@@ -118,10 +116,9 @@ public class UnmetDemandServiceImpl implements UnmetDemandService {
                 boolean cancelled = order.getStatus() == SalesOrderStatus.CANCELLED;
                 int delivered = order.getStatus() == SalesOrderStatus.COMPLETED && line.getDeliveredQty() != null
                         ? line.getDeliveredQty() : 0;
-                PickingGuide.Part held = stock.get(order.getStoreId()).get(line.getProductId());
                 rows.add(row(order, cancelled ? WaitingOrderState.CANCELLED : WaitingOrderState.RELEASED, line,
                         (Product) entry[2], delivered, cancelled ? line.getRequestedQty() : 0,
-                        held == null ? 0 : held.sellableQty(), 0, false, false));
+                        stock.get(order.getStoreId()).getOrDefault(line.getProductId(), 0), 0, false, false));
             }
         }
 

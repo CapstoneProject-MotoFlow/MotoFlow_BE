@@ -1,12 +1,18 @@
 package fu.hl.g64.motorflow.sales;
 
 import com.jayway.jsonpath.JsonPath;
+import fu.hl.g64.motorflow.inventory.dto.NewLotPosting;
+import fu.hl.g64.motorflow.inventory.entity.StockMovement.SourceRef;
+import fu.hl.g64.motorflow.inventory.entity.enums.LotSourceType;
+import fu.hl.g64.motorflow.inventory.entity.enums.MovementType;
+import fu.hl.g64.motorflow.inventory.entity.enums.StockStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +77,96 @@ class UnmetDemandApiTest extends SalesOrderTestData {
         unmetDemand(managerToken, "from", TODAY.plusDays(1).toString()).andExpect(jsonPath("$.items", hasSize(0)));
         unmetDemand(managerToken, "from", TODAY.toString(), "to", TODAY.toString())
                 .andExpect(jsonPath("$.items", hasSize(1)));
+    }
+
+    @Test
+    void ownerSeesEveryStoresSellableAndReadyPerLine() throws Exception {
+        // Store A (Gia Lâm): 8 pads in stock. An open order holds 3; an 8-pad order sells the 5 left and waits for 3.
+        createOrder(pad, 3);
+        create(managerToken, order(null, customer, "RETAIL", null, lines(pad, 8)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_PICKING"))
+                .andExpect(jsonPath("$.split.waitingOrderId").isNumber());
+        // Store B (Long Biên): an order for 3 pads waits while no pad is in stock; then 4 expired and 2 valid arrive.
+        create(ownerToken, order(otherStore, customer, "RETAIL", null, lines(pad, 3)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"));
+        supplierLot(otherStore, pad, 4, 60_000, TODAY.minusDays(3), "B-EXP");
+        supplierLot(otherStore, pad, 2, 60_000, LocalDate.of(2026, 12, 30), "B-OK");
+        // Part Q waits at store A and is in stock nowhere.
+        long filter = part("FILTER-01", "Lọc gió", id("SELECT min(id) FROM part_category"));
+        price(filter, 40_000, TODAY.minusDays(12).atStartOfDay());
+        waitingOrder(lines(filter, 1));
+
+        unmetDemand(ownerToken, "state", "WAITING")
+                .andExpect(jsonPath("$.items[?(@.storeId == " + store + " && @.productId == " + pad + ")]"
+                        + ".sellableQty", contains(0)))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + store + " && @.productId == " + pad + ")]"
+                        + ".readyQty", contains(0)))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + store + " && @.productId == " + pad + ")]"
+                        + ".state", contains("WAITING")))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + otherStore + " && @.productId == " + pad + ")]"
+                        + ".sellableQty", contains(2)))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + otherStore + " && @.productId == " + pad + ")]"
+                        + ".readyQty", contains(2)))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + otherStore + " && @.productId == " + pad + ")]"
+                        + ".state", contains("WAITING")))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + store + " && @.productId == " + filter + ")]"
+                        + ".sellableQty", contains(0)))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + store + " && @.productId == " + filter + ")]"
+                        + ".readyQty", contains(0)))
+                .andExpect(jsonPath("$.items[?(@.storeId == " + store + " && @.productId == " + filter + ")]"
+                        + ".state", contains("WAITING")))
+                .andExpect(jsonPath("$.totalItems").value(3));
+    }
+
+    @Test
+    void releasedAndCancelledLinesShowWhatTheirStoreSellsNowOnTwoStores() throws Exception {
+        // Store A: all 8 pads held by an open order; a waiting order of 2 pads is cancelled.
+        createOrder(pad, 8);
+        long cancelled = waitingOrder(lines(pad, 2));
+        cancel(cancelled, "Khách đổi ý").andExpect(status().isOk());
+        // Store B: a waiting order of 3 pads; 4 expired and 2 valid pads arrive; the store releases 1 pad now.
+        String body = create(ownerToken, order(otherStore, customer, "RETAIL", null, lines(pad, 3)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"))
+                .andReturn().getResponse().getContentAsString();
+        long waitingB = ((Number) JsonPath.read(body, "$.id")).longValue();
+        supplierLot(otherStore, pad, 4, 60_000, TODAY.minusDays(3), "B-EXP");
+        supplierLot(otherStore, pad, 2, 60_000, LocalDate.of(2026, 12, 30), "B-OK");
+        mvc.perform(post("/api/v1/sales-orders/" + waitingB + "/release")
+                        .header(HttpHeaders.AUTHORIZATION, otherManagerToken).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("lines", List.of(Map.of("lineId", lineOf(waitingB), "nowQty", 1))))))
+                .andExpect(status().isOk());
+
+        unmetDemand(ownerToken, "state", "CANCELLED")
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].storeId").value((int) store))
+                .andExpect(jsonPath("$.items[0].requestedQty").value(2))
+                .andExpect(jsonPath("$.items[0].sellableQty").value(0));
+        unmetDemand(ownerToken, "state", "RELEASED")
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].storeId").value((int) otherStore))
+                .andExpect(jsonPath("$.items[0].requestedQty").value(1))
+                .andExpect(jsonPath("$.items[0].sellableQty").value(1));
+        // The rest of the order of B waits: 2 pads asked, 1 valid pad left in stock.
+        unmetDemand(ownerToken, "state", "WAITING")
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].storeId").value((int) otherStore))
+                .andExpect(jsonPath("$.items[0].sellableQty").value(1))
+                .andExpect(jsonPath("$.items[0].readyQty").value(1));
+    }
+
+    @Test
+    void aStoreWhoseOpenOrdersHoldMoreThanItStillSellsHasNothingSellable() throws Exception {
+        // An open order holds all 8 pads; then the lot of 3 expiring on 01/12 expires: 8 are held of the 5 left.
+        createOrder(pad, 8);
+        waitingOrder(lines(pad, 2));
+        clock.advance(Duration.ofDays(60));
+        signInAll();
+
+        unmetDemand(ownerToken, "state", "WAITING")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].sellableQty").value(0))
+                .andExpect(jsonPath("$.items[0].readyQty").value(0));
     }
 
     @Test
@@ -279,6 +375,22 @@ class UnmetDemandApiTest extends SalesOrderTestData {
         return mvc.perform(put("/api/v1/sales-orders/" + order + "/expected-ready-date")
                 .header(HttpHeaders.AUTHORIZATION, managerToken).contentType(MediaType.APPLICATION_JSON)
                 .content(json(body)));
+    }
+
+    /** A supplier lot at {@code storeId}, received as the receiving flow posts it (the base helper posts to one store). */
+    private void supplierLot(long storeId, long product, int quantity, long unitPrice, LocalDate expiry, String lotNo) {
+        long vendor = id("SELECT id FROM supplier WHERE supplier_name = 'Honda'");
+        long purchase = id("INSERT INTO purchase_order (supplier_id, store_id, created_by) VALUES (?, ?, ?) "
+                + "RETURNING id", vendor, storeId, owner.getId());
+        long receipt = id("INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, delivery_document_no, "
+                + "arrived_at) VALUES ('SUPPLIER_DELIVERY', ?, ?, now()) RETURNING id", purchase, "PX-" + lotNo);
+        long line = id("INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, document_qty, "
+                + "delivered_qty, passed_qty) VALUES (?, ?, ?, ?, ?) RETURNING id", receipt, product, quantity,
+                quantity, quantity);
+        tx.execute(status -> posting.receiveNewLot(new NewLotPosting(storeId, product, LotSourceType.RECEIPT, line,
+                vendor, TODAY.minusDays(20), unitPrice, lotNo, null, expiry,
+                Map.of(StockStatus.AVAILABLE, quantity), MovementType.RECEIPT_CONFIRMED,
+                SourceRef.goodsReceiptNote(receipt), owner.getId(), null)));
     }
 
     private long lineOf(long order) {

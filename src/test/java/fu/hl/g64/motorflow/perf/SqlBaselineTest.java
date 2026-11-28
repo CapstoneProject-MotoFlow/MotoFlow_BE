@@ -4,6 +4,7 @@ import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
+import fu.hl.g64.motorflow.pricing.PricingTestData;
 import fu.hl.g64.motorflow.receiving.GoodsReceiptTestData;
 import fu.hl.g64.motorflow.sales.SalesOrderTestData;
 import fu.hl.g64.motorflow.stockcount.StockCountTestData;
@@ -441,6 +442,80 @@ class SqlBaselineTest {
                             .content(json(Map.of("lines", dispatchLines))))
                     .andExpect(status().isOk());
             assertBudget("transfer-dispatch-10-lines", queries, 111, 64);
+        }
+    }
+
+    @Nested
+    class StockDocumentFlows extends TransferFlowTestData {
+
+        @Autowired
+        private QueryCounter queries;
+
+        @Test
+        void stockDocumentListPage0AndDetail() throws Exception {
+            lot(source, brake, 10, 50_000, null, "SD-A");
+            long order = dispatchedOrder(brake, 2);
+            String ownerToken = signIn("owner");
+
+            queries.reset();
+            mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, ownerToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(2));
+            assertBudget("stock-documents-page-0", queries, 2, 2);
+
+            queries.reset();
+            mvc.perform(get("/api/v1/stock-documents/TRANSFER_ORDER/" + order)
+                            .header(HttpHeaders.AUTHORIZATION, ownerToken)
+                            .param("storeId", String.valueOf(source)).param("direction", "OUT"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.lines.length()").value(1));
+            assertBudget("stock-document-detail", queries, 3, 3);
+        }
+    }
+
+    @Nested
+    class UnmetDemandFlows extends SalesOrderTestData {
+
+        @Autowired
+        private QueryCounter queries;
+
+        @Test
+        void unmetDemandOwner3Stores() throws Exception {
+            long thirdStore = createStore("Thủ Đức");
+            // Store A has 8 pads, all held by an open order, so a 2-pad order waits there. B and C have no pad.
+            createOrder(pad, 8);
+            create(managerToken, order(null, customer, "RETAIL", null, lines(pad, 2)))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"));
+            for (long waitingStore : List.of(otherStore, thirdStore)) {
+                create(ownerToken, order(waitingStore, customer, "RETAIL", null, lines(pad, 2)))
+                        .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"));
+            }
+
+            queries.reset();
+            mvc.perform(get("/api/v1/unmet-demand").header(HttpHeaders.AUTHORIZATION, ownerToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(3));
+            assertBudget("unmet-demand-owner-3-stores", queries, 5, 5);
+        }
+    }
+
+    @Nested
+    class RetailPriceFlows extends PricingTestData {
+
+        @Autowired
+        private QueryCounter queries;
+
+        @Test
+        void retailPricesDiffering() throws Exception {
+            setMarkup(ownerToken, TODAY, "UP_1000", Map.of(brakes, 30, oils, 20), Map.of()).andExpect(status().isOk());
+            setPrice(ownerToken, pad, 150_000, TODAY, null, false).andExpect(status().isOk());
+            setPrice(ownerToken, oil, 100_000, TODAY, null, false).andExpect(status().isOk());
+
+            queries.reset();
+            priceList(ownerToken, "?suggestionDiffers=true")
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(2));
+            assertBudget("retail-prices-differing", queries, 6, 6);
         }
     }
 }

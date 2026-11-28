@@ -34,8 +34,17 @@ public class StockDocumentServiceImpl implements StockDocumentService {
         String q = search.q() == null ? "" : search.q().strip().toLowerCase(Locale.ROOT);
         StockDocument.Search clean = new StockDocument.Search(search.direction(), search.type(), search.kind(),
                 search.from(), search.to(), q);
-        return new PageResponse<>(documents.page(scope, clean, isOwner(user), offsetPage, pageSize),
-                documents.count(scope, clean), offsetPage, pageSize);
+        StockDocumentQuery.Page found = documents.page(scope, clean, isOwner(user), offsetPage, pageSize);
+        long total;
+        if (!found.rows().isEmpty()) {
+            total = found.total();
+        } else if (offsetPage == 0) {
+            total = 0;
+        } else {
+            // Past the last page: the page has no row to carry the total, so it is counted.
+            total = documents.count(scope, clean);
+        }
+        return new PageResponse<>(found.rows(), total, offsetPage, pageSize);
     }
 
     @Override
