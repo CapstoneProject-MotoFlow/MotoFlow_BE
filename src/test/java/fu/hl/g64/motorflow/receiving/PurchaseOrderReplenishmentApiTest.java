@@ -1,11 +1,14 @@
 package fu.hl.g64.motorflow.receiving;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -191,5 +194,22 @@ class PurchaseOrderReplenishmentApiTest extends PurchaseOrderTestData {
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();
         assertThat(toPurchase(request)).containsExactly(2, 0, 0);
+    }
+
+    @Test
+    void toPurchaseMayNotBeLoweredBelowAlreadyOrderedQty() throws Exception {
+        long request = request("IN_PROGRESS");
+        Map<String, Object> first = purchase(giaLam, request, false);
+        first.put("lines", List.of(line(pad, 4, 120_000)));
+        create(ownerToken, first).andExpect(status().isCreated());
+
+        mvc.perform(put("/api/v1/replenishment-requests/" + request + "/to-purchase")
+                        .header(HttpHeaders.AUTHORIZATION, ownerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"lines\":[{\"productId\":" + pad + ",\"toPurchaseQty\":3}]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MSG367"));
+
+        assertThat(toPurchase(request)).containsExactly(4, 0, 0);
     }
 }

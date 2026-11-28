@@ -31,7 +31,7 @@ public record TransferOrderDetailResponse(
         Person discrepancyAcknowledgedBy, LocalDateTime discrepancyAcknowledgedAt, String reconciliationNote,
         Person reconciliationConfirmedBy, LocalDateTime reconciliationConfirmedAt,
         List<Line> lines, List<Lot> lots, List<Receipt> receipts, List<Discrepancy> discrepancies,
-        List<AttachmentResponse> attachments) {
+        List<AttachmentResponse> attachments, boolean hasDiscrepancy) {
 
     public record Person(long id, String fullName) {
     }

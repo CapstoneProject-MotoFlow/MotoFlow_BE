@@ -792,7 +792,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                         incoming ? order.getVehiclePlateNo() : receipt.getVehiclePlateNo(), receipt.getArrivedAt(),
                         receipt.getConfirmedAt());
                 }).toList(),
-                discrepancies, staff ? List.of() : attachments.list(OwnerType.TRANSFER_ORDER, id));
+                discrepancies, staff ? List.of() : attachments.list(OwnerType.TRANSFER_ORDER, id),
+                orders.hasDiscrepancy(id));
     }
 
     private List<TransferOrderDetailResponse.Discrepancy> discrepancies(long transferOrderId) {

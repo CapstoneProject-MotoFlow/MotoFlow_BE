@@ -95,6 +95,8 @@ class TransferOrderViewApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.items[2].hasDiscrepancy").value(false))
                 .andExpect(jsonPath("$.items[2].createdByName").isNotEmpty())
                 .andExpect(jsonPath("$.items[3].closedAt").value("2026-11-06T08:00:00"));
+        detail("owner", dispatched).andExpect(status().isOk())
+                .andExpect(jsonPath("$.hasDiscrepancy").value(false));
     }
 
     @Test
@@ -154,7 +156,8 @@ class TransferOrderViewApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.lots[0].unitCost").value(1000))
                 .andExpect(jsonPath("$.receipts.length()").value(3))
                 .andExpect(jsonPath("$.discrepancies[0].shortQty").value(3))
-                .andExpect(jsonPath("$.discrepancies[0].events.length()").value(2));
+                .andExpect(jsonPath("$.discrepancies[0].events.length()").value(2))
+                .andExpect(jsonPath("$.hasDiscrepancy").value(true));
 
         detail("bmkt", dispatched).andExpect(status().isOk())
                 .andExpect(jsonPath("$.lines[0].shortageQty").value(1))
@@ -185,6 +188,23 @@ class TransferOrderViewApiTest extends ApiTestUsers {
         detail("bmhd", dispatched).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         detail("idle", dispatched).andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("MSG05"));
         detail("owner", 9999).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG175"));
+    }
+
+    @Test
+    void hasDiscrepancyStaysTrueOnListAndDetailAfterShortageIsResolved() throws Exception {
+        long arrived = receipt(dispatched, "TRANSFER_IN", "CONFIRMED");
+        receiptLine(arrived, brake, 8, 0);
+        receiptLine(arrived, chain, 3, 0);
+        long shortage = jdbc.queryForObject("INSERT INTO discrepancy_case (source_type, transfer_order_id, product_id, "
+                + "short_qty, opened_at) VALUES ('TRANSFER', ?, ?, 2, now()) RETURNING id", Long.class, dispatched, brake);
+        loss(shortage, 2, "APPLIED");
+
+        list("owner", "status", "RECONCILING").andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].id").value(dispatched))
+                .andExpect(jsonPath("$.items[0].hasDiscrepancy").value(true));
+        detail("owner", dispatched).andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[0].shortageQty").value(0))
+                .andExpect(jsonPath("$.hasDiscrepancy").value(true));
     }
 
     // ------------------------------------------------------------------------------------------------------------
