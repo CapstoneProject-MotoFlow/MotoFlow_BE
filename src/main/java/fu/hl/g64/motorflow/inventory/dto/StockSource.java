@@ -17,7 +17,8 @@ public enum StockSource {
     SALE(Set.of(MovementType.SALE_ISSUE)),
     /** Dispatched out of this warehouse, or sent to it (in transit from dispatch, then received). */
     TRANSFER(Set.of(MovementType.TRANSFER_DISPATCH, MovementType.TRANSFER_EXTRA_DISPATCH,
-            MovementType.TRANSFER_RECEIPT)),
+            MovementType.TRANSFER_RECEIPT, MovementType.TRANSFER_WRONG_ITEM,
+            MovementType.TRANSFER_SHORT_RETURNED, MovementType.TRANSFER_RECEIPT_CORRECTED)),
     /** Approved adjustment requests: write-offs and corrections. */
     ADJUSTMENT(Set.of(MovementType.ADJUSTMENT)),
     /** Surplus and shortage found by a stock count. */

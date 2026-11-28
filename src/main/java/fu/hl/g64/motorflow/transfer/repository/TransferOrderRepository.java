@@ -80,7 +80,20 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
         long getLineCount();
 
         long getTotalPlannedQty();
+
+        boolean getHasDiscrepancy();
     }
+
+    /** An order has a discrepancy if it ever had a discrepancy case or a confirmed receipt line with excess, damage, or wrong item. */
+    String HAS_DISCREPANCY = """
+            (exists (select 1 from DiscrepancyCase c where c.transferOrderId = o.id)
+             or exists (select 1 from GoodsReceiptNoteLine gl
+                        join GoodsReceiptNote g on g.id = gl.goodsReceiptNoteId
+                        where g.transferOrderId = o.id
+                          and g.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.CONFIRMED
+                          and (gl.excessQty > 0 or gl.damagedQty > 0 or gl.damagedBeyondQty > 0
+                               or gl.wrongItemQty > 0)))
+            """;
 
     /** UC-72: {@code storeId} keeps a Branch Manager to orders from or to their store, {@code staffId} Staff to theirs. */
     @Query(value = """
@@ -88,7 +101,9 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
                    u.fullName as createdByName,
                    (select count(l) from TransferOrderLine l where l.transferOrderId = o.id) as lineCount,
                    (select coalesce(sum(l.plannedQty), 0) from TransferOrderLine l
-                    where l.transferOrderId = o.id) as totalPlannedQty
+                    where l.transferOrderId = o.id) as totalPlannedQty,
+                   """ + HAS_DISCREPANCY + """
+                   as hasDiscrepancy
             from TransferOrder o
             join Store s on s.id = o.sourceStoreId
             join Store d on d.id = o.destStoreId
@@ -106,6 +121,9 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
 
     @Query("select count(o) > 0 from TransferOrder o where o.id = :id and " + STAFF_TASK)
     boolean staffWorksOn(@Param("id") long id, @Param("staffId") long staffId);
+
+    @Query("select count(o) > 0 from TransferOrder o where o.id = :id and " + HAS_DISCREPANCY)
+    boolean hasDiscrepancy(@Param("id") long id);
 
     @Query("select g from GoodsReceiptNote g where g.transferOrderId = :id order by g.id")
     List<GoodsReceiptNote> findReceipts(@Param("id") long id);

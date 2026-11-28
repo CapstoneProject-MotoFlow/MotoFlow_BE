@@ -43,8 +43,9 @@ public class ReportQueries {
     }
 
     /**
-     * [store_id, day, order_payments, refunds, deposits_received, deposits_refunded] of order payments, refunds,
-     * deposits and deposits given back (PM 21/11) verified in the period.
+     * [store_id, day, order_payments, refunds, deposits_received, deposits_refunded, cash_collected,
+     * transfer_collected] of order payments, refunds, deposits and deposits given back (PM 21/11) verified in the
+     * period.
      */
     public List<Map<String, Object>> orderCollections(Long storeId, LocalDateTime from, LocalDateTime to,
                                                       String unit) {
@@ -53,7 +54,13 @@ public class ReportQueries {
                        coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'ORDER_PAYMENT'), 0) AS order_payments,
                        coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'REFUND'), 0) AS refunds,
                        coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'DEPOSIT'), 0) AS deposits_received,
-                       coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'DEPOSIT_REFUND'), 0) AS deposits_refunded
+                       coalesce(sum(p.amount) FILTER (WHERE p.payment_type = 'DEPOSIT_REFUND'), 0) AS deposits_refunded,
+                       coalesce(sum(CASE WHEN p.payment_type IN ('ORDER_PAYMENT', 'DEPOSIT') THEN p.amount
+                                         ELSE -p.amount END) FILTER (WHERE p.payment_method = 'CASH'), 0)
+                           AS cash_collected,
+                       coalesce(sum(CASE WHEN p.payment_type IN ('ORDER_PAYMENT', 'DEPOSIT') THEN p.amount
+                                         ELSE -p.amount END) FILTER (WHERE p.payment_method = 'BANK_TRANSFER'), 0)
+                           AS transfer_collected
                 FROM payment p
                 JOIN sales_order o ON o.id = p.sales_order_id
                 WHERE p.status = 'VERIFIED'
@@ -92,6 +99,7 @@ public class ReportQueries {
      */
     private static final String ALLOCATIONS = """
             SELECT a.payment_id, a.receivable_id, a.allocated_amount, a.reversed_at, p.verified_at, p.payment_type,
+                   p.payment_method,
                    (SELECT max(q.applied_at) FROM payment_allocation x
                     JOIN adjustment_request q ON q.id = x.reversed_by_adjustment_id
                     WHERE x.payment_id = a.payment_id AND x.id < a.id
@@ -101,14 +109,18 @@ public class ReportQueries {
             WHERE p.status = 'VERIFIED'""";
 
     /**
-     * [store_id, day, debt_collected]: debt payments verified in the period, by the store of the debt paid, as they
-     * were recorded (BR-65). A later correction of the amount shows among the collection corrections.
+     * [store_id, day, debt_collected, debt_cash, debt_transfer]: debt payments verified in the period, by the store
+     * of the debt paid, as they were recorded (BR-65). A later correction of the amount shows among the collection
+     * corrections.
      */
     public List<Map<String, Object>> debtCollections(Long storeId, LocalDateTime from, LocalDateTime to,
                                                      String unit) {
         return jdbc.queryForList("""
                 SELECT r.store_id, CAST(date_trunc(:unit, a.verified_at) AS DATE) AS day,
-                       coalesce(sum(a.allocated_amount), 0) AS debt_collected
+                       coalesce(sum(a.allocated_amount), 0) AS debt_collected,
+                       coalesce(sum(a.allocated_amount) FILTER (WHERE a.payment_method = 'CASH'), 0) AS debt_cash,
+                       coalesce(sum(a.allocated_amount) FILTER (WHERE a.payment_method = 'BANK_TRANSFER'), 0)
+                           AS debt_transfer
                 FROM (%s) a
                 JOIN receivable r ON r.id = a.receivable_id
                 WHERE a.payment_type = 'DEBT_PAYMENT' AND a.rewritten_at IS NULL

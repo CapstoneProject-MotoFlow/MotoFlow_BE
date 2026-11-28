@@ -175,6 +175,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         Map<Long, ReplenishmentRequestLine> byProduct = requested.stream()
                 .collect(Collectors.toMap(ReplenishmentRequestLine::getProductId, Function.identity()));
         Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
+        Map<Long, Long> ordered = byProduct(requests.orderedByProduct(id));
         Map<Long, Product> parts = products.findAllById(ids).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
         List<Map<String, Object>> changes = new ArrayList<>();
@@ -183,6 +184,11 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
             ReplenishmentRequestLine target = byProduct.get(line.productId());
             if (target == null) {
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG204", i + 1);
+            }
+            long minOrdered = ordered.getOrDefault(line.productId(), 0L);
+            if (line.toPurchaseQty() < minOrdered) {
+                throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG367", parts.get(line.productId()).getSku(),
+                        minOrdered);
             }
             long limit = target.getRequestedQty() - planned.getOrDefault(line.productId(), 0L);
             if (line.toPurchaseQty() > limit) {
@@ -216,11 +222,19 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
         if (request.getStatus() == ReplenishmentRequestStatus.CLOSED) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG29");
         }
-        if (requests.findPurchaseOrders(id).stream()
-                .anyMatch(row -> row.getPurchaseOrder().getStatus() != PurchaseOrderStatus.CANCELLED)) {
+        List<ReplenishmentRequestLine> requested = lines.findByReplenishmentRequestIdOrderById(id);
+        Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
+        Map<Long, Long> ordered = byProduct(requests.orderedByProduct(id));
+        boolean hasRemaining = requested.stream().anyMatch(line -> {
+            long alreadyOrdered = ordered.getOrDefault(line.getProductId(), 0L);
+            long remainingToPurchase = Math.max(line.getToPurchaseQty() - alreadyOrdered, 0L);
+            long unplanned = Math.max(line.getRequestedQty() - planned.getOrDefault(line.getProductId(), 0L)
+                    - line.getToPurchaseQty(), 0L);
+            return remainingToPurchase + unplanned > 0;
+        });
+        if (!hasRemaining) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG261", id);
         }
-        List<ReplenishmentRequestLine> requested = lines.findByReplenishmentRequestIdOrderById(id);
         Set<Long> parts = requested.stream().map(ReplenishmentRequestLine::getProductId).collect(Collectors.toSet());
         int lineNo = 0;
         for (Long productId : quantities.keySet()) {
@@ -229,24 +243,33 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG204", lineNo);
             }
         }
-        Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
         List<Map<String, Object>> changes = new ArrayList<>();
         for (ReplenishmentRequestLine line : requested) {
+            Integer orderedNow = quantities.get(line.getProductId());
+            if (orderedNow == null) {
+                continue;
+            }
+            long alreadyOrdered = ordered.getOrDefault(line.getProductId(), 0L);
+            long remainingToPurchase = Math.max(line.getToPurchaseQty() - alreadyOrdered, 0L);
+            long maxGap = Math.max(line.getRequestedQty() - planned.getOrDefault(line.getProductId(), 0L), 0L);
             if (includeUnallocated) {
-                long unallocated = line.getRequestedQty() - planned.getOrDefault(line.getProductId(), 0L)
-                        - line.getToPurchaseQty();
+                long unallocated = Math.max(maxGap - line.getToPurchaseQty(), 0L);
                 if (unallocated > 0) {
                     changes.add(passToPurchase(line, Math.toIntExact(line.getToPurchaseQty() + unallocated)));
+                    remainingToPurchase += unallocated;
                 }
             }
-            // GVHD 20/11, on both paths (the Owner may have saved the allocation first): the PO may buy more than
-            // is short (a supplier's pack, stock for later), never less, or the shortage passed to purchase stays
-            // uncovered. A part left out of the PO counts as 0.
-            if (line.getToPurchaseQty() > 0
-                    && quantities.getOrDefault(line.getProductId(), 0) < line.getToPurchaseQty()) {
+            // Plan 28/11 #1: check only lines included in this PO; the total purchased >= needed rule is checked at
+            // the replenishment-request level when closing.
+            if (remainingToPurchase > 0 && orderedNow < remainingToPurchase) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG262", id,
                         products.findById(line.getProductId()).map(Product::getSku).orElseThrow(),
-                        line.getToPurchaseQty());
+                        remainingToPurchase);
+            }
+            int nextToPurchase = Math.max(line.getToPurchaseQty(),
+                    Math.toIntExact(Math.min(alreadyOrdered + orderedNow, maxGap)));
+            if (nextToPurchase > line.getToPurchaseQty()) {
+                changes.add(passToPurchase(line, nextToPurchase));
             }
         }
         if (!changes.isEmpty()) {
@@ -269,10 +292,10 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
             return;
         }
         Map<Long, Long> fulfilled = reconciliation.fulfilled(requestId);
-        // A part short of stock is bought on a PO of its own, not merely planned or passed to purchase (BR-55).
-        Set<Long> purchased = Set.copyOf(requests.findPurchasedProductIds(requestId));
+        // Plan 28/11 #1: total ordered across non-cancelled POs of this request must cover toPurchaseQty.
+        Map<Long, Long> ordered = byProduct(requests.orderedByProduct(requestId));
         boolean done = lines.findByReplenishmentRequestIdOrderById(requestId).stream().allMatch(line ->
-                (line.getToPurchaseQty() == 0 || purchased.contains(line.getProductId()))
+                ordered.getOrDefault(line.getProductId(), 0L) >= line.getToPurchaseQty()
                         && fulfilled.getOrDefault(line.getProductId(), 0L) + line.getToPurchaseQty()
                         >= line.getRequestedQty());
         if (!done) {
@@ -435,6 +458,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                         .map(ReplenishmentRequestLine::getProductId).toList()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
         Map<Long, Long> planned = byProduct(transferLines.plannedByProduct(id));
+        Map<Long, Long> ordered = byProduct(requests.orderedByProduct(id));
         Map<Long, Long> fulfilled = reconciliation.fulfilled(id);
         return new ReplenishmentDetailResponse(id, store.getId(), store.getStoreName(), request.getStatus(),
                 request.getNote(), request.getCreatedBy(), createdByName, request.getCreatedAt(), request.getClosedAt(),
@@ -443,7 +467,7 @@ public class ReplenishmentRequestServiceImpl implements ReplenishmentRequestServ
                     long received = fulfilled.getOrDefault(part.getId(), 0L);
                     return new ReplenishmentDetailResponse.Line(part.getId(), part.getSku(), part.getPartName(),
                             part.getBaseUnit(), line.getRequestedQty(), planned.getOrDefault(part.getId(), 0L), received,
-                            line.getToPurchaseQty(),
+                            line.getToPurchaseQty(), ordered.getOrDefault(part.getId(), 0L),
                             Math.max(line.getRequestedQty() - received - line.getToPurchaseQty(), 0));
                 }).toList(),
                 transferOrders.findLinkedOrders(id).stream().map(row -> {

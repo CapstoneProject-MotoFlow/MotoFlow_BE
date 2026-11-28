@@ -42,7 +42,7 @@ public class AccountingWorkbook {
             Sheet revenue = sheet(book, styles, "Doanh thu", title, "Ngày", "Đơn hoàn tất", "Doanh thu",
                     "Thu tiền đơn", "Hoàn tiền", "Thu nợ", "Tổng thu", "Bán chịu", "Điều chỉnh doanh thu",
                     "Điều chỉnh thu tiền", "Điều chỉnh công nợ", "Thu cọc", "Trả lại cọc", "Cọc dùng cho đơn",
-                    "Cọc khách mất");
+                    "Cọc khách mất", "Thu tiền mặt", "Thu chuyển khoản");
             int r = 3;
             for (SalesCollectionReport.PeriodRow p : daily.periods()) {
                 figures(revenue.createRow(r++), styles, p.from(), p.figures());
@@ -167,7 +167,7 @@ public class AccountingWorkbook {
         long[] values = {f.completedOrders(), f.revenue(), f.orderPayments(), f.refunds(), f.debtCollected(),
                 f.totalCollected(), f.creditSales(), f.revenueCorrections(), f.collectionCorrections(),
                 f.receivableCorrections(), f.depositsReceived(), f.depositsRefunded(), f.depositsApplied(),
-                f.depositsForfeited()};
+                f.depositsForfeited(), f.cashCollected(), f.transferCollected()};
         for (int i = 0; i < values.length; i++) {
             money(row, from + i, values[i], styles);
         }

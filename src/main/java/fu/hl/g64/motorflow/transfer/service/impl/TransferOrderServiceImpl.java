@@ -177,7 +177,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             return new TransferOrderRowResponse(order.getId(), order.getStatus(), order.getSourceStoreId(),
                     row.getSourceStoreName(), order.getDestStoreId(), row.getDestStoreName(),
                     order.getReplenishmentRequestId(), row.getLineCount(), row.getTotalPlannedQty(),
-                    row.getCreatedByName(), order.getCreatedAt(), order.getDispatchedAt(), order.getClosedAt());
+                    row.getCreatedByName(), order.getCreatedAt(), order.getDispatchedAt(), order.getClosedAt(),
+                    row.getHasDiscrepancy());
         }).toList());
     }
 
@@ -791,7 +792,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                         incoming ? order.getVehiclePlateNo() : receipt.getVehiclePlateNo(), receipt.getArrivedAt(),
                         receipt.getConfirmedAt());
                 }).toList(),
-                discrepancies, staff ? List.of() : attachments.list(OwnerType.TRANSFER_ORDER, id));
+                discrepancies, staff ? List.of() : attachments.list(OwnerType.TRANSFER_ORDER, id),
+                orders.hasDiscrepancy(id));
     }
 
     private List<TransferOrderDetailResponse.Discrepancy> discrepancies(long transferOrderId) {

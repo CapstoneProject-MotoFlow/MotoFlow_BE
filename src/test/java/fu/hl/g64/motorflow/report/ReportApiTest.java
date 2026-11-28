@@ -70,6 +70,8 @@ class ReportApiTest extends SalesOrderTestData {
                 .andExpect(jsonPath("$.total.revenue").value(570_000))
                 .andExpect(jsonPath("$.total.orderPayments").value(370_000))
                 .andExpect(jsonPath("$.total.totalCollected").value(370_000))
+                .andExpect(jsonPath("$.total.cashCollected").value(85_000))
+                .andExpect(jsonPath("$.total.transferCollected").value(285_000))
                 .andExpect(jsonPath("$.total.creditSales").value(200_000))
                 .andExpect(jsonPath("$.total.revenueCorrections").value(-100_000))
                 .andExpect(jsonPath("$.total.collectionCorrections").value(-100_000))
@@ -152,6 +154,8 @@ class ReportApiTest extends SalesOrderTestData {
             assertThat(book.getSheet("Chứng từ điều chỉnh").getLastRowNum()).isEqualTo(2 + 2);
             Sheet revenue = book.getSheet("Doanh thu");
             assertThat(revenue.getRow(3 + 12).getCell(2).getNumericCellValue()).isEqualTo(570_000);
+            assertThat(revenue.getRow(3 + 13).getCell(15).getNumericCellValue()).isEqualTo(85_000);
+            assertThat(revenue.getRow(3 + 13).getCell(16).getNumericCellValue()).isEqualTo(285_000);
         }
         report(managerToken, "/accounting-export").andExpect(status().isForbidden());
     }
