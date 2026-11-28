@@ -12,8 +12,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -107,5 +109,46 @@ public class PickingGuide {
                     inOrder, left));
         }
         return parts;
+    }
+
+    /**
+     * {@code sellableQty} of each part of each warehouse, as {@code parts(store, ids, today).get(id).sellableQty()} gives
+     * it, for every (store, part) asked: {@code partsByStore} maps a store to the parts to read there. Two statements for
+     * all the stores, however many there are. A pair with no lot or no hold reads 0; a part not asked is left out.
+     *
+     * <p>Why the sum is right: {@link #parts} hands the first lots in picking order to the other open orders (FEFO),
+     * so what is left for this read is the lots' total less what those orders hold, never below 0. Nothing is
+     * excluded for one order, the same as {@code parts} with no {@code orderId}.
+     */
+    public Map<Long, Map<Long, Integer>> sellableByStore(Map<Long, ? extends Collection<Long>> partsByStore,
+                                                         LocalDate today) {
+        if (partsByStore.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> productIds = new HashSet<>();
+        partsByStore.values().forEach(productIds::addAll);
+        Map<Long, Map<Long, Integer>> lots = new HashMap<>();
+        Map<Long, Map<Long, Integer>> holding = new HashMap<>();
+        if (!productIds.isEmpty()) {
+            for (Object[] row : orderLines.reservedByStore(productIds)) {
+                holding.computeIfAbsent((Long) row[0], key -> new HashMap<>())
+                        .put((Long) row[1], ((Number) row[2]).intValue());
+            }
+            for (Object[] row : sellable.sumSellableByStore(partsByStore.keySet(), productIds, today)) {
+                lots.computeIfAbsent((Long) row[0], key -> new HashMap<>())
+                        .put((Long) row[1], ((Number) row[2]).intValue());
+            }
+        }
+        Map<Long, Map<Long, Integer>> sellableByStore = new HashMap<>();
+        partsByStore.forEach((store, ids) -> {
+            Map<Long, Integer> quantities = new HashMap<>();
+            for (Long productId : ids) {
+                int total = lots.getOrDefault(store, Map.of()).getOrDefault(productId, 0);
+                int held = holding.getOrDefault(store, Map.of()).getOrDefault(productId, 0);
+                quantities.put(productId, Math.max(0, total - held));
+            }
+            sellableByStore.put(store, quantities);
+        });
+        return sellableByStore;
     }
 }
