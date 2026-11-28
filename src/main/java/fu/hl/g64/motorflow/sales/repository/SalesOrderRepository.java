@@ -46,7 +46,10 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
               and o.status <> fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.DRAFT""")
     Page<SalesOrder> findByCustomer(Long customerId, Long storeId, Pageable pageable);
 
-    /** Orders of the store needing BM attention on the home page: unassigned picking, awaiting confirmation, awaiting completion. */
+    /**
+     * Orders of the store needing BM attention on the home page: unassigned picking, awaiting confirmation, awaiting
+     * completion. Only open orders are read.
+     */
     @Query("""
             select coalesce(sum(case when o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING
                                           and not exists (select t.id from WarehouseTask t where t.salesOrderId = o.id
@@ -57,7 +60,10 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long>, J
                    coalesce(sum(case when o.status = fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.CONFIRMED
                                      then 1L else 0L end), 0L) as awaitingCompletion
             from SalesOrder o
-            where o.storeId = :storeId""")
+            where o.storeId = :storeId
+              and o.status in (fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.AWAITING_PICKING,
+                               fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.PICKED,
+                               fu.hl.g64.motorflow.sales.entity.enums.SalesOrderStatus.CONFIRMED)""")
     HomeCounts countHomeWork(Long storeId);
 
     interface HomeCounts {

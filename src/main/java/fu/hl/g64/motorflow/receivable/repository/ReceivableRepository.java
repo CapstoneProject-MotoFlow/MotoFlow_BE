@@ -56,6 +56,17 @@ public interface ReceivableRepository extends JpaRepository<Receivable, Long> {
             order by r.recognizedAt, r.id""")
     List<Object[]> findWithRemaining(long customerId, Long storeId);
 
+    /**
+     * [receivable, remaining amount in VND] of each unsettled receivable of the customer, at one store or at every store
+     * when {@code storeId} is null.
+     */
+    @Query("select r, " + REMAINING + """
+            from Receivable r
+            where r.customerId = :customerId and (:storeId is null or r.storeId = :storeId)
+              and r.settledAt is null
+            order by r.recognizedAt, r.id""")
+    List<Object[]> findOwedWithRemaining(long customerId, Long storeId);
+
     /** [receivable, remaining amount in VND] of the receivable an order completed on credit created, if any. */
     @Query("select r, " + REMAINING + """
             from Receivable r

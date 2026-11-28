@@ -376,12 +376,13 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         LocalDateTime now = LocalDateTime.now(clock);
         // UC-53 as for a new order: the prices in effect now (BR-18) and the discount threshold (BR-16). A refusal
         // rolls the whole transaction back, so the draft keeps what it had.
-        Content content = rewriteDraft(seller, order, request, now);
+        Content content = changeDraft(seller, order, request, now);
         LocalDate expected = expectedReadyDate(request.expectedReadyDate(), now.toLocalDate());
         List<Share> shares = shares(content.store().getId(), content.customer().id() == null, request.lines(),
                 now.toLocalDate());
         order.submit(now);
         // GVHD 20/11: the draft becomes the order sold now (or the waiting order if nothing can be sold now).
+        // The lines are written once, by openSplit, so the draft's old lines are only deleted here.
         orderLines.deleteBySalesOrderId(id);
         return openSplit(seller, order, shares, content, now, expected);
     }
@@ -486,7 +487,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                     order.getPriceType(), rate, order.getNote(), seller.id(), now).splitFrom(order.getId()));
             rest.waitForStock();
             rest.setExpectedReadyDate(expected, now);
-            opened(seller, rest, saveShares(rest, waiting, Share::waitQty, content), now);
+            recordOpened(seller, rest, saveShares(rest, waiting, Share::waitQty, content), now);
             waitingId = rest.getId();
         }
         Long declinedId = declineRest(seller, order, refused, content, now);
@@ -560,11 +561,18 @@ public class SalesOrderServiceImpl implements SalesOrderService {
     /** Replaces the draft's whole content with the request, at the prices in effect now. */
     private Content rewriteDraft(AuthenticatedUser seller, SalesOrder order, SalesOrderRequest request,
                                  LocalDateTime now) {
+        Content content = changeDraft(seller, order, request, now);
+        orderLines.deleteBySalesOrderId(order.getId());
+        saveLines(order, request, content);
+        return content;
+    }
+
+    /** Checks the request (UC-53) and sets the draft's header, without touching its lines. */
+    private Content changeDraft(AuthenticatedUser seller, SalesOrder order, SalesOrderRequest request,
+                                LocalDateTime now) {
         Content content = content(seller, request, now);
         order.changeDraft(content.store().getId(), content.customer(), request.priceType(), content.rate(),
                 text(request.note()), now);
-        orderLines.deleteBySalesOrderId(order.getId());
-        saveLines(order, request, content);
         return content;
     }
 
@@ -599,9 +607,16 @@ public class SalesOrderServiceImpl implements SalesOrderService {
         return orderLines.saveAll(lines);
     }
 
-    /** UC-53 steps 9-10: version 1 is recorded and, when Owner sold it, the store's Branch Manager is told. */
+    /** {@link #recordOpened}, then the order's detail. */
     private SalesOrderDetail opened(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
                                     LocalDateTime now) {
+        recordOpened(seller, order, lines, now);
+        return detail(seller, order);
+    }
+
+    /** UC-53 steps 9-10: version 1 is recorded and, when Owner sold it, the store's Branch Manager is told. */
+    private void recordOpened(AuthenticatedUser seller, SalesOrder order, List<SalesOrderLine> lines,
+                              LocalDateTime now) {
         Map<String, Object> first = SalesOrderHistory.snapshot(1, null, order, lines);
         // GVHD 20/11: version 1 of a split order also keeps where it came from, as the column does.
         if (order.getSplitFromOrderId() != null) {
@@ -613,7 +628,6 @@ public class SalesOrderServiceImpl implements SalesOrderService {
             // A waiting order is not picked yet.
             notifyPicking(seller, order);
         }
-        return detail(seller, order);
     }
 
     // UC-55
@@ -874,7 +888,7 @@ public class SalesOrderServiceImpl implements SalesOrderService {
                             quantity, reference, OrderPricing.actualUnitPrice(reference, rate)));
                 }
             }
-            opened(seller, rest, orderLines.saveAll(restLines), now);
+            recordOpened(seller, rest, orderLines.saveAll(restLines), now);
             waitingId = rest.getId();
             data.put(SalesOrderHistory.SHORT_WAITING_ORDER, waitingId);
         }

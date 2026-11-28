@@ -270,7 +270,7 @@ public class CustomerDebtServiceImpl implements CustomerDebtService {
 
     /** UC-66 Step 3_Customer pays specific debts: the named debts, or every debt still owed at the store (BR-70). */
     private List<Debt> eligible(long customerId, long storeId, List<Long> receivableIds) {
-        List<Debt> owed = ledger.debtsOf(customerId, storeId).stream().filter(debt -> debt.remaining() > 0).toList();
+        List<Debt> owed = ledger.owedOf(customerId, storeId);
         if (owed.isEmpty()) {
             throw new BusinessException(HttpStatus.CONFLICT, "MSG149");
         }
