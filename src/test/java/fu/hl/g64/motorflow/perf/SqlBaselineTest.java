@@ -494,7 +494,7 @@ class SqlBaselineTest {
             mvc.perform(get("/api/v1/unmet-demand").header(HttpHeaders.AUTHORIZATION, ownerToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalItems").value(3));
-            assertBudget("unmet-demand-owner-3-stores", queries, 12, 12);
+            assertBudget("unmet-demand-owner-3-stores", queries, 5, 5);
         }
     }
 }
