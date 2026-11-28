@@ -227,6 +227,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             for (Pick pick : picks) {
                 post(balance, pick.lot, p.fromStatus(), -pick.quantity, costOf(product, pick.lot), p.movementType(),
                         p.source(), p.reason(), p.performedBy(), period, now, now, checkedStores, batch.locked);
+                batch.posted(new LotKey(pick.lot.getId(), p.storeId(), p.fromStatus()), pick.quantity);
                 touchedLots.putIfAbsent(pick.lot.getId(), pick.lot);
                 line.add(new LotQuantity(pick.lot.getId(), pick.quantity));
             }
@@ -412,6 +413,69 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
 
     @Transactional(propagation = Propagation.MANDATORY)
     @Override
+    public void adjustLotsAll(List<LotAdjustPosting> postings) {
+        List<LotAdjustPosting> changing = postings.stream().filter(p -> p.quantityChange() != 0).toList();
+        if (changing.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        // Periods are share-locked before any stock row, as on the other posting paths: a new month's period is inserted
+        // here and must not wait on another posting while this one holds stock rows. The checks still run in list order.
+        InventoryPeriod month = changing.stream().anyMatch(p -> p.periodId() == null && p.occurredAt() == null)
+                ? inventoryPeriods.lockFor(now.toLocalDate()) : null;
+        Map<Long, InventoryPeriod> periodCache = new HashMap<>();
+        changing.stream().map(LotAdjustPosting::periodId).filter(id -> id != null).distinct().sorted()
+                .forEach(id -> periods.findForPostingById(id).ifPresent(found -> periodCache.put(id, found)));
+        // A lot that does not exist is refused in list order below, like adjustLot, so only known lots are locked here.
+        Map<Long, Lot> loaded = loadLots(changing.stream().map(LotAdjustPosting::lotId).toList());
+        List<LotAdjustPosting> known = changing.stream().filter(p -> loaded.containsKey(p.lotId())).toList();
+        // Same lock order as adjustLot: stock_balance, then product, then lot_balance.
+        Map<StoreProduct, StockBalance> balances = lockBalances(known.stream()
+                .map(p -> new StoreProduct(p.storeId(), loaded.get(p.lotId()).getProductId())).toList(), now);
+        Map<Long, Product> parts = readProducts(known.stream()
+                .map(p -> loaded.get(p.lotId()).getProductId()).distinct().toList());
+        // Increases are locked too: post() would lock them one by one, and here every row is locked in key order.
+        Map<LotKey, LotBalance> locked = new HashMap<>();
+        lockDestinationLotBalances(known.stream().map(p -> new LotKey(p.lotId(), p.storeId(), p.status())).toList(),
+                locked, now);
+
+        Set<Long> checkedStores = new HashSet<>();
+        Map<Long, Lot> changed = new LinkedHashMap<>();
+        boolean monthChecked = false;
+        for (LotAdjustPosting p : changing) {
+            // Same order as adjustLot: the period and time are resolved before the lot is looked up.
+            PostingTime when;
+            if (p.periodId() == null && p.occurredAt() == null) {
+                if (!monthChecked) {
+                    requireOpen(month);
+                    monthChecked = true;
+                }
+                when = new PostingTime(month, now);
+            } else {
+                when = postingTime(p.movementType(), p.periodId(), p.occurredAt(), now, periodCache);
+            }
+            Lot lot = loaded.get(p.lotId());
+            if (lot == null) {
+                throw new IllegalArgumentException("unknown lot " + p.lotId());
+            }
+            Product product = productOf(parts, lot.getProductId());
+            if (p.quantityChange() < 0) {
+                // The row is the one posted into earlier in this loop, so held already counts those changes.
+                int held = locked.get(new LotKey(lot.getId(), p.storeId(), p.status())).getQuantity();
+                if (held + p.quantityChange() < 0) {
+                    throw notEnough(product, -p.quantityChange(), held);
+                }
+            }
+            post(balances.get(new StoreProduct(p.storeId(), lot.getProductId())), lot, p.status(), p.quantityChange(),
+                    costOf(product, lot), p.movementType(), p.source(), p.reason(), p.performedBy(), when.period(), now,
+                    when.at(), checkedStores, locked);
+            changed.putIfAbsent(lot.getId(), lot);
+        }
+        refreshDepletions(changed.values());
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
     public void receiveIntoLot(LotReceiptPosting p) {
         LocalDateTime now = LocalDateTime.now(clock);
         InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
@@ -442,6 +506,93 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                     p.performedBy(), period, now, now, checkedStores, locked);
         }
         refreshDepletion(lot);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Override
+    public void receiveIntoLotsAll(List<LotReceiptPosting> postings) {
+        if (postings.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        InventoryPeriod period = inventoryPeriods.openFor(now.toLocalDate());
+        // A lot that does not exist or did not come from a receipt is refused in list order below, so only the
+        // receipt lots are locked here.
+        Map<Long, Lot> loaded = loadLots(postings.stream().map(LotReceiptPosting::lotId).toList());
+        List<LotReceiptPosting> valid = postings.stream()
+                .filter(p -> loaded.containsKey(p.lotId()) && loaded.get(p.lotId()).getSourceType() == LotSourceType.RECEIPT)
+                .toList();
+        List<Long> productIds = valid.stream().map(p -> loaded.get(p.lotId()).getProductId()).distinct().sorted().toList();
+        // Same lock order as receiveIntoLot: stock_balance, then product, then lot_balance.
+        Map<StoreProduct, StockBalance> balances = lockBalances(valid.stream()
+                .map(p -> new StoreProduct(p.storeId(), loaded.get(p.lotId()).getProductId())).toList(), now);
+        Map<Long, Product> lockedProducts = productIds.isEmpty() ? Map.of() : products.findAllByIdForUpdate(productIds)
+                .stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        if (lockedProducts.size() != productIds.size()) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
+        }
+        Set<Object> managedProductIds = managedIds(Product.class);
+        List<Product> toRefresh = productIds.stream()
+                .filter(managedProductIds::contains)
+                .map(lockedProducts::get)
+                .toList();
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
+        }
+        // Read once, then kept up to date below: the query counts what each earlier posting put into those statuses.
+        Map<Long, Long> valuedQtyByProduct = new HashMap<>();
+        if (!productIds.isEmpty()) {
+            for (Object[] row : stockBalances.sumValuedQuantityByProductIdIn(productIds)) {
+                valuedQtyByProduct.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+            }
+        }
+        Map<LotKey, LotBalance> locked = new HashMap<>();
+        lockDestinationLotBalances(valid.stream()
+                .flatMap(p -> p.quantities().entrySet().stream()
+                        .filter(e -> e.getValue() != null && e.getValue() > 0)
+                        .map(e -> new LotKey(p.lotId(), p.storeId(), e.getKey())))
+                .toList(), locked, now);
+
+        Set<Long> checkedStores = new HashSet<>();
+        Map<Long, Lot> changed = new LinkedHashMap<>();
+        for (LotReceiptPosting p : postings) {
+            Lot lot = loaded.get(p.lotId());
+            if (lot == null) {
+                throw new IllegalArgumentException("unknown lot " + p.lotId());
+            }
+            if (lot.getSourceType() != LotSourceType.RECEIPT) {
+                throw new IllegalArgumentException("lot " + lot.getId() + " did not come from a supplier receipt");
+            }
+            long productId = lot.getProductId();
+            StockBalance balance = balances.get(new StoreProduct(p.storeId(), productId));
+            Product product = lockedProducts.get(productId);
+
+            int available = quantityOf(p.quantities(), StockStatus.AVAILABLE);
+            product.receiveIntoAverage(valuedQtyByProduct.getOrDefault(productId, 0L), available,
+                    lot.getPurchaseUnitPrice());
+
+            BigDecimal unitCost = BigDecimal.valueOf(lot.getPurchaseUnitPrice());
+            long added = 0;
+            for (Map.Entry<StockStatus, Integer> e : p.quantities().entrySet()) {
+                if (e.getValue() == null || e.getValue() == 0) {
+                    continue;
+                }
+                if (e.getValue() < 0) {
+                    throw new IllegalArgumentException("received quantity must be positive");
+                }
+                post(balance, lot, e.getKey(), e.getValue(), unitCost, p.movementType(), p.source(), p.reason(),
+                        p.performedBy(), period, now, now, checkedStores, locked);
+                if (isValued(e.getKey())) {
+                    added += e.getValue();
+                }
+            }
+            if (added != 0) {
+                valuedQtyByProduct.merge(productId, added, Long::sum);
+            }
+            changed.putIfAbsent(lot.getId(), lot);
+        }
+        refreshDepletions(changed.values());
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -489,6 +640,8 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         private final Map<Long, Lot> lots;
         private final Map<PoolKey, List<Held>> open;
         private final Map<LotKey, LotBalance> locked;
+        /** Quantity chosen from each lot so far and not yet posted: lot_balance does not show it until post(). */
+        private final Map<LotKey, Integer> chosen = new HashMap<>();
 
         private Batch(Map<Long, Product> products, Map<Long, Lot> lots, Map<PoolKey, List<Held>> open,
                       Map<LotKey, LotBalance> locked) {
@@ -496,6 +649,11 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             this.lots = lots;
             this.open = open;
             this.locked = locked;
+        }
+
+        /** A chosen quantity has been posted, so lot_balance shows it and it no longer counts as chosen. */
+        private void posted(LotKey key, int quantity) {
+            chosen.merge(key, -quantity, Integer::sum);
         }
 
         private Product product(long productId) {
@@ -666,9 +824,15 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
                     lb = lotBalance(lot.getId(), storeId, status, now);
                     batch.locked.put(key, lb);
                 }
-                int held = lb.getQuantity();
+                int held = lb.getQuantity() - batch.chosen.getOrDefault(key, 0);
                 if (w.quantity() > held) {
                     throw notEnough(product, w.quantity(), held);
+                }
+                batch.chosen.merge(key, w.quantity(), Integer::sum);
+                for (Held open : batch.open.getOrDefault(new PoolKey(storeId, status, product.getId()), List.of())) {
+                    if (open.lot.getId().equals(lot.getId())) {
+                        open.remaining -= w.quantity();
+                    }
                 }
                 picks.add(new Pick(lot, w.quantity()));
                 total += w.quantity();
@@ -688,6 +852,7 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             if (left > 0 && held.remaining > 0) {
                 int take = Math.min(left, held.remaining);
                 held.remaining -= take;
+                batch.chosen.merge(new LotKey(held.lot.getId(), storeId, status), take, Integer::sum);
                 picks.add(new Pick(held.lot, take));
                 left -= take;
             }
@@ -782,16 +947,21 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
             period = periods.findForPostingById(periodId)
                     .orElseThrow(() -> new IllegalArgumentException("unknown period " + periodId));
         }
-        if (!period.isOpen()) {
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
-                    period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));
-        }
+        requireOpen(period);
         // A period's opening adds up the movements before its first day (PeriodTotals), so the time must fall in it.
         LocalDate day = occurredAt.toLocalDate();
         if (day.isBefore(period.getFromDate()) || day.isAfter(period.getToDate())) {
             throw new IllegalArgumentException("occurredAt " + occurredAt + " is outside period " + periodId);
         }
         return new PostingTime(period, occurredAt);
+    }
+
+    /** MSG85 when the period is closed. The one place in this class that formats the month for it. */
+    private static void requireOpen(InventoryPeriod period) {
+        if (!period.isOpen()) {
+            throw new BusinessException(HttpStatus.CONFLICT, "MSG85",
+                    period.getPeriodMonth().format(DateTimeFormatter.ofPattern("MM/yyyy")));
+        }
     }
 
     private StockBalance lockBalance(Long storeId, Long productId, LocalDateTime now) {
@@ -836,6 +1006,48 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
         lot.refreshDepletion((int) lotBalances.sumQuantityOfLot(lot.getId()));
     }
 
+    /** {@link #refreshDepletion} for several lots, with one read of their totals. */
+    private void refreshDepletions(Collection<Lot> changed) {
+        if (changed.isEmpty()) {
+            return;
+        }
+        lotBalances.flush();
+        Map<Long, Integer> totals = new HashMap<>();
+        for (Object[] row : lotBalances.sumQuantityByLotIdIn(changed.stream().map(Lot::getId).toList())) {
+            totals.put(((Number) row[0]).longValue(), ((Number) row[1]).intValue());
+        }
+        for (Lot lot : changed) {
+            lot.refreshDepletion(totals.getOrDefault(lot.getId(), 0));
+        }
+    }
+
+    private Map<Long, Lot> loadLots(Collection<Long> lotIds) {
+        Set<Long> ids = new HashSet<>(lotIds);
+        return ids.isEmpty() ? Map.of() : lots.findAllById(ids).stream()
+                .collect(Collectors.toMap(Lot::getId, Function.identity()));
+    }
+
+    /** Reads the parts without a lock, as {@link #product} does: a part this transaction already holds is read again. */
+    private Map<Long, Product> readProducts(Collection<Long> productIds) {
+        Set<Object> managed = managedIds(Product.class);
+        Map<Long, Product> found = products.findAllById(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Function.identity()));
+        List<Product> toRefresh = found.values().stream().filter(p -> managed.contains(p.getId())).toList();
+        if (!toRefresh.isEmpty()) {
+            em.flush();
+            toRefresh.forEach(em::refresh);
+        }
+        return found;
+    }
+
+    private static Product productOf(Map<Long, Product> parts, Long productId) {
+        Product product = parts.get(productId);
+        if (product == null) {
+            throw new BusinessException(HttpStatus.NOT_FOUND, "MSG57");
+        }
+        return product;
+    }
+
     private Product product(Long productId) {
         return fresh(Product.class, Product::getId, () -> products.findById(productId)
                 .orElseThrow(() -> new BusinessException(HttpStatus.NOT_FOUND, "MSG57")));
@@ -844,6 +1056,12 @@ public class InventoryPostingServiceImpl implements InventoryPostingService {
     private static int quantityOf(Map<StockStatus, Integer> quantities, StockStatus status) {
         Integer qty = quantities.get(status);
         return qty == null ? 0 : qty;
+    }
+
+    /** The statuses that make up the valued quantity of sumValuedQuantityByProductIdIn (BR-74). */
+    private static boolean isValued(StockStatus status) {
+        return status == StockStatus.AVAILABLE || status == StockStatus.AWAITING_INSPECTION
+                || status == StockStatus.IN_TRANSIT;
     }
 
     /** Outgoing and moved stock is valued at the moving average; a part with no average yet uses the lot's price. */

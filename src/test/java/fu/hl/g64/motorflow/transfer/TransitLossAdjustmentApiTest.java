@@ -6,6 +6,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -125,5 +126,43 @@ class TransitLossAdjustmentApiTest extends TransferFlowTestData {
                                 "attachments", List.of(Map.of("storageKey", "motoflow/attachments/" + UUID.randomUUID(),
                                         "fileName", "a.jpg", "contentType", "image/jpeg", "fileSize", 1000))))))
                 .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("MSG279"));
+    }
+
+    @Test
+    void aTransitLossOfTwoPartsTakesEachPartsOldestLotsFirstAcrossSeveralLots() throws Exception {
+        long lotA = lot(source, brake, 2, 100_000, LocalDate.of(2027, 1, 31), "A");
+        long lotB = lot(source, brake, 10, 100_000, LocalDate.of(2027, 6, 30), "B");
+        long lotC = lot(source, chain, 5, 50_000, null, "C");
+        // FEFO dispatch: brake leaves 2 from lot A and 3 from lot B; the destination receives none of the brake and
+        // 1 of the 2 chains, so 5 brake units are in transit over two lots and 1 chain unit in transit.
+        long order = dispatchedOrder(brake, 5, chain, 2);
+        confirm("bmlb", order, inspected(order, brake, 0, 0, chain, 1, 0)).andExpect(status().isOk());
+        assertThat(lotStock(lotA, dest, "IN_TRANSIT")).isEqualTo(2);
+        assertThat(lotStock(lotB, dest, "IN_TRANSIT")).isEqualTo(3);
+        assertThat(lotStock(lotC, dest, "IN_TRANSIT")).isEqualTo(1);
+
+        // The loss names no lot: brake 4 takes lot A first (earliest expiry), then lot B; chain 1 takes lot C.
+        Map<String, Object> brakeLine = Map.of("productId", brake, "stockStatus", "IN_TRANSIT", "quantity", 4);
+        Map<String, Object> chainLine = Map.of("productId", chain, "stockStatus", "IN_TRANSIT", "quantity", 1);
+        Map<String, Object> body = new HashMap<>();
+        body.put("transferOrderId", order);
+        body.put("reason", "Xe chở hàng làm rơi thùng phanh và xích");
+        body.put("lines", List.of(brakeLine, chainLine));
+        body.put("attachments", List.of(uploaded("bien-ban-rot.jpg")));
+        String created = mvc.perform(post(REQUESTS + "/stock-loss").header(HttpHeaders.AUTHORIZATION, signIn("bmlb"))
+                        .contentType(MediaType.APPLICATION_JSON).content(json(body)))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        long request = ((Number) JsonPath.read(created, "$.id")).longValue();
+
+        mvc.perform(post(REQUESTS + "/" + request + "/approve").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
+        assertThat(lotStock(lotA, dest, "IN_TRANSIT")).isZero();
+        assertThat(lotStock(lotB, dest, "IN_TRANSIT")).isEqualTo(1);
+        assertThat(lotStock(lotC, dest, "IN_TRANSIT")).isZero();
+        assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
+        assertThat(stock(dest, chain, "in_transit_qty")).isZero();
+        assertThat(jdbc.queryForList("SELECT lot_id || ':' || quantity_change FROM stock_movement "
+                + "WHERE adjustment_request_id = ? AND stock_status = 'IN_TRANSIT' ORDER BY id", String.class, request))
+                .containsExactly(lotA + ":-2", lotB + ":-2", lotC + ":-1");
     }
 }

@@ -69,6 +69,9 @@ public interface InventoryPostingService {
     /**
      * {@link #move} for every line of one document. Stock rows are locked in store id then product id order before
      * any lot is chosen. The returned lists follow {@code postings}.
+     * <p>Every line's lots are chosen before any is posted. A line sees what earlier lines took out of a lot, but not
+     * what they moved into one: it can take only what the lot and status held before the call, less those earlier
+     * takes.
      */
     List<List<LotQuantity>> moveAll(List<MovePosting> postings);
 
@@ -88,9 +91,24 @@ public interface InventoryPostingService {
     void adjustLot(LotAdjustPosting posting);
 
     /**
+     * {@link #adjustLot} for every line of one document, with the same results as calling it for each posting in list
+     * order. Locks the warehouse stock rows, then the parts, then every lot balance in key order, before any posting.
+     * The postings are then checked and posted in list order, so the first refused posting is the one reported, and a
+     * later posting of the same lot and status sees what the earlier ones left.
+     */
+    void adjustLotsAll(List<LotAdjustPosting> postings);
+
+    /**
      * Stock in on a lot that a supplier receipt created, at the lot's purchase price: excess that Owner accepts or
      * rejects after the GRN was confirmed (UC-45). Like {@link #receiveNewLot}, the AVAILABLE quantity recalculates the
      * moving average (BR-74), and the other statuses keep the goods out of it.
      */
     void receiveIntoLot(LotReceiptPosting posting);
+
+    /**
+     * {@link #receiveIntoLot} for every excess line of one document, with the same results as calling it for each
+     * posting in list order. Locks the warehouse stock rows, then the parts, then the lot balances in key order, before
+     * any posting. Each part's moving average is recalculated in list order, so two lots of one part see each other.
+     */
+    void receiveIntoLotsAll(List<LotReceiptPosting> postings);
 }

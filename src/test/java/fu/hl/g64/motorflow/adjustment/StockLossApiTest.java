@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -295,6 +296,49 @@ class StockLossApiTest extends AdjustmentTestData {
         preview(managerToken, loss(null, line(oil, oilLot1, "AVAILABLE", 1), line(oil, oilLot2, "AVAILABLE", 2),
                 line(filter, null, "AVAILABLE", 3))).andExpect(status().isOk());
         assertThat(queries.prepared()).isEqualTo(forOne);
+    }
+
+    @Test
+    void aRequestMixingFefoLotAndDamagedLinesPostsEachLineAsItWould() throws Exception {
+        // Filter: 2 DAMAGED at the plain lot, so a damaged write-off without a lot can take them.
+        jdbc.update("INSERT INTO lot_balance (lot_id, store_id, stock_status, quantity) VALUES (?, ?, 'DAMAGED', 2)",
+                filterLotPlain, store);
+        jdbc.update("UPDATE stock_balance SET damaged_qty = damaged_qty + 2 WHERE store_id = ? AND product_id = ?",
+                store, filter);
+        // Four more parts with one lot each, so the request has seven lines.
+        List<Map<String, Object>> lines = new ArrayList<>(List.of(line(filter, null, "AVAILABLE", 3),
+                line(filter, null, "DAMAGED", 1), line(oil, oilLot1, "AVAILABLE", 2)));
+        List<Long> extras = new ArrayList<>();
+        for (int i = 1; i <= 4; i++) {
+            long extra = part("EXTRA-" + i, "Phụ tùng phụ " + i, 40_000);
+            lot(store, extra, LocalDate.of(2026, 10, 1), null, 5, 40_000);
+            extras.add(extra);
+            lines.add(line(extra, null, "AVAILABLE", 2));
+        }
+        long id = submitted(managerToken, loss(null, lines.toArray(Map[]::new)));
+
+        queries.reset();
+        act(ownerToken, id, "approve").andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
+        // Statements of the approval, posted in three runs: 93 executed / 84 round trips measured (142 / 142 before the
+        // lines were batched), with SqlBaselineTest's 10% headroom.
+        assertThat(queries.executed()).isLessThanOrEqualTo(103);
+        assertThat(queries.roundTrips()).isLessThanOrEqualTo(93);
+
+        assertThat(available(oil)).isEqualTo(10);
+        assertThat(lotQty(oilLot1)).isEqualTo(3);
+        assertThat(available(filter)).isEqualTo(6);
+        assertThat(lotQty(filterLotA)).isEqualTo(1);
+        assertThat(lotQty(filterLotB)).isEqualTo(3);
+        assertThat(lotQty(filterLotPlain)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT damaged_qty FROM stock_balance WHERE store_id = ? AND product_id = ?",
+                Integer.class, store, filter)).isEqualTo(1);
+        for (long extra : extras) {
+            assertThat(jdbc.queryForObject("SELECT available_qty FROM stock_balance WHERE store_id = ? AND product_id = ?",
+                    Integer.class, store, extra)).isEqualTo(3);
+        }
+        assertThat(movements(id)).containsExactly("ADJUSTMENT,-2,-170000", "ADJUSTMENT,-3,-150000",
+                "ADJUSTMENT,-1,-50000", "ADJUSTMENT,-2,-80000", "ADJUSTMENT,-2,-80000", "ADJUSTMENT,-2,-80000",
+                "ADJUSTMENT,-2,-80000");
     }
 
     /** "type,quantity,value" of the movements the request posted. */

@@ -22,7 +22,6 @@ import fu.hl.g64.motorflow.inventory.repository.LotRepository;
 import fu.hl.g64.motorflow.inventory.repository.StockBalanceRepository;
 import fu.hl.g64.motorflow.inventory.service.InventoryPostingService;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository;
-import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository.TransitLot;
 import fu.hl.g64.motorflow.transfer.repository.TransferOrderRepository.TransitLotOfPart;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -179,9 +178,12 @@ public class AdjustmentStock {
     }
 
     /**
-     * UC-84 step 7: posts every stock line of the request, part by part in id order (the posting service's lock
-     * order). A transit loss takes only the order's own goods in transit (BR-75); a line without a lot takes FEFO,
-     * then FIFO; an increase goes back into its lot.
+     * UC-84 step 7: posts every stock line of the request, in the sorted order (product, status, lot). The lines are
+     * posted in runs of one kind: a run of takings (a transit loss or a FEFO decrease, {@code takeOutAll}) or a run of
+     * lot lines ({@code adjustLotsAll}). A run is posted before the next one starts, so the stock rows are locked in
+     * part order, the posting service's lock order, and each run posts in list order. A transit loss takes only the
+     * order's own goods in transit (BR-75); a line without a lot takes FEFO, then FIFO; an increase goes back into its
+     * lot.
      */
     public void apply(AdjustmentRequest request, List<AdjustmentStockLine> lines, long ownerId) {
         SourceRef source = SourceRef.adjustmentRequest(request.getId());
@@ -190,43 +192,88 @@ public class AdjustmentStock {
                         .thenComparing(AdjustmentStockLine::getStockStatus)
                         .thenComparing(l -> l.getLotId() == null ? 0L : l.getLotId()))
                 .toList();
+        TransitDraw transit = new TransitDraw(request.getTransferOrderId());
+        List<OutPosting> outs = new ArrayList<>();
+        List<LotAdjustPosting> adjusts = new ArrayList<>();
         for (AdjustmentStockLine line : ordered) {
             int change = line.getQuantityChange();
-            if (request.getTransferOrderId() != null && line.getStockStatus() == StockStatus.IN_TRANSIT) {
-                posting.takeOut(new OutPosting(line.getStoreId(), line.getProductId(), StockStatus.IN_TRANSIT,
-                        -change, transitLots(request.getTransferOrderId(), line.getStoreId(), line.getProductId(),
-                        -change), MovementType.ADJUSTMENT, source, ownerId, request.getReason()));
-            } else if (line.getLotId() != null) {
-                posting.adjustLot(new LotAdjustPosting(line.getStoreId(), line.getLotId(), line.getStockStatus(),
-                        change, MovementType.ADJUSTMENT, source, ownerId, request.getReason()));
-            } else if (change < 0) {
-                posting.takeOut(new OutPosting(line.getStoreId(), line.getProductId(), line.getStockStatus(), -change,
-                        null, MovementType.ADJUSTMENT, source, ownerId, request.getReason()));
-            } else {
+            boolean inTransit = request.getTransferOrderId() != null && line.getStockStatus() == StockStatus.IN_TRANSIT;
+            if (!inTransit && line.getLotId() == null && change >= 0) {
                 throw new IllegalStateException("an increase needs a lot: line " + line.getId());
             }
+            if (inTransit || line.getLotId() == null) {
+                if (!adjusts.isEmpty()) {
+                    posting.adjustLotsAll(adjusts);
+                    adjusts.clear();
+                }
+                outs.add(new OutPosting(line.getStoreId(), line.getProductId(), line.getStockStatus(), -change,
+                        inTransit ? transit.take(line.getStoreId(), line.getProductId(), -change) : null,
+                        MovementType.ADJUSTMENT, source, ownerId, request.getReason()));
+            } else {
+                if (!outs.isEmpty()) {
+                    posting.takeOutAll(outs);
+                    outs.clear();
+                }
+                adjusts.add(new LotAdjustPosting(line.getStoreId(), line.getLotId(), line.getStockStatus(), change,
+                        MovementType.ADJUSTMENT, source, ownerId, request.getReason()));
+            }
+        }
+        if (!outs.isEmpty()) {
+            posting.takeOutAll(outs);
+        }
+        if (!adjusts.isEmpty()) {
+            posting.adjustLotsAll(adjusts);
         }
     }
 
     // ------------------------------------------------------------------------------------------------------------
 
-    /** The order's goods of the part in transit, FEFO, enough for {@code quantity} (MSG84 when they are not). */
-    private List<LotQuantity> transitLots(long orderId, long storeId, long productId, int quantity) {
-        List<LotQuantity> taken = new ArrayList<>();
-        int left = quantity;
-        for (TransitLot lot : transferOrders.findTransitLots(orderId, storeId, productId)) {
-            if (left == 0) {
-                break;
+    /**
+     * The order's goods in transit, read once per warehouse with the 2-argument query, and drawn down in memory as the
+     * transit lines are chosen. A lot already drawn by an earlier line of the request drops out once it is used up,
+     * exactly as the per-line query would after that line posted (the posted movement counts against the order).
+     */
+    private final class TransitDraw {
+
+        private final Long orderId;
+        private final Map<Long, Map<Long, List<long[]>>> byStore = new HashMap<>();
+
+        TransitDraw(Long orderId) {
+            this.orderId = orderId;
+        }
+
+        /** The order's goods of the part in transit, FEFO, enough for {@code quantity} (MSG84 when they are not). */
+        List<LotQuantity> take(long storeId, long productId, int quantity) {
+            List<LotQuantity> taken = new ArrayList<>();
+            int left = quantity;
+            for (long[] lot : byStore.computeIfAbsent(storeId, this::load).getOrDefault(productId, List.of())) {
+                if (left == 0) {
+                    break;
+                }
+                if (lot[1] <= 0) {
+                    continue;
+                }
+                int take = (int) Math.min(left, lot[1]);
+                taken.add(new LotQuantity(lot[0], take));
+                lot[1] -= take;
+                left -= take;
             }
-            int take = (int) Math.min(left, lot.getQuantity());
-            taken.add(new LotQuantity(lot.getLotId(), take));
-            left -= take;
+            if (left > 0) {
+                Product part = products.findById(productId).orElseThrow();
+                throw new BusinessException(HttpStatus.CONFLICT, "MSG84", part.getSku(), quantity, quantity - left);
+            }
+            return taken;
         }
-        if (left > 0) {
-            Product part = products.findById(productId).orElseThrow();
-            throw new BusinessException(HttpStatus.CONFLICT, "MSG84", part.getSku(), quantity, quantity - left);
+
+        /** {lotId, remaining quantity} of every part of the order in transit at the warehouse, in FEFO order. */
+        private Map<Long, List<long[]>> load(long storeId) {
+            Map<Long, List<long[]>> parts = new HashMap<>();
+            for (TransitLotOfPart t : transferOrders.findTransitLots(orderId, storeId)) {
+                parts.computeIfAbsent(t.getProductId(), k -> new ArrayList<>())
+                        .add(new long[] {t.getLotId(), t.getQuantity()});
+            }
+            return parts;
         }
-        return taken;
     }
 
     /**

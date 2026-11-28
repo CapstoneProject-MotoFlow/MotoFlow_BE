@@ -93,4 +93,40 @@ class HeldGoodsWriteOffApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.code").value("MSG257"));
         writeOff(managerToken, grn, "DAMAGED", 2).andExpect(status().isCreated());
     }
+
+    @Test
+    void writtenOffHeldGoodsOfTwoPartsSettleBothCases() throws Exception {
+        long grn = receive("PX-003");
+        assign(grn, staff);
+        record(staffToken, grn, findings(counted(lineOf(grn, pad), 10, 10, 0, 2),
+                counted(lineOf(grn, oil), 24, 24, 0, 3))).andExpect(status().isOk());
+        confirm(managerToken, grn).andExpect(status().isOk());
+        long padCase = caseOf(grn, pad);
+        long oilCase = caseOf(grn, oil);
+        // GVHD 24/11: the store keeps the damaged goods, nothing replaced: the Owner's direction (3).
+        handle(ownerToken, grn, List.of(direction(handling(padCase, 0, null), "ACCEPT_NO_REPLACEMENT"),
+                direction(handling(oilCase, 0, null), "ACCEPT_NO_REPLACEMENT"))).andExpect(status().isOk());
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("goodsReceiptNoteId", grn);
+        body.put("reason", "Hàng hỏng, nhà cung cấp không nhận lại");
+        body.put("lines", List.of(Map.of("productId", pad, "stockStatus", "DAMAGED", "quantity", 2),
+                Map.of("productId", oil, "stockStatus", "DAMAGED", "quantity", 3)));
+        body.put("attachments", List.of(uploaded("hang-hong.jpg")));
+        String created = mvc.perform(post("/api/v1/adjustment-requests/stock-loss")
+                        .header(HttpHeaders.AUTHORIZATION, managerToken)
+                        .contentType(MediaType.APPLICATION_JSON).content(json(body)))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        long request = ((Number) JsonPath.read(created, "$.id")).longValue();
+
+        mvc.perform(post("/api/v1/adjustment-requests/" + request + "/approve")
+                        .header(HttpHeaders.AUTHORIZATION, ownerToken))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPLIED"));
+        assertThat(stock(giaLam, pad, "DAMAGED")).isZero();
+        assertThat(stock(giaLam, oil, "DAMAGED")).isZero();
+        assertStockAgrees(giaLam, pad);
+        assertStockAgrees(giaLam, oil);
+        discrepancy(managerToken, padCase).andExpect(jsonPath("$.status").value("CLOSED"));
+        discrepancy(managerToken, oilCase).andExpect(jsonPath("$.status").value("CLOSED"));
+    }
 }

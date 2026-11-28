@@ -584,6 +584,86 @@ class GoodsReceiptApiTest extends GoodsReceiptTestData {
                 .andExpect(jsonPath("$.lines[*].acceptedExcessQty", contains(2, 1)));
     }
 
+    /**
+     * Two parts in one GRN: pad's line still has 10 to bring in (a lot line with excess), oil's line is already full
+     * (a no-lot line with excess). Both excess lines are accepted in one decision, so BR-74 runs over each part's
+     * posting with the average the earlier receipts left.
+     */
+    @Test
+    void acceptedExcessOfALotLineAndOfANoLotLineGivesTheSameAverageAndLotCosts() throws Exception {
+        // Earlier stock from another PO: 10 pads at 100 000 and 10 oil at 80 000 (averages 100 000 and 80 000).
+        long earlier = created(order(honda, giaLam, TODAY, null, line(pad, 10, 100_000), line(oil, 10, 80_000)));
+        String old = createReceipt(managerToken, earlier, deliveryNote("CU-AB"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        long oldGrn = ((Number) JsonPath.read(old, "$.id")).longValue();
+        assign(oldGrn, staff);
+        List<Long> oldLines = linesOf(oldGrn);
+        record(staffToken, oldGrn, findings(counted(oldLines.get(0), 10, 10, 0, 0),
+                counted(oldLines.get(1), 10, 10, 0, 0))).andExpect(status().isOk());
+        confirm(managerToken, oldGrn).andExpect(status().isOk());
+
+        // The order: 10 pads at 120 000 and 2 oil at 85 000. Two GRNs are open before either is confirmed (as in
+        // excessOfALine...): the first brings no pad and 2 oil, the second 12 pads and 3 oil. The second GRN's oil
+        // line finds the oil already in stock, so its 3 are excess with no lot.
+        long po = created(order(honda, giaLam, TODAY, null, line(pad, 10, 120_000), line(oil, 2, 85_000)));
+        long firstGrn = receiptOf(po, "PX-A1");
+        long grn = receiptOf(po, "PX-A2");
+        List<Long> firstLines = linesOf(firstGrn);
+        List<Long> lines = linesOf(grn);
+        assign(firstGrn, staff);
+        record(staffToken, firstGrn, findings(counted(firstLines.get(0), 0, 0, 0, 0),
+                counted(firstLines.get(1), 2, 2, 0, 0))).andExpect(status().isOk());
+        confirm(managerToken, firstGrn).andExpect(status().isOk());
+        // Oil: (10 x 80 000 + 2 x 85 000) / 12 = 80 833.3333.
+        assertThat(averageCost(oil)).isEqualByComparingTo("80833.3333");
+
+        assign(grn, staff2);
+        record(staff2Token, grn, findings(counted(lines.get(0), 12, 12, 0, 0),
+                counted(lines.get(1), 3, 3, 0, 0))).andExpect(status().isOk());
+        confirm(managerToken, grn)
+                .andExpect(jsonPath("$.lines[*].toStockQty", contains(10, 0)))
+                .andExpect(jsonPath("$.lines[*].excessQty", contains(2, 3)));
+        // Pad: (10 x 100 000 + 10 x 120 000) / 20. Oil's excess is not in stock yet.
+        assertThat(averageCost(pad)).isEqualByComparingTo("110000");
+        assertThat(averageCost(oil)).isEqualByComparingTo("80833.3333");
+
+        decide(ownerToken, grn, lines.get(0), "ACCEPTED", lines.get(1), "ACCEPTED")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lines[*].excessDecision", contains("ACCEPTED", "ACCEPTED")));
+
+        // Pad: the excess joins its lot (BR-73) at 120 000. Oil: the excess gets a lot of its own at 85 000.
+        assertThat(stock(giaLam, pad, "AVAILABLE")).isEqualTo(22);
+        assertThat(stock(giaLam, oil, "AVAILABLE")).isEqualTo(15);
+        assertThat(jdbc.queryForObject("SELECT b.quantity FROM lot_balance b JOIN lot l ON l.id = b.lot_id "
+                + "WHERE l.goods_receipt_note_line_id = ? AND b.stock_status = 'AVAILABLE'", Integer.class,
+                lines.get(0))).isEqualTo(12);
+        assertThat(jdbc.queryForObject("SELECT purchase_unit_price FROM lot WHERE goods_receipt_note_line_id = ?",
+                Long.class, lines.get(0))).isEqualTo(120_000L);
+        assertThat(jdbc.queryForObject("SELECT purchase_unit_price FROM lot WHERE goods_receipt_note_line_id = ?",
+                Long.class, lines.get(1))).isEqualTo(85_000L);
+        assertThat(jdbc.queryForObject("SELECT b.quantity FROM lot_balance b JOIN lot l ON l.id = b.lot_id "
+                + "WHERE l.goods_receipt_note_line_id = ? AND b.stock_status = 'AVAILABLE'", Integer.class,
+                lines.get(1))).isEqualTo(3);
+        // BR-74: (20 x 110 000 + 2 x 120 000) / 22 = 110 909.0909; (12 x 80 833.3333 + 3 x 85 000) / 15 = 81 666.6666.
+        assertThat(averageCost(pad)).isEqualByComparingTo("110909.0909");
+        assertThat(averageCost(oil)).isEqualByComparingTo("81666.6666");
+        assertThat(movementsOf(pad)).endsWith(List.of("EXCESS_ACCEPTED", "AVAILABLE", 2));
+        assertThat(movementsOf(oil)).endsWith(List.of("EXCESS_ACCEPTED", "AVAILABLE", 3));
+        assertStockAgrees(giaLam, pad);
+        assertStockAgrees(giaLam, oil);
+    }
+
+    private long receiptOf(long purchaseOrder, String documentNo) throws Exception {
+        String body = createReceipt(managerToken, purchaseOrder, deliveryNote(documentNo))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        return ((Number) JsonPath.read(body, "$.id")).longValue();
+    }
+
+    private List<Long> linesOf(long receipt) {
+        return jdbc.queryForList("SELECT id FROM goods_receipt_note_line WHERE goods_receipt_note_id = ? ORDER BY id",
+                Long.class, receipt);
+    }
+
     @Test
     void excessOfALineWithNothingExpectedGetsALotWhenOwnerAcceptsIt() throws Exception {
         long first = receive("PX-001");

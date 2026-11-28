@@ -220,9 +220,12 @@ public class TransferDiscrepancyServiceImpl implements TransferDiscrepancyServic
         // stock. One plus per lot, as a movement is unique per type, source, lot and status.
         Map<Long, Integer> intoAvailable = new java.util.TreeMap<>();
         int inTransit = 0;
+        // Transit decreases first, then the increases: one batch. findDamagedLots reads ADJUSTMENT movements only,
+        // so the decreases posted here do not change what it returns.
+        List<LotAdjustPosting> postings = new ArrayList<>();
         for (var lot : orders.findTransitLots(transferOrderId, order.getDestStoreId(), productId)) {
             int quantity = Math.toIntExact(lot.getQuantity());
-            posting.adjustLot(new LotAdjustPosting(order.getDestStoreId(), lot.getLotId(), StockStatus.IN_TRANSIT,
+            postings.add(new LotAdjustPosting(order.getDestStoreId(), lot.getLotId(), StockStatus.IN_TRANSIT,
                     -quantity, MovementType.TRANSFER_RECEIPT_CORRECTED, source, user.id(), note));
             intoAvailable.merge(lot.getLotId(), quantity, Integer::sum);
             inTransit += quantity;
@@ -235,9 +238,10 @@ public class TransferDiscrepancyServiceImpl implements TransferDiscrepancyServic
                 damaged += quantity;
             }
         }
-        intoAvailable.forEach((lotId, quantity) -> posting.adjustLot(new LotAdjustPosting(order.getDestStoreId(),
+        intoAvailable.forEach((lotId, quantity) -> postings.add(new LotAdjustPosting(order.getDestStoreId(),
                 lotId, StockStatus.AVAILABLE, quantity, MovementType.TRANSFER_RECEIPT_CORRECTED, source, user.id(),
                 note)));
+        posting.adjustLotsAll(postings);
         // (c) excess, (d) phiếu nhận hàng giao sai awaiting the source, (e) pending decisions: void.
         int excess = 0;
         for (GoodsReceiptNoteLine item : received) {
@@ -258,7 +262,8 @@ public class TransferDiscrepancyServiceImpl implements TransferDiscrepancyServic
                 voided.add(event);
             }
         }
-        events.deleteAll(voided);
+        // No cascade, listener or soft delete on the event, and no later change to a voided event: a batch delete is safe.
+        events.deleteAllInBatch(voided);
         found.close(ClosureType.CLOSED_BY_AGREEMENT, note + ": " + reason, user.id(), now);
 
         Map<String, Object> data = new LinkedHashMap<>();
