@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * Users, a category tree, three parts and their supplier receipts, shared by the pricing API tests. The clock starts
  * on 13/10/2026 at 08:00 Vietnam time.
  */
-abstract class PricingTestData extends ApiTestUsers {
+public abstract class PricingTestData extends ApiTestUsers {
 
     protected static final LocalDate TODAY = LocalDate.of(2026, 10, 13);
 

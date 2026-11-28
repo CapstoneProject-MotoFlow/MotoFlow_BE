@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -83,6 +84,27 @@ class RetailPriceApiTest extends PricingTestData {
                 .andExpect(jsonPath("$.sku").value("MA-PHANH-01"))
                 .andExpect(jsonPath("$.suggestedPrice").value(161_000))
                 .andExpect(jsonPath("$.purchaseBasis").doesNotExist());
+    }
+
+    @Test
+    void aBranchManagerWithoutRetailPricePermissionSeesTheCategoryButNoSuggestion() throws Exception {
+        priceList(managerToken, "?q=phanh")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].categoryName", contains("Má phanh")))
+                .andExpect(jsonPath("$.items[0].suggestedPrice").doesNotExist());
+    }
+
+    @Test
+    void aPartInASubCategoryTakesItsParentsRateInTheDifferingList() throws Exception {
+        setPrice(ownerToken, pad, 150_000, TODAY, null, false).andExpect(status().isOk());
+
+        priceList(ownerToken, "?suggestionDiffers=true")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].sku", hasItem("MA-PHANH-01")))
+                .andExpect(jsonPath("$.items[?(@.sku == 'MA-PHANH-01')].categoryName", contains("Má phanh")))
+                // The sub-category has no rate of its own: 123,456 x 1.30 from the parent "Phanh", rounded up to 1,000.
+                .andExpect(jsonPath("$.items[?(@.sku == 'MA-PHANH-01')].purchaseBasis.markupRate", contains(30.0)))
+                .andExpect(jsonPath("$.items[?(@.sku == 'MA-PHANH-01')].suggestedPrice", contains(161_000)));
     }
 
     @Test

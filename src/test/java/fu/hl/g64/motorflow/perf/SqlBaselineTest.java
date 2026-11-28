@@ -4,6 +4,7 @@ import com.jayway.jsonpath.JsonPath;
 import fu.hl.g64.motorflow.account.entity.enums.Role;
 import fu.hl.g64.motorflow.inventory.entity.enums.StockCountStatus;
 import fu.hl.g64.motorflow.operation.entity.enums.WarehouseTaskStatus;
+import fu.hl.g64.motorflow.pricing.PricingTestData;
 import fu.hl.g64.motorflow.receiving.GoodsReceiptTestData;
 import fu.hl.g64.motorflow.sales.SalesOrderTestData;
 import fu.hl.g64.motorflow.stockcount.StockCountTestData;
@@ -495,6 +496,26 @@ class SqlBaselineTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalItems").value(3));
             assertBudget("unmet-demand-owner-3-stores", queries, 5, 5);
+        }
+    }
+
+    @Nested
+    class RetailPriceFlows extends PricingTestData {
+
+        @Autowired
+        private QueryCounter queries;
+
+        @Test
+        void retailPricesDiffering() throws Exception {
+            setMarkup(ownerToken, TODAY, "UP_1000", Map.of(brakes, 30, oils, 20), Map.of()).andExpect(status().isOk());
+            setPrice(ownerToken, pad, 150_000, TODAY, null, false).andExpect(status().isOk());
+            setPrice(ownerToken, oil, 100_000, TODAY, null, false).andExpect(status().isOk());
+
+            queries.reset();
+            priceList(ownerToken, "?suggestionDiffers=true")
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(2));
+            assertBudget("retail-prices-differing", queries, 7, 7);
         }
     }
 }
