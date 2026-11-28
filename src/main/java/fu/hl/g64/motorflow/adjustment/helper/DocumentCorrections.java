@@ -276,6 +276,8 @@ public class DocumentCorrections {
         List<Change> changes = new ArrayList<>();
         List<Map<String, Object>> before = new ArrayList<>();
         List<Map<String, Object>> after = new ArrayList<>();
+        // The sale's issues by part, read once and only if a line goes back into lots (each part is one line).
+        Map<Long, List<StockMovement>> issues = null;
         long money = 0;
         int position = 0;
         for (Map.Entry<Long, Integer> e : corrected.entrySet()) {
@@ -296,7 +298,13 @@ public class DocumentCorrections {
             if (diff > 0) {
                 changes.add(new Change(line.getProductId(), null, StockStatus.AVAILABLE, -diff));
             } else {
-                changes.addAll(backIntoSoldLots(order.getId(), line.getProductId(), -diff, earlier));
+                if (issues == null) {
+                    issues = movements.findSaleIssues(order.getId()).stream()
+                            .collect(Collectors.groupingBy(StockMovement::getProductId, LinkedHashMap::new,
+                                    Collectors.toList()));
+                }
+                changes.addAll(backIntoSoldLots(line.getProductId(), -diff, earlier,
+                        issues.getOrDefault(line.getProductId(), List.of())));
             }
             Product part = parts.get(line.getProductId());
             before.add(lineValue(line.getId(), part, delivered, line.getActualUnitPrice()));
@@ -312,11 +320,12 @@ public class DocumentCorrections {
     }
 
     /** Units that were not really delivered go back into the lots the sale took them from, latest first. */
-    private List<Change> backIntoSoldLots(long orderId, long productId, int quantity, List<Object[]> earlier) {
+    private List<Change> backIntoSoldLots(long productId, int quantity, List<Object[]> earlier,
+                                          List<StockMovement> saleIssues) {
         // Still out of each lot for this sale: what it issued less what earlier corrections put back (plus what they
         // took out), latest issue first.
         Map<Long, Integer> out = new LinkedHashMap<>();
-        for (StockMovement issue : movements.findSaleIssues(orderId, productId)) {
+        for (StockMovement issue : saleIssues) {
             out.merge(issue.getLotId(), -issue.getQuantityChange(), Integer::sum);
         }
         for (Object[] row : earlier) {

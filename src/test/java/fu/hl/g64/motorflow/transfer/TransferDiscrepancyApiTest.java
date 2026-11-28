@@ -302,6 +302,102 @@ class TransferDiscrepancyApiTest extends TransferFlowTestData {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
     }
 
+    /** C.2: a part's pending late-delivery decisions are consumed oldest first; one partial arrival splits one. */
+    @Test
+    void aLateArrivalConsumesThePartsPendingDecisionsOldestFirst() throws Exception {
+        long order = shortOrder(4, 1);
+        decide("bmlb", order, brake, "LATE_DELIVERY", 1, null).andExpect(status().isOk());
+        decide("owner", order, brake, "LATE_DELIVERY", 2, null).andExpect(status().isOk());
+        long late = inspected(order, brake, 2, 0);
+
+        confirm("bmlb", order, late).andExpect(status().isOk());
+
+        List<Map<String, Object>> rows = jdbc.queryForList("SELECT e.quantity, e.goods_receipt_note_id, "
+                + "e.confirmed_at IS NOT NULL AS done FROM discrepancy_resolution_event e "
+                + "JOIN discrepancy_case c ON c.id = e.discrepancy_case_id "
+                + "WHERE c.transfer_order_id = ? AND c.product_id = ? ORDER BY e.id", order, brake);
+        assertThat(rows).hasSize(3);
+        // The oldest decision is settled whole by the arrival; the younger one is reduced to what is still pending;
+        // the record of the part the arrival split off is confirmed.
+        assertThat(rows.get(0)).containsEntry("quantity", 1).containsEntry("goods_receipt_note_id", late)
+                .containsEntry("done", true);
+        assertThat(rows.get(1)).containsEntry("quantity", 1).containsEntry("done", false);
+        assertThat(rows.get(1).get("goods_receipt_note_id")).isNull();
+        assertThat(rows.get(2)).containsEntry("quantity", 1).containsEntry("goods_receipt_note_id", late)
+                .containsEntry("done", true);
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(3);
+        assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
+    }
+
+    /**
+     * C.2: one late receipt covers two parts with pending decisions. Each part's decisions are consumed only by its own
+     * line: brake's first decision settles whole and its second is split, chain's two settle whole.
+     */
+    @Test
+    void aLateReceiptSettlesEachPartsOwnDecisions() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 10, 50_000, null, "B");
+        long order = dispatchedOrder(brake, 4, chain, 4);
+        confirm("bmlb", order, inspected(order, brake, 1, 0, chain, 1, 0)).andExpect(status().isOk());
+        decide("bmlb", order, brake, "LATE_DELIVERY", 1, null).andExpect(status().isOk());
+        decide("bmlb", order, brake, "LATE_DELIVERY", 2, null).andExpect(status().isOk());
+        decide("bmlb", order, chain, "LATE_DELIVERY", 1, null).andExpect(status().isOk());
+        decide("bmlb", order, chain, "LATE_DELIVERY", 2, null).andExpect(status().isOk());
+
+        long late = inspected(order, brake, 2, 0, chain, 3, 0);
+        confirm("bmlb", order, late).andExpect(status().isOk());
+
+        assertThat(eventsOfPart(order, brake)).containsExactly(
+                Map.of("quantity", 1, "goods_receipt_note_id", late, "done", true),
+                Map.of("quantity", 1, "done", false),
+                Map.of("quantity", 1, "goods_receipt_note_id", late, "done", true));
+        assertThat(eventsOfPart(order, chain)).containsExactly(
+                Map.of("quantity", 1, "goods_receipt_note_id", late, "done", true),
+                Map.of("quantity", 2, "goods_receipt_note_id", late, "done", true));
+        assertThat(stock(dest, brake, "available_qty")).isEqualTo(3);
+        assertThat(stock(dest, brake, "in_transit_qty")).isEqualTo(1);
+        assertThat(stock(dest, chain, "available_qty")).isEqualTo(4);
+        assertThat(stock(dest, chain, "in_transit_qty")).isZero();
+    }
+
+    /** The events of one part, oldest first, as {quantity, goods_receipt_note_id, done}; a null receipt is left out. */
+    private List<Map<String, Object>> eventsOfPart(long order, long product) {
+        return jdbc.queryForList("SELECT e.quantity, e.goods_receipt_note_id, e.confirmed_at IS NOT NULL AS done "
+                + "FROM discrepancy_resolution_event e JOIN discrepancy_case c ON c.id = e.discrepancy_case_id "
+                + "WHERE c.transfer_order_id = ? AND c.product_id = ? ORDER BY e.id", order, product).stream()
+                .map(row -> {
+                    Map<String, Object> view = new java.util.HashMap<>();
+                    view.put("quantity", row.get("quantity"));
+                    view.put("done", row.get("done"));
+                    if (row.get("goods_receipt_note_id") != null) {
+                        view.put("goods_receipt_note_id", row.get("goods_receipt_note_id"));
+                    }
+                    return view;
+                }).toList();
+    }
+
+    /** C.1: closing returns each part's pending NO_REPLACEMENT decision once, on its own lots. */
+    @Test
+    void closingReturnsEachPartsNoReplacementOnce() throws Exception {
+        lot(source, brake, 10, 100_000, null, "A");
+        lot(source, chain, 10, 50_000, null, "B");
+        long order = dispatchedOrder(brake, 4, chain, 4);
+        confirm("bmlb", order, inspected(order, brake, 1, 0, chain, 1, 0)).andExpect(status().isOk());
+        decide("bmlb", order, brake, "NO_REPLACEMENT", 3, null).andExpect(status().isOk());
+        decide("bmlb", order, chain, "NO_REPLACEMENT", 3, null).andExpect(status().isOk());
+
+        mvc.perform(post(ORDERS + "/" + order + "/close").header(HttpHeaders.AUTHORIZATION, signIn("owner")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CLOSED"));
+
+        assertThat(stock(source, brake, "available_qty")).isEqualTo(9);
+        assertThat(stock(source, chain, "available_qty")).isEqualTo(9);
+        assertThat(stock(dest, brake, "in_transit_qty")).isZero();
+        assertThat(stock(dest, chain, "in_transit_qty")).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM discrepancy_resolution_event e JOIN discrepancy_case c "
+                + "ON c.id = e.discrepancy_case_id WHERE c.transfer_order_id = ? AND e.confirmed_at IS NULL",
+                Long.class, order)).isZero();
+    }
+
     /** Dispatched {@code sent} brakes, {@code received} confirmed at the destination: the rest is missing. */
     private long shortOrder(int sent, int received) throws Exception {
         lot(source, brake, 10, 100_000, null, "A");

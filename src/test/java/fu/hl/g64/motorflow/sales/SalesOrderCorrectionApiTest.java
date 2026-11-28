@@ -182,6 +182,41 @@ class SalesOrderCorrectionApiTest extends SalesOrderTestData {
         detail(managerToken, order).andExpect(jsonPath("$.money.receivable.remainingAmount").value(200_000));
     }
 
+    /**
+     * C.3: two parts of one sale, each issued from its own lot, corrected in one request. Each part goes back into its
+     * own lot, and a second correction starts from the first.
+     */
+    @Test
+    void aCorrectionOfTwoPartsPutsEachBackIntoItsOwnLot() throws Exception {
+        long order = createOrder(pad, 2, oil, 2);
+        assign(managerToken, "PICKING", order, staff).andExpect(status().isOk());
+        pick(staffToken, order, 1, pad, 2, null, oil, 2, null).andExpect(status().isOk());
+        confirm(managerToken, order, 1, pad, 2, oil, 2).andExpect(status().isOk());
+        send(managerToken, "/api/v1/sales-orders/" + order + "/payments", Map.of("amount", 370_000,
+                "paymentMethod", "BANK_TRANSFER", "transactionReference", "FT" + System.nanoTime(),
+                "verified", true, "expectedPayable", moneyNow(order, "payableNow")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.completed").value(true));
+        long padLine = lineOf(order, pad);
+        long oilLine = lineOf(order, oil);
+        long padLot = issuedLot(order, pad);
+        long oilLot = issuedLot(order, oil);
+        int padBefore = lotAvailable(padLot);
+        int oilBefore = lotAvailable(oilLot);
+
+        approve(submitted(managerToken, correction(order, padLine, 1, oilLine, 1))).andExpect(status().isOk());
+        assertThat(lotAvailable(padLot)).isEqualTo(padBefore + 1);
+        assertThat(lotAvailable(oilLot)).isEqualTo(oilBefore + 1);
+
+        approve(submitted(managerToken, correction(order, oilLine, 0))).andExpect(status().isOk());
+        assertThat(lotAvailable(oilLot)).isEqualTo(oilBefore + 2);
+        assertThat(lotAvailable(padLot)).isEqualTo(padBefore + 1);
+    }
+
+    private long issuedLot(long order, long product) {
+        return jdbc.queryForObject("SELECT lot_id FROM stock_movement WHERE sales_order_id = ? AND product_id = ? "
+                + "AND movement_type = 'SALE_ISSUE' ORDER BY id LIMIT 1", Long.class, order, product);
+    }
+
     @Test
     void aSecondCorrectionOfTheSameLineStartsFromTheFirstOne() throws Exception {
         long order = paidOrder();

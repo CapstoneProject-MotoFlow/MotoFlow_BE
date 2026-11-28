@@ -538,8 +538,12 @@ public class TransferOrderServiceImpl implements TransferOrderService {
                 key -> new ArrayList<>()).add(new LotQuantity(lot.getLotId(), Math.toIntExact(lot.getQuantity()))));
         List<MovePosting> back = new ArrayList<>();
         List<Map<String, Object>> returned = new ArrayList<>();
-        for (DiscrepancyResolutionEvent decision : events.findPendingNoReplacementForUpdate(id)) {
-            long productId = cases.findById(decision.getDiscrepancyCaseId()).orElseThrow().getProductId();
+        List<DiscrepancyResolutionEvent> decisions = events.findPendingNoReplacementForUpdate(id);
+        Map<Long, Long> productOfCase = cases.findAllById(decisions.stream()
+                .map(DiscrepancyResolutionEvent::getDiscrepancyCaseId).distinct().toList()).stream()
+                .collect(Collectors.toMap(DiscrepancyCase::getId, DiscrepancyCase::getProductId));
+        for (DiscrepancyResolutionEvent decision : decisions) {
+            long productId = productOfCase.get(decision.getDiscrepancyCaseId());
             List<LotQuantity> lots = take(transit.getOrDefault(productId, new ArrayList<>()), decision.getQuantity());
             if (lots.stream().mapToInt(LotQuantity::quantity).sum() != decision.getQuantity()) {
                 throw new BusinessException(HttpStatus.CONFLICT, "MSG337");

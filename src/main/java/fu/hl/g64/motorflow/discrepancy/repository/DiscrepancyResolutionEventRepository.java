@@ -19,15 +19,19 @@ public interface DiscrepancyResolutionEventRepository extends JpaRepository<Disc
     List<DiscrepancyResolutionEvent> findByGoodsReceiptNoteIdAndResolutionTypeOrderByIdAsc(Long goodsReceiptNoteId,
                                                                                          ResolutionType type);
 
-    /** UC-76: the return decisions of one part of a transfer order that no return receipt has settled, oldest first. */
+    /**
+     * UC-76, R-06 (PM 23/11): the return decisions of several parts of a transfer order that no return receipt has
+     * settled, locked, oldest first within each part.
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
-            where c.transferOrderId = :transferOrderId and c.productId = :productId
+            where c.transferOrderId = :transferOrderId and c.productId in :productIds
               and e.resolutionType = fu.hl.g64.motorflow.discrepancy.entity.enums.ResolutionType.RECEIVED_BACK_AT_SOURCE
               and e.confirmedAt is null
-            order by e.occurredAt, e.id""")
-    List<DiscrepancyResolutionEvent> findPendingReturnDecisionsForUpdate(long transferOrderId, long productId);
+            order by c.productId, e.occurredAt, e.id""")
+    List<DiscrepancyResolutionEvent> findPendingReturnDecisionsForUpdateOfParts(long transferOrderId,
+                                                                               Collection<Long> productIds);
 
     /** PM 23/11: one event, locked. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -65,14 +69,15 @@ public interface DiscrepancyResolutionEventRepository extends JpaRepository<Disc
             order by e.occurredAt, e.id""")
     List<DiscrepancyResolutionEvent> findOpenByCaseForUpdate(long caseId);
 
-    /** PM 23/11: pending decisions of one type for one part of a transfer order, oldest first, locked. */
+    /** PM 23/11: pending decisions of one type for several parts of a transfer order, locked, oldest first within each part. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select e from DiscrepancyResolutionEvent e join DiscrepancyCase c on c.id = e.discrepancyCaseId
-            where c.transferOrderId = :transferOrderId and c.productId = :productId
+            where c.transferOrderId = :transferOrderId and c.productId in :productIds
               and e.resolutionType = :type and e.confirmedAt is null
-            order by e.occurredAt, e.id""")
-    List<DiscrepancyResolutionEvent> findPendingForUpdate(long transferOrderId, long productId, ResolutionType type);
+            order by c.productId, e.occurredAt, e.id""")
+    List<DiscrepancyResolutionEvent> findPendingForUpdateOfParts(long transferOrderId, Collection<Long> productIds,
+                                                                 ResolutionType type);
 
     /** PM 23/11: pending NO_REPLACEMENT decisions of a transfer order, locked, for its closing. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
