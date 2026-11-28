@@ -17,10 +17,11 @@ public record ReplenishmentDetailResponse(long id, long requestingStoreId, Strin
     /**
      * @param plannedQty   on the transfer orders of this request, the dispatched quantity once dispatched
      * @param fulfilledQty received and passed at the destination, on confirmed transfer receipts
+     * @param orderedQty   ordered across non-cancelled purchase orders linked to this request
      * @param remainingQty requested less fulfilled and to purchase, never below 0
      */
     public record Line(long productId, String sku, String partName, String baseUnit, int requestedQty, long plannedQty,
-                       long fulfilledQty, int toPurchaseQty, long remainingQty) {
+                       long fulfilledQty, int toPurchaseQty, long orderedQty, long remainingQty) {
     }
 
     public record TransferOrderRef(long id, long sourceStoreId, String sourceStoreName, long destStoreId,

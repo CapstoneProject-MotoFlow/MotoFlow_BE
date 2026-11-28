@@ -80,6 +80,8 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
         long getLineCount();
 
         long getTotalPlannedQty();
+
+        boolean getHasDiscrepancy();
     }
 
     /** UC-72: {@code storeId} keeps a Branch Manager to orders from or to their store, {@code staffId} Staff to theirs. */
@@ -88,7 +90,14 @@ public interface TransferOrderRepository extends JpaRepository<TransferOrder, Lo
                    u.fullName as createdByName,
                    (select count(l) from TransferOrderLine l where l.transferOrderId = o.id) as lineCount,
                    (select coalesce(sum(l.plannedQty), 0) from TransferOrderLine l
-                    where l.transferOrderId = o.id) as totalPlannedQty
+                    where l.transferOrderId = o.id) as totalPlannedQty,
+                   (exists (select 1 from DiscrepancyCase c where c.transferOrderId = o.id)
+                    or exists (select 1 from GoodsReceiptNoteLine gl
+                               join GoodsReceiptNote g on g.id = gl.goodsReceiptNoteId
+                               where g.transferOrderId = o.id
+                                 and g.status = fu.hl.g64.motorflow.receiving.entity.enums.GoodsReceiptNoteStatus.CONFIRMED
+                                 and (gl.excessQty > 0 or gl.damagedQty > 0 or gl.damagedBeyondQty > 0
+                                      or gl.wrongItemQty > 0))) as hasDiscrepancy
             from TransferOrder o
             join Store s on s.id = o.sourceStoreId
             join Store d on d.id = o.destStoreId

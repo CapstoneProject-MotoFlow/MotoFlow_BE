@@ -92,6 +92,7 @@ class TransferOrderViewApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.items[2].destStoreName").value("Long Biên"))
                 .andExpect(jsonPath("$.items[2].lineCount").value(2))
                 .andExpect(jsonPath("$.items[2].totalPlannedQty").value(13))
+                .andExpect(jsonPath("$.items[2].hasDiscrepancy").value(false))
                 .andExpect(jsonPath("$.items[2].createdByName").isNotEmpty())
                 .andExpect(jsonPath("$.items[3].closedAt").value("2026-11-06T08:00:00"));
     }

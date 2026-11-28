@@ -208,6 +208,27 @@ class InventoryOperationsReportApiTest extends ApiTestUsers {
                 .andExpect(jsonPath("$.code").value("MSG52"));
     }
 
+    @Test
+    void everyMovementTypeHasAReportSourceAndTransferWrongItemWorks() throws Exception {
+        for (MovementType type : MovementType.values()) {
+            fu.hl.g64.motorflow.inventory.dto.StockSource.of(type);
+        }
+        at("2026-10-01T10:00:00");
+        long receipt = jdbc.queryForObject("INSERT INTO goods_receipt_note (receipt_type, purchase_order_id, "
+                + "delivery_document_no, arrived_at) VALUES ('SUPPLIER_DELIVERY', ?, 'PX-WT', now()) RETURNING id",
+                Long.class, po);
+        long line = jdbc.queryForObject("INSERT INTO goods_receipt_note_line (goods_receipt_note_id, product_id, "
+                + "document_qty, delivered_qty, passed_qty) VALUES (?, ?, 2, 2, 2) RETURNING id",
+                Long.class, receipt, chain);
+        tx.execute(s -> posting.receiveNewLot(new NewLotPosting(cauGiay, chain, LotSourceType.RECEIPT, line, supplier,
+                LocalDate.of(2026, 10, 1), 100_000, null, null, null, Map.of(StockStatus.AVAILABLE, 2),
+                MovementType.TRANSFER_WRONG_ITEM, SourceRef.goodsReceiptNote(receipt), owner.getId(), null)));
+
+        call("owner", "?month=2026-10").andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.items[0].inQty").value(2))
+                .andExpect(jsonPath("$.page.items[0].bySource[*].source", contains("TRANSFER")));
+    }
+
     private ResultActions call(String username, String query) throws Exception {
         return mvc.perform(get(URL + query).header(HttpHeaders.AUTHORIZATION, signIn(username)));
     }

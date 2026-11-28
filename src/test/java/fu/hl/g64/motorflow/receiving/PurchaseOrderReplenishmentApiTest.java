@@ -57,31 +57,35 @@ class PurchaseOrderReplenishmentApiTest extends PurchaseOrderTestData {
     }
 
     @Test
-    void withoutIncludeUnallocatedOnlyTheLinkIsKept() throws Exception {
+    void withoutIncludeUnallocatedOrderedQuantitiesAlsoUpdateToPurchase() throws Exception {
         long request = request("IN_PROGRESS");
 
         create(ownerToken, purchase(giaLam, request, false))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.replenishmentRequestId").value(request));
 
-        assertThat(toPurchase(request)).containsExactly(2, 0, 0);
+        assertThat(toPurchase(request)).containsExactly(4, 5, 0);
     }
 
     @Test
-    void aSecondPoIsRefusedUntilTheFirstIsCancelled() throws Exception {
+    void multiplePosForDifferentSuppliersAreAllowedUntilNothingRemainsToBuy() throws Exception {
         long request = request("IN_PROGRESS");
-        long first = created(purchase(giaLam, request, true));
+        Map<String, Object> first = purchase(giaLam, request, false);
+        first.put("lines", List.of(line(pad, 4, 120_000)));
+        create(ownerToken, first).andExpect(status().isCreated());
 
+        // Oil is still unallocated and pad is already covered: a second PO for another supplier succeeds.
+        Map<String, Object> second = order(yamaha, giaLam, null, null, line(oil, 5, 85_000));
+        second.put("replenishmentRequestId", request);
+        second.put("includeUnallocated", false);
+        create(ownerToken, second).andExpect(status().isCreated());
+
+        // Nothing remains buyable now, so a third PO is rejected with MSG261.
         create(ownerToken, purchase(giaLam, request, true))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("MSG261"))
                 .andExpect(jsonPath("$.message")
                         .value("Yêu cầu bổ sung #" + request + " đã có đơn nhập hàng chưa hủy."));
-
-        cancel(ownerToken, first, "Nhà cung cấp hết hàng").andExpect(status().isOk());
-        create(ownerToken, purchase(giaLam, request, true)).andExpect(status().isCreated());
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order WHERE replenishment_request_id = ?",
-                Long.class, request)).isEqualTo(2);
     }
 
     @Test
@@ -117,15 +121,13 @@ class PurchaseOrderReplenishmentApiTest extends PurchaseOrderTestData {
     }
 
     @Test
-    void withAnAllocationAlreadySavedThePoMayNotOmitThePart() throws Exception {
+    void omittingAPartFromOnePoIsAllowedSoEachSupplierHasItsOwnPo() throws Exception {
         long request = request("IN_PROGRESS");
         Map<String, Object> body = purchase(giaLam, request, false);
         body.put("lines", List.of(line(oil, 5, 85_000)));
 
-        create(ownerToken, body)
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("MSG262"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM purchase_order", Long.class)).isZero();
+        create(ownerToken, body).andExpect(status().isCreated());
+        assertThat(toPurchase(request)).containsExactly(2, 5, 0);
     }
 
     @Test
@@ -139,7 +141,7 @@ class PurchaseOrderReplenishmentApiTest extends PurchaseOrderTestData {
         Map<String, Object> more = purchase(giaLam, request, false);
         more.put("lines", List.of(line(pad, 7, 120_000), line(oil, 5, 85_000)));
         create(ownerToken, more).andExpect(status().isCreated());
-        assertThat(toPurchase(request)).containsExactly(2, 0, 0);
+        assertThat(toPurchase(request)).containsExactly(4, 5, 0);
     }
 
     @Test

@@ -117,15 +117,16 @@ public interface ReplenishmentRequestRepository extends JpaRepository<Replenishm
                    or r.requestingStoreId in (select qs.id from Store qs where search_fold(qs.storeName) like :pattern escape '\\'))
             """;
 
-    /** UC-77 step 6: the parts bought on a PO of the request that is not cancelled. */
+    /** UC-77 step 6 / UC-70: ordered quantity per product across non-cancelled POs of the request. */
     @Query("""
-            select l.productId
+            select l.productId as productId, coalesce(sum(l.orderedQty), 0) as qty
             from PurchaseOrderLine l
             join PurchaseOrder p on p.id = l.purchaseOrderId
             where p.replenishmentRequestId = :requestId
               and p.status <> fu.hl.g64.motorflow.receiving.entity.enums.PurchaseOrderStatus.CANCELLED
+            group by l.productId
             """)
-    List<Long> findPurchasedProductIds(@Param("requestId") long requestId);
+    List<TransferOrderLineRepository.ProductQty> orderedByProduct(@Param("requestId") long requestId);
 
     @Query("""
             select p as purchaseOrder, s.supplierName as supplierName

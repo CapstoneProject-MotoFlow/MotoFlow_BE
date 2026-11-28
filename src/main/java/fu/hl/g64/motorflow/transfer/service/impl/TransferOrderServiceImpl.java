@@ -177,7 +177,8 @@ public class TransferOrderServiceImpl implements TransferOrderService {
             return new TransferOrderRowResponse(order.getId(), order.getStatus(), order.getSourceStoreId(),
                     row.getSourceStoreName(), order.getDestStoreId(), row.getDestStoreName(),
                     order.getReplenishmentRequestId(), row.getLineCount(), row.getTotalPlannedQty(),
-                    row.getCreatedByName(), order.getCreatedAt(), order.getDispatchedAt(), order.getClosedAt());
+                    row.getCreatedByName(), order.getCreatedAt(), order.getDispatchedAt(), order.getClosedAt(),
+                    row.getHasDiscrepancy());
         }).toList());
     }
 

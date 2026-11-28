@@ -26,6 +26,8 @@ public record SalesCollectionReport(LocalDate from, LocalDate to, ReportGrouping
      * @param depositsForfeited     deposit the store kept when a waiting order was cancelled or its deposit expired,
      *                              in the period; already counted when it was received
      * @param totalCollected        orderPayments − refunds + depositsReceived − depositsRefunded + debtCollected
+     * @param cashCollected         part of totalCollected in cash (order, deposit, debt, net of cash refunds)
+     * @param transferCollected     part of totalCollected via bank transfer (order, deposit, debt, net of refunds)
      * @param creditSales           debt that arose from orders completed on credit in the period
      * @param revenueCorrections    sales order corrections applied in the period (change of the order's money)
      * @param collectionCorrections payment amount corrections applied in the period
@@ -33,16 +35,18 @@ public record SalesCollectionReport(LocalDate from, LocalDate to, ReportGrouping
      * @param receivableAtEnd       debt left at the end of the period; null on a day or month row
      */
     public record Figures(long completedOrders, long revenue, long orderPayments, long refunds, long debtCollected,
-                          long totalCollected, long creditSales, long revenueCorrections, long collectionCorrections,
-                          long receivableCorrections, Long receivableAtEnd, long depositsReceived,
-                          long depositsRefunded, long depositsApplied, long depositsForfeited) {
+                          long totalCollected, long cashCollected, long transferCollected, long creditSales,
+                          long revenueCorrections, long collectionCorrections, long receivableCorrections,
+                          Long receivableAtEnd, long depositsReceived, long depositsRefunded, long depositsApplied,
+                          long depositsForfeited) {
 
-        public static final Figures ZERO = new Figures(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, 0);
+        public static final Figures ZERO = new Figures(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, 0);
 
         public Figures plus(Figures o) {
             return new Figures(completedOrders + o.completedOrders, revenue + o.revenue,
                     orderPayments + o.orderPayments, refunds + o.refunds, debtCollected + o.debtCollected,
-                    totalCollected + o.totalCollected, creditSales + o.creditSales,
+                    totalCollected + o.totalCollected, cashCollected + o.cashCollected,
+                    transferCollected + o.transferCollected, creditSales + o.creditSales,
                     revenueCorrections + o.revenueCorrections, collectionCorrections + o.collectionCorrections,
                     receivableCorrections + o.receivableCorrections,
                     receivableAtEnd == null && o.receivableAtEnd == null ? null

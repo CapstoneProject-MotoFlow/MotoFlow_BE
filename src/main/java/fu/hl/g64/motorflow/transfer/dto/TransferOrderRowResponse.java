@@ -8,5 +8,6 @@ import java.time.LocalDateTime;
 public record TransferOrderRowResponse(long id, TransferOrderStatus status, long sourceStoreId, String sourceStoreName,
                                        long destStoreId, String destStoreName, Long replenishmentRequestId,
                                        long lineCount, long totalPlannedQty, String createdByName,
-                                       LocalDateTime createdAt, LocalDateTime dispatchedAt, LocalDateTime closedAt) {
+                                       LocalDateTime createdAt, LocalDateTime dispatchedAt, LocalDateTime closedAt,
+                                       boolean hasDiscrepancy) {
 }
