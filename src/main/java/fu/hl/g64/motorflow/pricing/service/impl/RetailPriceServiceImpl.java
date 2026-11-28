@@ -79,14 +79,18 @@ public class RetailPriceServiceImpl implements RetailPriceService {
         int pageSize = Math.clamp(size, 1, 100);
         if (!onlyDiffering) {
             Page<Product> found = products.findAll(matching(filter), PageRequest.of(pageNo, pageSize, BY_SKU));
-            return PageResponse.of(found, rows(user, found.getContent(), now));
+            List<Product> parts = found.getContent();
+            return PageResponse.of(found, rows(user, parts, now, categoriesFor(user, parts)));
         }
 
         // Suggested prices are worked out, not stored, so this filter goes through every matching part.
+        // The category tree is read once for all the chunks: only users who see suggestions get here (MSG05 above).
         List<Product> matches = products.findAll(matching(filter), BY_SKU);
+        Categories tree = categoriesFor(user, matches);
         List<RetailPriceResponse> differing = new ArrayList<>();
         for (int from = 0; from < matches.size(); from += PriceSuggestions.CHUNK) {
-            rows(user, matches.subList(from, Math.min(from + PriceSuggestions.CHUNK, matches.size())), now).stream()
+            List<Product> chunk = matches.subList(from, Math.min(from + PriceSuggestions.CHUNK, matches.size()));
+            rows(user, chunk, now, tree).stream()
                     .filter(RetailPriceResponse::suggestionDiffers)
                     .forEach(differing::add);
         }
@@ -99,7 +103,8 @@ public class RetailPriceServiceImpl implements RetailPriceService {
     @Transactional(readOnly = true)
     @Override
     public RetailPriceResponse get(AuthenticatedUser user, long productId) {
-        return rows(user, List.of(find(productId)), LocalDateTime.now(clock)).getFirst();
+        List<Product> parts = List.of(find(productId));
+        return rows(user, parts, LocalDateTime.now(clock), categoriesFor(user, parts)).getFirst();
     }
 
     // UC-35
@@ -110,10 +115,12 @@ public class RetailPriceServiceImpl implements RetailPriceService {
         Product product = find(request.productId());
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDateTime from = PricingVersions.effectiveFrom(request.effectiveDate(), now);
+        // One read of the whole tree serves the suggestion check and the returned row, whoever the actor is.
+        Categories tree = allCategories();
         if (request.fromSuggestion()) {
             // The suggestion moves with each supplier receipt and markup change: apply only the one the user saw.
-            Suggestion suggestion = suggestions.suggest(List.of(product), suggestions.rulesInEffect(now))
-                    .get(product.getId());
+            Suggestion suggestion = suggestions.suggest(List.of(product), suggestions.rulesInEffect(now),
+                    tree.parentOf()).get(product.getId());
             if (suggestion.suggestedPrice() == null) {
                 // No supplier receipt yet, or no markup rate applies (BR-69): there is nothing to apply.
                 throw new BusinessException(HttpStatus.BAD_REQUEST, "MSG145", product.getSku());
@@ -143,7 +150,7 @@ public class RetailPriceServiceImpl implements RetailPriceService {
                 .toList());
         auditLog.save(AuditLog.record(AUDIT_ENTITY, saved.getId(), PRICE_SET, actor.id(), blankToNull(request.reason()),
                 oldData, newData, now));
-        return rows(actor, List.of(product), now).getFirst();
+        return rows(actor, List.of(product), now, tree).getFirst();
     }
 
     // UC-36
@@ -177,8 +184,9 @@ public class RetailPriceServiceImpl implements RetailPriceService {
         });
     }
 
-    /** The rows of the price list for these parts, in their order. */
-    private List<RetailPriceResponse> rows(AuthenticatedUser user, List<Product> parts, LocalDateTime now) {
+    /** The rows of the price list for these parts, in their order, with the categories read by the caller. */
+    private List<RetailPriceResponse> rows(AuthenticatedUser user, List<Product> parts, LocalDateTime now,
+                                           Categories tree) {
         if (parts.isEmpty()) {
             return List.of();
         }
@@ -188,11 +196,9 @@ public class RetailPriceServiceImpl implements RetailPriceService {
         Map<Long, PricingPolicy> scheduled = pricingPolicies.findScheduledRetailPrices(ids, now).stream()
                 .collect(Collectors.toMap(PricingPolicy::getProductId, Function.identity(),
                         (a, b) -> a.getEffectiveFrom().isBefore(b.getEffectiveFrom()) ? a : b));
-        Map<Long, String> categoryNames = categories.findAllById(parts.stream().map(Product::getCategoryId)
-                        .collect(Collectors.toSet())).stream()
-                .collect(Collectors.toMap(PartCategory::getId, PartCategory::getCategoryName));
+        Map<Long, String> categoryNames = tree.names();
         Map<Long, Suggestion> suggested = seesSuggestions(user)
-                ? suggestions.suggest(parts, suggestions.rulesInEffect(now))
+                ? suggestions.suggest(parts, suggestions.rulesInEffect(now), tree.parentOf())
                 : Map.of();
         boolean costShown = user.role() == Role.OWNER;
         return parts.stream().map(p -> RetailPriceResponse.of(p, categoryNames.get(p.getCategoryId()),
@@ -214,6 +220,41 @@ public class RetailPriceServiceImpl implements RetailPriceService {
             }
             return cb.and(where.toArray(Predicate[]::new));
         };
+    }
+
+    /**
+     * The category names of these parts, read once per call. A user who sees suggestions gets the whole tree, with the
+     * parent of every category too (a sub-category inherits its parent's markup rate, BR-69), so that read is the only
+     * category read of the request; other users get the names of the parts' categories only.
+     */
+    private Categories categoriesFor(AuthenticatedUser user, List<Product> parts) {
+        if (parts.isEmpty()) {
+            return Categories.NONE;
+        }
+        if (seesSuggestions(user)) {
+            return allCategories();
+        }
+        Map<Long, String> names = categories.findAllById(parts.stream().map(Product::getCategoryId)
+                        .collect(Collectors.toSet())).stream()
+                .collect(Collectors.toMap(PartCategory::getId, PartCategory::getCategoryName));
+        return new Categories(names, Map.of());
+    }
+
+    /** Every category, with its name and parent. */
+    private Categories allCategories() {
+        Map<Long, String> names = new HashMap<>();
+        Map<Long, Long> parentOf = new HashMap<>();
+        for (PartCategory category : categories.findAll()) {
+            names.put(category.getId(), category.getCategoryName());
+            parentOf.put(category.getId(), category.getParentId());
+        }
+        return new Categories(names, parentOf);
+    }
+
+    /** The category names and parent links one request needs. HashMap, not Map.of: a parent can be null. */
+    private record Categories(Map<Long, String> names, Map<Long, Long> parentOf) {
+
+        static final Categories NONE = new Categories(Map.of(), Map.of());
     }
 
     /** UC-34, BR-69: Owner, and a Branch Manager while holding retail price permission. */

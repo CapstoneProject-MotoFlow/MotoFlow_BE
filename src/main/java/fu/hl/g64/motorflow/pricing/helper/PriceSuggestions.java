@@ -49,6 +49,14 @@ public class PriceSuggestions {
     public Map<Long, Suggestion> suggest(Collection<Product> products, MarkupRules rules) {
         Map<Long, Long> parentOf = new HashMap<>();
         categories.findAll().forEach(c -> parentOf.put(c.getId(), c.getParentId()));
+        return suggest(products, rules, parentOf);
+    }
+
+    /**
+     * As {@link #suggest(Collection, MarkupRules)}, with the parent of each category already read by the caller, so a
+     * request that reads the category tree once does not read it again here.
+     */
+    public Map<Long, Suggestion> suggest(Collection<Product> products, MarkupRules rules, Map<Long, Long> parentOf) {
         Map<Long, LatestPurchase> purchases = latestPurchases(products.stream().map(Product::getId).toList());
 
         Map<Long, Suggestion> result = new HashMap<>();
