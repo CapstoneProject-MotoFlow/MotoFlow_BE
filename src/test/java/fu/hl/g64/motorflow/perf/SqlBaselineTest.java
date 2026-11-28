@@ -471,4 +471,30 @@ class SqlBaselineTest {
             assertBudget("stock-document-detail", queries, 3, 3);
         }
     }
+
+    @Nested
+    class UnmetDemandFlows extends SalesOrderTestData {
+
+        @Autowired
+        private QueryCounter queries;
+
+        @Test
+        void unmetDemandOwner3Stores() throws Exception {
+            long thirdStore = createStore("Thủ Đức");
+            // Store A has 8 pads, all held by an open order, so a 2-pad order waits there. B and C have no pad.
+            createOrder(pad, 8);
+            create(managerToken, order(null, customer, "RETAIL", null, lines(pad, 2)))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"));
+            for (long waitingStore : List.of(otherStore, thirdStore)) {
+                create(ownerToken, order(waitingStore, customer, "RETAIL", null, lines(pad, 2)))
+                        .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("AWAITING_STOCK"));
+            }
+
+            queries.reset();
+            mvc.perform(get("/api/v1/unmet-demand").header(HttpHeaders.AUTHORIZATION, ownerToken))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalItems").value(3));
+            assertBudget("unmet-demand-owner-3-stores", queries, 12, 12);
+        }
+    }
 }
