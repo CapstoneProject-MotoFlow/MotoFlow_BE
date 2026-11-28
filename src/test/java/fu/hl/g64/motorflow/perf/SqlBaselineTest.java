@@ -460,7 +460,7 @@ class SqlBaselineTest {
             mvc.perform(get("/api/v1/stock-documents").header(HttpHeaders.AUTHORIZATION, ownerToken))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.totalItems").value(2));
-            assertBudget("stock-documents-page-0", queries, 3, 3);
+            assertBudget("stock-documents-page-0", queries, 2, 2);
 
             queries.reset();
             mvc.perform(get("/api/v1/stock-documents/TRANSFER_ORDER/" + order)
